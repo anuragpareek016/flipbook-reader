@@ -155,7 +155,6 @@ html.mac-native-window .top-bar {
   align-items: center;
   justify-content: center;
   transform-origin: center center;
-  will-change: transform;
 }
 
 .zoom-viewport.is-zoomed {

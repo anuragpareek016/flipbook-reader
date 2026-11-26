@@ -114,6 +114,7 @@ const state = {
   autoFlipTimer: null,
 
   zoom: 1,
+  committedZoom: 1,
   panX: 0,
   panY: 0,
   isPanning: false,
@@ -351,19 +352,21 @@ function initPageFlip(startIndex = 0) {
 
   computeBookGeometry();
 
+  const sw = Math.round(state.pageW * state.committedZoom);
+  const sh = Math.round(state.pageH * state.committedZoom);
   const single = isEffectiveSingleMode();
-  const totalBookW = single ? state.pageW : state.pageW * 2;
+  const totalBookW = single ? sw : sw * 2;
   els.bookShell.style.width = `${totalBookW}px`;
-  els.bookShell.style.height = `${state.pageH}px`;
+  els.bookShell.style.height = `${sh}px`;
   els.bookContainer.style.width = `${totalBookW}px`;
-  els.bookContainer.style.height = `${state.pageH}px`;
+  els.bookContainer.style.height = `${sh}px`;
 
   host.appendChild(buildPageElements());
 
   const safeStart = clamp(startIndex, 0, Math.max(0, state.totalPages - 1));
   const pf = new FlipBookEngine(host, {
-    width: state.pageW,
-    height: state.pageH,
+    width: sw,
+    height: sh,
     usePortrait: single,
     startPage: safeStart,
     flippingTime: 540,
@@ -386,11 +389,12 @@ function initPageFlip(startIndex = 0) {
     onSpreadChanged(false);
   });
 
+  pf.on('flipStart', () => {
+    flipSound.playFlip();
+  });
+
   pf.on('flip', (e) => {
     const nextIdx = clamp(e.data, 0, state.totalPages - 1);
-    if (nextIdx !== state.currentIndex) {
-      flipSound.playFlip();
-    }
     state.currentIndex = nextIdx;
     onSpreadChanged(true);
   });
@@ -434,17 +438,23 @@ function initPageFlip(startIndex = 0) {
 }
 
 /* ---------- On-Demand PDF Canvas + TextLayer Rendering ---------- */
-async function renderPageNode(idx, pixelScale = null) {
+async function renderPageNode(idx) {
   if (!state.pdfDoc || idx < 0 || idx >= state.totalPages) return;
   const pageNode = state.pageNodes[idx];
   if (!pageNode) return;
   const inner = pageNode.querySelector('.fb-page-inner');
   if (!inner) return;
 
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const desiredScale = pixelScale || Math.min(3.4, dpr * (state.zoom > 1 ? state.zoom : 1.15));
+  const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
+  const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const maxDim = 4096;
+  const maxScaleByDim = Math.min(maxDim / sw, maxDim / sh);
+  const pixelScale = Math.max(1, Math.min(dpr, maxScaleByDim));
+  const renderKey = `${sw}x${sh}@${pixelScale.toFixed(2)}`;
+
   const existing = state.renderedMap.get(idx);
-  if (existing && Math.abs(existing.scale - desiredScale) < 0.08 && inner.querySelector('canvas.fb-canvas')) {
+  if (existing && existing.renderKey === renderKey && inner.querySelector('canvas.fb-canvas')) {
     paintSearchHighlightsOnPage(idx);
     return;
   }
@@ -453,7 +463,7 @@ async function renderPageNode(idx, pixelScale = null) {
     try { existing.renderTask.cancel(); } catch {}
   }
 
-  const token = { scale: desiredScale, renderTask: null };
+  const token = { renderKey, renderTask: null };
   state.renderedMap.set(idx, token);
 
   try {
@@ -461,9 +471,9 @@ async function renderPageNode(idx, pixelScale = null) {
     if (state.renderedMap.get(idx) !== token) return;
 
     const rawVp = pdfPage.getViewport({ scale: 1 });
-    const cssScale = state.pageW / rawVp.width;
+    const cssScale = sw / rawVp.width;
     const cssVp = pdfPage.getViewport({ scale: cssScale });
-    const renderVp = pdfPage.getViewport({ scale: cssScale * desiredScale });
+    const renderVp = pdfPage.getViewport({ scale: cssScale * pixelScale });
 
     const canvas = document.createElement('canvas');
     canvas.className = 'fb-canvas';
@@ -479,7 +489,7 @@ async function renderPageNode(idx, pixelScale = null) {
     await renderTask.promise;
     if (state.renderedMap.get(idx) !== token) return;
 
-    // Build TextLayer
+    // Build TextLayer matched 1:1 to scaled CSS dimensions
     const textLayerDiv = document.createElement('div');
     textLayerDiv.className = 'textLayer';
     textLayerDiv.style.setProperty('--scale-factor', String(cssVp.scale));
@@ -510,13 +520,14 @@ async function renderPageNode(idx, pixelScale = null) {
 }
 
 function evictDistantPages(centerIdx) {
-  if (state.renderedMap.size <= MAX_CACHED_CANVASES) return;
+  const maxKeep = state.committedZoom > 1.2 ? 6 : MAX_CACHED_CANVASES;
+  if (state.renderedMap.size <= maxKeep) return;
   const entries = Array.from(state.renderedMap.keys())
     .sort((a, b) => Math.abs(b - centerIdx) - Math.abs(a - centerIdx));
 
-  while (state.renderedMap.size > MAX_CACHED_CANVASES && entries.length) {
+  while (state.renderedMap.size > maxKeep && entries.length) {
     const farIdx = entries.shift();
-    if (Math.abs(farIdx - centerIdx) <= 4) break;
+    if (Math.abs(farIdx - centerIdx) <= (state.committedZoom > 1.2 ? 1 : 4)) break;
     const rec = state.renderedMap.get(farIdx);
     try { rec?.renderTask?.cancel(); } catch {}
     state.renderedMap.delete(farIdx);
@@ -534,9 +545,10 @@ function evictDistantPages(centerIdx) {
 }
 
 function queueNearbyRenders(centerIdx, radius = 3) {
+  const effectiveRadius = state.committedZoom > 1.2 ? 1 : radius;
   const visible = getVisibleIndices(centerIdx);
   const priority = [...visible];
-  for (let d = 1; d <= radius; d++) {
+  for (let d = 1; d <= effectiveRadius; d++) {
     const next = centerIdx + d;
     const prev = centerIdx - d;
     if (next < state.totalPages && !priority.includes(next)) priority.push(next);
@@ -547,7 +559,7 @@ function queueNearbyRenders(centerIdx, radius = 3) {
       renderPageNode(idx);
     } else {
       setTimeout(() => {
-        if (Math.abs(idx - state.currentIndex) <= radius + 1) {
+        if (Math.abs(idx - state.currentIndex) <= effectiveRadius + 1) {
           renderPageNode(idx);
         }
       }, 45 * order);
@@ -560,11 +572,12 @@ function updateCenterShift() {
   if (!state.totalPages) return;
   const visible = getVisibleIndices();
   const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+  const sw = Math.round(state.pageW * state.committedZoom);
 
   let shiftX = 0;
   if (!single && state.showCover && visible.length === 1) {
     // Center single front cover or single back cover smoothly
-    shiftX = visible[0] === 0 ? -state.pageW / 2 : state.pageW / 2;
+    shiftX = visible[0] === 0 ? -sw / 2 : sw / 2;
   }
   els.bookCenterShift.style.transform = `translate3d(${shiftX}px, 0, 0)`;
 }
@@ -573,6 +586,7 @@ function updateBookDepthChrome() {
   if (!state.totalPages) return;
   const visible = getVisibleIndices();
   const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+  const sw = Math.round(state.pageW * state.committedZoom);
 
   const leftIdx = visible[0];
   const rightIdx = visible[visible.length - 1];
@@ -612,7 +626,7 @@ function updateBookDepthChrome() {
       els.bookStackRight.style.left = 'auto';
 
       els.bookSpineShadow.style.opacity = '0';
-      els.bookDropShadow.style.left = `${state.pageW}px`;
+      els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
     } else {
       // Back cover sits on left half of 2*pageW
@@ -625,7 +639,7 @@ function updateBookDepthChrome() {
 
       els.bookSpineShadow.style.opacity = '0';
       els.bookDropShadow.style.left = `${-leftThick}px`;
-      els.bookDropShadow.style.right = `${state.pageW}px`;
+      els.bookDropShadow.style.right = `${sw}px`;
     }
   } else {
     els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';
@@ -705,9 +719,38 @@ function jumpToPage(oneBasedPage, animate = false) {
   }
 }
 
-/* ---------- Zoom & Pan ---------- */
-function applyZoomTransform(rerender = true) {
-  els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${state.zoom})`;
+/* ---------- Zoom & Pan (True 1:1 Retina Layout Re-Render, Zero GPU Scale Blur) ---------- */
+function commitZoomLayout() {
+  if (!state.pdfDoc) return;
+  state.committedZoom = state.zoom;
+  const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
+  const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
+  const single = isEffectiveSingleMode();
+  const totalBookW = single ? sw : sw * 2;
+
+  els.bookShell.style.width = `${totalBookW}px`;
+  els.bookShell.style.height = `${sh}px`;
+  els.bookContainer.style.width = `${totalBookW}px`;
+  els.bookContainer.style.height = `${sh}px`;
+  state.pageFlip?.resize?.(sw, sh);
+
+  // Reset CSS scale to exact 1 so WebKit/Blink paints native Retina pixels without upscaling blur
+  els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0)`;
+  updateCenterShift();
+  updateBookDepthChrome();
+
+  for (const idx of getVisibleIndices()) {
+    renderPageNode(idx);
+  }
+}
+
+function applyZoomTransform(rerender = true, immediate = false) {
+  const previewScale = state.committedZoom ? state.zoom / state.committedZoom : state.zoom;
+  if (Math.abs(previewScale - 1) < 0.002) {
+    els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0)`;
+  } else {
+    els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${previewScale})`;
+  }
   const zoomed = state.zoom > 1.01;
   els.zoomViewport.classList.toggle('is-zoomed', zoomed);
   els.zoomPill.hidden = !zoomed;
@@ -715,31 +758,36 @@ function applyZoomTransform(rerender = true) {
 
   if (rerender && state.pdfDoc) {
     clearTimeout(state.zoomRerenderTimer);
-    state.zoomRerenderTimer = setTimeout(() => {
-      for (const idx of getVisibleIndices()) {
-        renderPageNode(idx);
-      }
-    }, 180);
+    if (immediate) {
+      commitZoomLayout();
+    } else {
+      state.zoomRerenderTimer = setTimeout(commitZoomLayout, 85);
+    }
   }
 }
 
-function setZoom(nextZoom) {
+function setZoom(nextZoom, immediate = false) {
+  const prevZoom = state.zoom || 1;
   const z = clamp(Number(nextZoom) || 1, 1, 3.5);
   state.zoom = z;
   if (z <= 1.01) {
     state.zoom = 1;
     state.panX = 0;
     state.panY = 0;
+    if (!state.pdfDoc) state.committedZoom = 1;
+  } else {
+    state.panX *= z / prevZoom;
+    state.panY *= z / prevZoom;
   }
-  applyZoomTransform(true);
+  applyZoomTransform(true, immediate || state.zoom === 1);
 }
 
 function cycleZoom() {
   if (state.zoom >= 2) {
-    setZoom(1);
+    setZoom(1, true);
   } else {
     const next = ZOOM_STEPS.find((s) => s > state.zoom + 0.05) || 1.75;
-    setZoom(next);
+    setZoom(next, true);
   }
 }
 
@@ -1029,7 +1077,9 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
   els.moreMenu.hidden = true;
 
   disposeBook();
-  setZoom(1);
+  state.pdfDoc = null;
+  state.committedZoom = 1;
+  setZoom(1, true);
 
   try {
     const loadingTask = pdfjsLib.getDocument({
@@ -1281,9 +1331,9 @@ function wireEvents() {
     els.btnMore.classList.toggle('active', !els.moreMenu.hidden);
   });
   els.btnZoom.addEventListener('click', cycleZoom);
-  els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom - 0.25));
-  els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + 0.25));
-  els.btnZoomReset.addEventListener('click', () => setZoom(1));
+  els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom - 0.25, true));
+  els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + 0.25, true));
+  els.btnZoomReset.addEventListener('click', () => setZoom(1, true));
 
   els.btnSearch.addEventListener('click', () => {
     if (!els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="search"]').classList.contains('active')) {
@@ -1464,11 +1514,16 @@ function wireEvents() {
     isSelectingText = false;
   }, true);
 
+  // Unlock Web Audio cleanly on first user interaction (required in WebKit/Safari)
+  const unlockAudioOnce = () => flipSound.unlock();
+  window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
+  window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
+
   // Panning when zoomed + double click to zoom
   els.zoomViewport.addEventListener('dblclick', (e) => {
     if (!state.pdfDoc) return;
     if (e.target.closest('.textLayer span')) return;
-    setZoom(state.zoom > 1.05 ? 1 : 1.75);
+    setZoom(state.zoom > 1.05 ? 1 : 1.75, true);
   });
 
   els.zoomViewport.addEventListener('mousedown', (e) => {
@@ -1558,20 +1613,20 @@ function wireEvents() {
         break;
       case '+':
       case '=':
-        setZoom(state.zoom + 0.25);
+        setZoom(state.zoom + 0.25, true);
         break;
       case '-':
-        setZoom(state.zoom - 0.25);
+        setZoom(state.zoom - 0.25, true);
         break;
       case '0':
-        setZoom(1);
+        setZoom(1, true);
         break;
       case 'Escape':
         if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
         else if (!els.sideDrawer.hidden) { els.sideDrawer.hidden = true; els.btnDrawer.classList.remove('active'); }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
-        else if (state.zoom > 1) setZoom(1);
+        else if (state.zoom > 1) setZoom(1, true);
         break;
     }
   });

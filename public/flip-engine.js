@@ -253,6 +253,31 @@ export class FlipBookEngine {
     this.pageNodes = [];
   }
 
+  resize(newPageW, newPageH) {
+    this.pageW = Math.max(120, Math.round(newPageW));
+    this.pageH = Math.max(160, Math.round(newPageH));
+    let m = Math.ceil(Math.hypot(this.pageW, this.pageH));
+    if ((m - this.pageH) % 2 !== 0) m += 1;
+    this.maskSize = m;
+    this.sideTop = (m - this.pageH) / 2;
+
+    if (this.activeFlip) this._cancelActiveFlipImmediate();
+
+    const totalW = this.single ? this.pageW : this.pageW * 2;
+    if (this.stage) {
+      this.stage.style.width = `${totalW}px`;
+      this.stage.style.height = `${this.pageH}px`;
+    }
+    if (this.leftSlot) {
+      this.leftSlot.style.width = `${this.pageW}px`;
+      this.leftSlot.style.height = `${this.pageH}px`;
+    }
+    if (this.rightSlot) {
+      this.rightSlot.style.width = `${this.pageW}px`;
+      this.rightSlot.style.height = `${this.pageH}px`;
+    }
+  }
+
   _buildSpreads() {
     this.spreads = [];
     const n = this.pageNodes.length;
@@ -847,6 +872,7 @@ export class FlipBookEngine {
     f.animDuration = Math.max(220, this.settings.flippingTime * remainingRatio);
     f.arcMode = false;
 
+    this._emit('flipStart', { from: this.currentPageIndex, side: f.side });
     this._setState('flipping');
     this._ensureRaf();
   }
@@ -941,6 +967,7 @@ export class FlipBookEngine {
   turnToNextPage() {
     if (this.currentSpreadIndex < this.spreads.length - 1) {
       this._cancelActiveFlipImmediate();
+      this._emit('flipStart', { from: this.currentPageIndex, side: 'right' });
       this.currentSpreadIndex++;
       this._renderStaticSpread();
       this._emit('flip', this.currentPageIndex);
@@ -950,6 +977,7 @@ export class FlipBookEngine {
   turnToPrevPage() {
     if (this.currentSpreadIndex > 0) {
       this._cancelActiveFlipImmediate();
+      this._emit('flipStart', { from: this.currentPageIndex, side: 'left' });
       this.currentSpreadIndex--;
       this._renderStaticSpread();
       this._emit('flip', this.currentPageIndex);
@@ -970,6 +998,7 @@ export class FlipBookEngine {
     f.animStartTime = performance.now();
     f.animDuration = this.settings.flippingTime;
     f.arcMode = !f.isHard;
+    this._emit('flipStart', { from: this.currentPageIndex, side: 'right' });
     this._setState('flipping');
     this._ensureRaf();
   }
@@ -988,6 +1017,7 @@ export class FlipBookEngine {
     f.animStartTime = performance.now();
     f.animDuration = this.settings.flippingTime;
     f.arcMode = !f.isHard;
+    this._emit('flipStart', { from: this.currentPageIndex, side: 'left' });
     this._setState('flipping');
     this._ensureRaf();
   }
