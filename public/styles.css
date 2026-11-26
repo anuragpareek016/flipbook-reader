@@ -259,7 +259,11 @@ html.mac-native-window .top-bar {
     rgba(0, 0, 0, 0) 69.5%,
     rgba(0, 0, 0, 0) 100%
   );
-  transition: opacity 0.2s ease;
+}
+
+.book-spine-top {
+  z-index: 7;
+  opacity: 0;
 }
 
 /* Inner-edge spine shading carried by resting/underneath spread halves during interactive hover/hold & flips */

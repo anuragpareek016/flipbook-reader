@@ -176,6 +176,7 @@ export class FlipBookEngine {
     this.flipSeq = 0;
     this.rafId = null;
     this._lastLoopTime = null;
+    this._lastSpineBlend = 0;
     this.isPointerDown = false;
     this.pointerMoved = false;
     this.pointerDownPos = null;
@@ -652,9 +653,10 @@ export class FlipBookEngine {
     }
 
     let underShadow = null;
+    let underSpine = null;
     if (underEl) {
       if (!this.single && underIdx !== null && underIdx !== undefined) {
-        const underSpine = document.createElement('div');
+        underSpine = document.createElement('div');
         underSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
         underEl.appendChild(underSpine);
       }
@@ -766,6 +768,7 @@ export class FlipBookEngine {
       seq,
       underEl,
       underIdx,
+      underSpine,
       castBounds,
       castMask,
       castGradient,
@@ -881,8 +884,11 @@ export class FlipBookEngine {
 
     // Dynamic curl shadow envelope (FlipHTML5 PageHighlightsFlipShadow profile)
     const rate = g.shadowRate;
-    const edgeFade = rate > 0.9 ? (1 - rate) / 0.1 : rate < 0.1 ? rate / 0.1 : 1;
-    const liftBell = rate < 0.5 ? rate * 2 : (1 - rate) * 2;
+    const travel = clamp(Math.abs(coord.x - f.from.x) / (2 * this.pageW), 0, 1);
+    f.travel = travel;
+    const travelFade = travel > 0.78 ? clamp((0.93 - travel) / 0.15, 0, 1) : 1;
+    const edgeFade = (rate > 0.85 ? clamp((0.97 - rate) / 0.12, 0, 1) : rate < 0.08 ? rate / 0.08 : 1) * travelFade;
+    const liftBell = (rate < 0.5 ? rate * 2 : (1 - rate) * 2) * travelFade;
     const widthScale = clamp(g.frontShadowDistance / 160, 0.18, 1.35);
 
     f.castGradient.style.transform = `scaleX(${widthScale})`;
@@ -1058,10 +1064,38 @@ export class FlipBookEngine {
       }
     }
 
+    this._updateLandingSpineBlend();
+
     if (this.flyingFlips.length > 0 || keepInteractive) {
       this._ensureRaf();
     } else {
       this._lastLoopTime = null;
+    }
+  }
+
+  _updateLandingSpineBlend() {
+    let blend = 0;
+    if (!this.single) {
+      const candidates = [];
+      for (const f of this.flyingFlips) {
+        if (!f.isHard && f.delayMs <= 0) candidates.push(f.travel || 0);
+      }
+      if (this.interactiveFlip && !this.interactiveFlip.isHard) {
+        candidates.push(this.interactiveFlip.travel || 0);
+      }
+      if (candidates.length > 0) {
+        const minTravel = Math.min(...candidates);
+        if (minTravel > 0.78) {
+          blend = clamp((minTravel - 0.78) / 0.14, 0, 1);
+        }
+      }
+    }
+    if (this.interactiveFlip?.underSpine) {
+      this.interactiveFlip.underSpine.style.opacity = String(1 - blend);
+    }
+    if (blend !== this._lastSpineBlend) {
+      this._lastSpineBlend = blend;
+      this._emit('spineBlend', blend);
     }
   }
 
@@ -1072,6 +1106,7 @@ export class FlipBookEngine {
     }
     this.flyingFlips = [];
     this._renderStaticSpread();
+    this._updateLandingSpineBlend();
     if (!this.interactiveFlip) {
       this._setState('read');
     }
@@ -1082,6 +1117,7 @@ export class FlipBookEngine {
     if (!this.interactiveFlip) return;
     this._removeFlipDom(this.interactiveFlip);
     this.interactiveFlip = null;
+    this._updateLandingSpineBlend();
     if (!this.flyingFlips.length) {
       this._renderStaticSpread();
       this._setState('read');
@@ -1094,6 +1130,7 @@ export class FlipBookEngine {
     this.interactiveFlip = null;
     this.flyingFlips = [];
     this._renderStaticSpread();
+    this._updateLandingSpineBlend();
     this._setState('read');
   }
 

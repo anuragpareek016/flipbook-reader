@@ -378,15 +378,34 @@ function initPageFlip(startIndex = 0) {
   pf.loadFromHTML(state.pageNodes);
 
   // Layer spine shadow inside .fh-stage at z-index:3 (above static slots [z:1], below flip layer [z:6])
+  // plus top landing overlay [z:7] so the final settling deceleration blends seamlessly with zero cutoff line.
   const fhStage = host.querySelector('.fh-stage');
   if (fhStage) {
+    if (!els.bookSpineTop) {
+      els.bookSpineTop = document.createElement('div');
+      els.bookSpineTop.className = 'book-spine-shadow book-spine-top';
+      els.bookSpineTop.id = 'bookSpineTop';
+    }
     fhStage.appendChild(els.bookSpineShadow);
+    fhStage.appendChild(els.bookSpineTop);
   }
 
   pf.on('init', (e) => {
     state.orientation = pf.getOrientation();
     state.currentIndex = clamp(e.data?.page ?? safeStart, 0, state.totalPages - 1);
     onSpreadChanged(false);
+  });
+
+  pf.on('spineBlend', (e) => {
+    if (!els.bookSpineTop) return;
+    if (!state.allowSpine) {
+      els.bookSpineShadow.style.opacity = '0';
+      els.bookSpineTop.style.opacity = '0';
+      return;
+    }
+    const b = clamp(e.data ?? 0, 0, 1);
+    els.bookSpineShadow.style.opacity = String(1 - b);
+    els.bookSpineTop.style.opacity = String(b);
   });
 
   pf.on('flipStart', (e) => {
@@ -399,13 +418,12 @@ function initPageFlip(startIndex = 0) {
       const touchingCover =
         state.showCover &&
         (vis.includes(0) ||
-          vis.includes(state.totalPages - 1) ||
-          state.currentIndex <= 1 ||
-          fromIdx <= 1 ||
-          state.currentIndex >= state.totalPages - 2 ||
-          fromIdx >= state.totalPages - 2);
+          fromIdx === 0 ||
+          (state.totalPages % 2 === 0 && (vis.includes(state.totalPages - 1) || fromIdx >= state.totalPages - 1)));
       if (touchingCover) {
+        state.allowSpine = false;
         els.bookSpineShadow.style.opacity = '0';
+        if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       }
     }
   });
@@ -424,9 +442,14 @@ function initPageFlip(startIndex = 0) {
     }
     if (state.isFlipping) {
       const vis = getVisibleIndices();
-      const touchingCover = state.showCover && (vis.includes(0) || vis.includes(state.totalPages - 1) || state.currentIndex <= 1 || state.currentIndex >= state.totalPages - 2);
+      const hasHard = !!(pf.interactiveFlip?.isHard || pf.flyingFlips?.some((f) => f.isHard));
+      const touchingCover =
+        state.showCover &&
+        (hasHard || vis.includes(0) || (state.totalPages % 2 === 0 && vis.includes(state.totalPages - 1)));
       if (touchingCover) {
+        state.allowSpine = false;
         els.bookSpineShadow.style.opacity = '0';
+        if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       }
     }
     if (e.data === 'read') {
@@ -624,7 +647,9 @@ function updateBookDepthChrome() {
     els.bookStackRight.style.right = `${-rightThick}px`;
     els.bookStackRight.style.left = 'auto';
 
+    state.allowSpine = false;
     els.bookSpineShadow.style.opacity = '0';
+    if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
     return;
@@ -632,6 +657,7 @@ function updateBookDepthChrome() {
 
   // Landscape 2-page spread
   if (state.showCover && visible.length === 1) {
+    state.allowSpine = false;
     if (visible[0] === 0) {
       // Front cover sits on right half of 2*pageW
       els.bookStackLeft.style.opacity = '0';
@@ -643,6 +669,7 @@ function updateBookDepthChrome() {
       els.bookStackRight.style.left = 'auto';
 
       els.bookSpineShadow.style.opacity = '0';
+      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
     } else {
@@ -655,10 +682,12 @@ function updateBookDepthChrome() {
       els.bookStackRight.style.width = '0px';
 
       els.bookSpineShadow.style.opacity = '0';
+      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
     }
   } else {
+    state.allowSpine = true;
     els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';
     els.bookStackLeft.style.width = `${leftThick}px`;
     els.bookStackLeft.style.left = `${-leftThick}px`;
@@ -667,7 +696,10 @@ function updateBookDepthChrome() {
     els.bookStackRight.style.width = `${rightThick}px`;
     els.bookStackRight.style.right = `${-rightThick}px`;
 
-    els.bookSpineShadow.style.opacity = '1';
+    if (!state.isFlipping) {
+      els.bookSpineShadow.style.opacity = '1';
+      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
+    }
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
   }
