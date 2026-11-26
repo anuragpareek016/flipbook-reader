@@ -1,0 +1,11 @@
+{
+  "name": "flipbook-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local FlipHTML5-style PDF Flipbook Reader for macOS",
+  "main": "server.mjs",
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38"
+  }
+}

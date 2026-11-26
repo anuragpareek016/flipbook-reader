@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FlipBook Reader</title>
+  <link rel="stylesheet" href="/vendor/pdfjs/web/pdf_viewer.css" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body class="theme-charcoal">
+  <div id="app" class="app-root">
+    <!-- Subtle top-left book title + quick bookmark badge -->
+    <header class="top-bar" id="topBar">
+      <div class="top-bar-left">
+        <button id="btnOpenTop" class="top-chip" title="Open PDF Book (Cmd+O)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+          </svg>
+          <span id="bookTitleLabel" class="book-title-text">FlipBook Reader</span>
+        </button>
+      </div>
+      <div class="top-bar-right" id="topBarRight" hidden>
+        <button id="btnBookmarkPage" class="icon-chip" title="Bookmark Current Spread (B)" aria-label="Bookmark page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
+          </svg>
+        </button>
+        <div id="zoomPill" class="zoom-pill" hidden>
+          <button id="btnZoomOut" title="Zoom Out (-)">−</button>
+          <span id="zoomLabel">100%</span>
+          <button id="btnZoomInPill" title="Zoom In (+)">+</button>
+          <button id="btnZoomReset" title="Reset Zoom (0)">Reset</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main FlipBook Stage -->
+    <main class="stage" id="stage">
+      <!-- Empty / Welcome Dropzone State -->
+      <div class="welcome-overlay" id="welcomeOverlay">
+        <div class="welcome-card">
+          <div class="welcome-icon">
+            <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+          </div>
+          <h1>FlipBook Reader</h1>
+          <p class="welcome-sub">Drop any PDF book here to read with realistic corner-curl page flipping.</p>
+          <div class="welcome-actions">
+            <button id="btnWelcomePick" class="btn-primary">Open PDF File…</button>
+            <label class="btn-secondary" for="fileInputHidden">Browse in Browser</label>
+          </div>
+          <div id="welcomeRecentWrap" class="welcome-recent" hidden>
+            <div class="welcome-recent-title">Recent Books</div>
+            <div id="welcomeRecentList" class="welcome-recent-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading Spinner -->
+      <div class="loading-overlay" id="loadingOverlay" hidden>
+        <div class="spinner"></div>
+        <div class="loading-text" id="loadingText">Opening book…</div>
+      </div>
+
+      <!-- Drop Overlay -->
+      <div class="drop-overlay" id="dropOverlay" hidden>
+        <div class="drop-box">Drop PDF book to open</div>
+      </div>
+
+      <!-- Zoom/Pan Container -->
+      <div class="zoom-viewport" id="zoomViewport">
+        <div class="book-center-shift" id="bookCenterShift">
+          <div class="book-shell" id="bookShell" hidden>
+            <div class="book-drop-shadow" id="bookDropShadow"></div>
+            <div class="book-stack book-stack-left" id="bookStackLeft"></div>
+            <div class="book-stack book-stack-right" id="bookStackRight"></div>
+            <div class="book-container" id="bookContainer"></div>
+            <div class="book-spine-shadow" id="bookSpineShadow"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mid-height side chevron arrows (FlipHTML5 style) -->
+      <button id="btnPrevArrow" class="side-nav side-nav-left" title="Previous Page (←)" aria-label="Previous Page" hidden>
+        <svg width="34" height="58" viewBox="0 0 24 44" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="17 6 7 22 17 38"/>
+        </svg>
+      </button>
+      <button id="btnNextArrow" class="side-nav side-nav-right" title="Next Page (→)" aria-label="Next Page" hidden>
+        <svg width="34" height="58" viewBox="0 0 24 44" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="7 6 17 22 7 38"/>
+        </svg>
+      </button>
+
+      <!-- Bottom-corner First / Last page buttons (FlipHTML5 style) -->
+      <button id="btnFirstPage" class="corner-nav corner-nav-left" title="First Page (Home)" aria-label="First Page" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="6" y1="5" x2="6" y2="19"/>
+          <polyline points="17 6 10 12 17 18"/>
+        </svg>
+      </button>
+      <button id="btnLastPage" class="corner-nav corner-nav-right" title="Last Page (End)" aria-label="Last Page" hidden>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="7 6 14 12 7 18"/>
+          <line x1="18" y1="5" x2="18" y2="19"/>
+        </svg>
+      </button>
+    </main>
+
+    <!-- Extended '+' Menu Popover -->
+    <div id="moreMenu" class="popover-panel more-menu" hidden>
+      <button class="menu-item" id="menuOpenPdf">
+        <span>Open PDF File…</span>
+        <kbd>⌘O</kbd>
+      </button>
+      <button class="menu-item" id="menuLibrary">
+        <span>Recent Books Library</span>
+        <kbd>L</kbd>
+      </button>
+      <div class="menu-divider"></div>
+      <button class="menu-item" id="menuPageMode">
+        <span>Page View</span>
+        <span class="menu-val" id="valPageMode">Double</span>
+      </button>
+      <button class="menu-item" id="menuHardCover">
+        <span>Hard Cover</span>
+        <span class="menu-val" id="valHardCover">On</span>
+      </button>
+      <button class="menu-item" id="menuClickMode">
+        <span>Page Interaction</span>
+        <span class="menu-val" id="valClickMode">Corner + Select</span>
+      </button>
+      <button class="menu-item" id="menuAutoFlip">
+        <span>Auto-Flip</span>
+        <span class="menu-val" id="valAutoFlip">Off</span>
+      </button>
+      <div class="menu-divider"></div>
+      <div class="menu-theme-row">
+        <span>Backdrop</span>
+        <div class="theme-dots">
+          <button class="theme-dot active" data-theme="charcoal" style="background:#4c4c4c" title="FlipHTML5 Charcoal"></button>
+          <button class="theme-dot" data-theme="slate" style="background:#323232" title="Deep Slate"></button>
+          <button class="theme-dot" data-theme="obsidian" style="background:#191a1d" title="Night Dark"></button>
+          <button class="theme-dot" data-theme="warm" style="background:#d9d3c7" title="Warm Paper"></button>
+        </div>
+      </div>
+      <div class="menu-divider"></div>
+      <div class="menu-shortcuts">
+        <div><kbd>←</kbd><kbd>→</kbd> Flip &nbsp; <kbd>Home</kbd>/<kbd>End</kbd> Ends</div>
+        <div><kbd>⌘F</kbd> Search &nbsp; <kbd>+</kbd>/<kbd>-</kbd> Zoom &nbsp; <kbd>F</kbd> Full</div>
+      </div>
+    </div>
+
+    <!-- Bottom Thumbnails Filmstrip (FlipHTML5 Popular style) -->
+    <section id="thumbnailsStrip" class="thumbnails-strip" hidden>
+      <div class="thumb-header">
+        <span>Page Thumbnails</span>
+        <button id="btnCloseThumbs" class="drawer-close" aria-label="Close thumbnails">✕</button>
+      </div>
+      <div class="thumb-track-wrap">
+        <button id="btnThumbPrev" class="thumb-scroll-btn" aria-label="Scroll thumbnails left">‹</button>
+        <div id="thumbScroller" class="thumb-scroller"></div>
+        <button id="btnThumbNext" class="thumb-scroll-btn" aria-label="Scroll thumbnails right">›</button>
+      </div>
+    </section>
+
+    <!-- Slide-over Drawer (Search / TOC / Bookmarks / Page Text / Library) -->
+    <aside id="sideDrawer" class="side-drawer" hidden>
+      <div class="drawer-tabs">
+        <button class="drawer-tab active" data-tab="toc">Contents</button>
+        <button class="drawer-tab" data-tab="search">Search</button>
+        <button class="drawer-tab" data-tab="bookmarks">Bookmarks</button>
+        <button class="drawer-tab" data-tab="text">Text</button>
+        <button id="btnCloseDrawer" class="drawer-close" aria-label="Close panel">✕</button>
+      </div>
+
+      <div id="paneToc" class="drawer-pane active">
+        <div id="tocList" class="toc-list"></div>
+      </div>
+
+      <div id="paneSearch" class="drawer-pane">
+        <form id="searchForm" class="search-form">
+          <input id="searchInput" type="search" placeholder="Search text in book…" autocomplete="off" />
+          <button type="submit">Go</button>
+        </form>
+        <div id="searchStatus" class="search-status"></div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <div id="paneBookmarks" class="drawer-pane">
+        <div class="bookmarks-actions">
+          <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark Current Page</button>
+        </div>
+        <div id="bookmarksList" class="bookmarks-list"></div>
+      </div>
+
+      <div id="paneText" class="drawer-pane">
+        <div class="text-pane-actions">
+          <span id="textPaneLabel">Current Spread Text</span>
+          <button id="btnCopySpreadText" class="btn-small">Copy Text</button>
+        </div>
+        <pre id="pageTextPreview" class="page-text-preview"></pre>
+      </div>
+    </aside>
+
+    <!-- Recent Books Library Modal -->
+    <div id="libraryModal" class="modal-backdrop" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h2>Book Library</h2>
+          <button id="btnCloseLibrary" class="drawer-close">✕</button>
+        </div>
+        <div class="modal-actions">
+          <button id="btnModalPickPdf" class="btn-primary">Open PDF from Mac…</button>
+          <label class="btn-secondary" for="fileInputHidden">Browse File</label>
+        </div>
+        <div id="libraryList" class="library-list"></div>
+      </div>
+    </div>
+
+    <!-- Sleek FlipHTML5 Popular Bottom Toolbar -->
+    <footer class="bottom-bar" id="bottomBar">
+      <div class="bottom-left">
+        <button id="btnMore" class="bar-btn" title="More Tools & Settings" aria-label="More Tools">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+
+        <button id="btnZoom" class="bar-btn" title="Zoom In / Reset (Double-click page)" aria-label="Zoom">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="11" y1="8" x2="11" y2="14"/>
+            <line x1="8" y1="11" x2="14" y2="11"/>
+          </svg>
+        </button>
+
+        <button id="btnSearch" class="bar-btn" title="Search in Book (Cmd+F)" aria-label="Search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </button>
+
+        <button id="btnThumbs" class="bar-btn" title="Page Thumbnails (T)" aria-label="Thumbnails">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+            <rect x="4" y="4" width="6.5" height="6.5" rx="1"/>
+            <rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/>
+            <rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/>
+            <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/>
+          </svg>
+        </button>
+
+        <div class="page-counter-wrap" title="Click to jump to page">
+          <input id="pageInput" class="page-input" type="text" value="0/0" aria-label="Page number" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="bottom-center">
+        <div class="scrubber-wrap">
+          <div id="scrubberTooltip" class="scrubber-tooltip" hidden>1</div>
+          <input id="pageScrubber" class="page-scrubber" type="range" min="1" max="1" value="1" aria-label="Page slider" />
+        </div>
+      </div>
+
+      <div class="bottom-right">
+        <button id="btnSound" class="bar-btn" title="Page Flip Sound" aria-label="Toggle sound">
+          <svg id="iconSoundOn" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+          <svg id="iconSoundOff" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" hidden>
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <line x1="22" y1="9" x2="16" y2="15"/>
+            <line x1="16" y1="9" x2="22" y2="15"/>
+          </svg>
+        </button>
+
+        <button id="btnLibrary" class="bar-btn" title="Open PDF / Recent Books (Cmd+O)" aria-label="Open book">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+
+        <button id="btnFullscreen" class="bar-btn" title="Fullscreen (F)" aria-label="Fullscreen">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+
+        <button id="btnDrawer" class="bar-btn" title="Contents, Bookmarks & Text" aria-label="Table of contents">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/>
+            <line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/>
+            <circle cx="4" cy="6" r="1" fill="currentColor"/>
+            <circle cx="4" cy="12" r="1" fill="currentColor"/>
+            <circle cx="4" cy="18" r="1" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </footer>
+
+    <input id="fileInputHidden" type="file" accept="application/pdf,.pdf" hidden />
+  </div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>
