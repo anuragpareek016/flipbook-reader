@@ -1,5 +1,5 @@
 import * as pdfjsLib from '/vendor/pdfjs/build/pdf.min.mjs';
-import { flipSound } from '/assets/sound.js';
+import { flipSound, DEFAULT_SOUND_PRESET } from '/assets/sound.js';
 import { FlipBookEngine } from '/assets/flip-engine.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
@@ -89,6 +89,8 @@ const els = {
   btnSound: document.getElementById('btnSound'),
   iconSoundOn: document.getElementById('iconSoundOn'),
   iconSoundOff: document.getElementById('iconSoundOff'),
+  valSoundPreset: document.getElementById('valSoundPreset'),
+  soundPresetPills: document.getElementById('soundPresetPills'),
   btnLibrary: document.getElementById('btnLibrary'),
   btnFullscreen: document.getElementById('btnFullscreen'),
   btnDrawer: document.getElementById('btnDrawer'),
@@ -110,6 +112,7 @@ const state = {
   showCover: true,
   clickMode: 'smart', // 'smart' | 'anywhere'
   soundEnabled: true,
+  soundPreset: DEFAULT_SOUND_PRESET,
   theme: 'charcoal',
   autoFlipTimer: null,
 
@@ -202,10 +205,13 @@ async function fetchLibrary() {
 
 function applySavedSettings(settings) {
   if (settings.theme) setTheme(settings.theme, false);
+  if (settings.soundPreset) {
+    state.soundPreset = settings.soundPreset;
+  }
   if (typeof settings.soundEnabled === 'boolean') {
     state.soundEnabled = settings.soundEnabled;
-    updateSoundUi();
   }
+  updateSoundUi();
   if (settings.pageMode) state.pageMode = settings.pageMode;
   if (typeof settings.showCover === 'boolean') state.showCover = settings.showCover;
   if (settings.clickMode) state.clickMode = settings.clickMode;
@@ -219,6 +225,7 @@ function schedulePersistState() {
       settings: {
         theme: state.theme,
         soundEnabled: state.soundEnabled,
+        soundPreset: state.soundPreset,
         pageMode: state.pageMode,
         showCover: state.showCover,
         clickMode: state.clickMode,
@@ -1260,9 +1267,28 @@ function setTheme(theme, persist = true) {
 }
 
 function updateSoundUi() {
+  flipSound.setPreset(state.soundPreset);
   flipSound.setEnabled(state.soundEnabled);
   els.iconSoundOn.hidden = !state.soundEnabled;
   els.iconSoundOff.hidden = state.soundEnabled;
+
+  const info = flipSound.getPresetInfo(state.soundPreset);
+  state.soundPreset = info.id;
+  if (els.valSoundPreset) {
+    els.valSoundPreset.textContent = state.soundEnabled ? info.label : 'Off';
+  }
+  if (els.btnSound) {
+    els.btnSound.title = state.soundEnabled
+      ? `Page Turn Sound: ${info.fullName} (Click to mute, Right-click for presets)`
+      : 'Page Turn Sound: Off (Click to enable, Right-click for presets)';
+  }
+  if (els.soundPresetPills) {
+    els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
+      const id = btn.dataset.sound;
+      const active = state.soundEnabled ? id === state.soundPreset : id === 'off';
+      btn.classList.toggle('active', active);
+    });
+  }
 }
 
 function updateMenuValues() {
@@ -1416,8 +1442,14 @@ function wireEvents() {
   els.btnSound.addEventListener('click', () => {
     state.soundEnabled = !state.soundEnabled;
     updateSoundUi();
-    if (state.soundEnabled) flipSound.playFlip();
+    if (state.soundEnabled) flipSound.playFlip(true);
     schedulePersistState();
+  });
+  els.btnSound.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    els.moreMenu.hidden = false;
+    els.btnMore.classList.toggle('active', true);
   });
 
   els.btnLibrary.addEventListener('click', () => {
@@ -1494,6 +1526,26 @@ function wireEvents() {
     if (state.pdfDoc) initPageFlip(state.currentIndex);
   });
   els.menuAutoFlip.addEventListener('click', toggleAutoFlip);
+
+  if (els.soundPresetPills) {
+    els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const chosen = btn.dataset.sound;
+        if (chosen === 'off') {
+          state.soundEnabled = false;
+          updateSoundUi();
+          schedulePersistState();
+          return;
+        }
+        state.soundPreset = chosen;
+        state.soundEnabled = true;
+        updateSoundUi();
+        flipSound.unlock();
+        flipSound.playFlip(true);
+        schedulePersistState();
+      });
+    });
+  }
 
   document.querySelectorAll('.theme-dot').forEach((dot) => {
     dot.addEventListener('click', () => setTheme(dot.dataset.theme));
