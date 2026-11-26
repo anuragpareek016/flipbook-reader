@@ -103,6 +103,32 @@ html.mac-native-window .top-bar {
   fill: #ffd54f;
 }
 
+#btnDarkRead {
+  background: rgba(246, 247, 250, 0.90);
+  border-color: rgba(255, 255, 255, 0.96);
+  color: #1b1d22;
+}
+
+#btnDarkRead:hover {
+  background: #ffffff;
+}
+
+#btnDarkRead.active {
+  background: rgba(30, 44, 78, 0.94);
+  border-color: #8ab4f8;
+  color: #ffd54f;
+  box-shadow: 0 0 10px rgba(138, 180, 248, 0.32);
+}
+
+#btnDarkRead.active:hover {
+  background: rgba(38, 56, 98, 0.98);
+}
+
+#btnDarkRead.active svg {
+  fill: #ffd54f;
+  stroke: #ffd54f;
+}
+
 #btnHighlightsTop.has-hl::after {
   content: '';
   width: 6px;
@@ -1941,4 +1967,44 @@ body.read-dark .fb-hl-box.color-orange { background: rgba(255, 175, 85, 0.34); }
 body.read-dark .fh-inner-spine {
   mix-blend-mode: normal;
   opacity: 0.72;
+}
+
+body.read-dark .book-stack-left {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.34)),
+    repeating-linear-gradient(to right, #1b1c21 0px, #272930 1px, #131418 2px);
+  border-left-color: #2f323b;
+}
+
+body.read-dark .book-stack-right {
+  background:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.34)),
+    repeating-linear-gradient(to right, #1f2127 0px, #2b2d35 1px, #141519 2px);
+  border-right-color: #2f323b;
+}
+
+body.read-dark .fh-front-sheen {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.36) 0%,
+    rgba(0, 0, 0, 0.14) 1.5%,
+    rgba(255, 255, 255, 0.10) 4.2%,
+    rgba(255, 255, 255, 0.03) 8.5%,
+    rgba(0, 0, 0, 0.14) 14%,
+    rgba(0, 0, 0, 0.04) 22%,
+    transparent 34%
+  );
+}
+
+body.read-dark .fh-back-sheen {
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.42) 0%,
+    rgba(0, 0, 0, 0.14) 1.4%,
+    rgba(255, 255, 255, 0.12) 4.4%,
+    rgba(255, 255, 255, 0.04) 9.0%,
+    rgba(0, 0, 0, 0.16) 15%,
+    rgba(0, 0, 0, 0.05) 24%,
+    transparent 38%
+  );
 }
