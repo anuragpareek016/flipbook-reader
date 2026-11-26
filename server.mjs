@@ -29,6 +29,7 @@ const MIME_TYPES = {
   '.bcmap': 'application/octet-stream',
   '.pfb': 'application/octet-stream',
   '.ttf': 'font/ttf',
+  '.mp3': 'audio/mpeg',
   '.properties': 'text/plain; charset=utf-8',
   '.pdf': 'application/pdf',
 };
