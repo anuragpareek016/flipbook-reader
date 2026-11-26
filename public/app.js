@@ -76,6 +76,7 @@ const els = {
   highlightsSummary: document.getElementById('highlightsSummary'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
   btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
+  btnClearPageHighlights: document.getElementById('btnClearPageHighlights'),
   btnClearHighlights: document.getElementById('btnClearHighlights'),
   hlPageChips: document.getElementById('hlPageChips'),
   hlFilterPageInput: document.getElementById('hlFilterPageInput'),
@@ -764,19 +765,11 @@ function onSpreadChanged(persist = true, renderRadius = 5) {
 /* ---------- Navigation Actions ---------- */
 function goPrev() {
   if (!state.pageFlip) return;
-  if (state.zoom > 1) {
-    state.pageFlip.turnToPrevPage();
-    return;
-  }
   state.pageFlip.flipPrev('bottom');
 }
 
 function goNext() {
   if (!state.pageFlip) return;
-  if (state.zoom > 1) {
-    state.pageFlip.turnToNextPage();
-    return;
-  }
   state.pageFlip.flipNext('bottom');
 }
 
@@ -1282,6 +1275,9 @@ function updateHighlightsUi() {
   }
 
   els.btnClearHighlights.hidden = totalCount === 0;
+  if (els.btnClearPageHighlights) {
+    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && filtered.length > 0);
+  }
   if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = filtered.length === 0;
   if (els.btnToggleNotesView) {
     els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
@@ -1350,7 +1346,12 @@ function updateHighlightsUi() {
           <div class="hl-item-meta">Page ${hl.page}</div>
           <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
         </div>
-        <button class="drawer-close" title="Remove highlight" aria-label="Remove highlight">✕</button>
+        <button class="drawer-close hl-row-del" title="Delete highlight" aria-label="Delete highlight">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
       `;
       row.addEventListener('click', (e) => {
         if (e.target.closest('button')) {
@@ -1391,7 +1392,12 @@ function updateHighlightsUi() {
         entry.className = `hl-note-entry color-${color}`;
         entry.innerHTML = `
           <div class="hl-note-text">${escapeHtml(hl.text || '(Highlighted region)')}</div>
-          <button class="drawer-close hl-note-del" title="Remove highlight" aria-label="Remove highlight">✕</button>
+          <button class="drawer-close hl-row-del hl-note-del" title="Delete highlight" aria-label="Delete highlight">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
         `;
         entry.querySelector('.hl-note-del')?.addEventListener('click', () => removeHighlightById(hl.id));
         listEl.appendChild(entry);
@@ -1527,12 +1533,35 @@ function hideHighlightPopover() {
   state.activeHlDraft = null;
 }
 
+function findOverlappingHighlightIds(entries) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  const ids = new Set();
+  for (const ent of entries) {
+    for (const hl of state.highlights) {
+      if (hl.page !== ent.page) continue;
+      for (const er of ent.rects) {
+        const overlaps = hl.rects.some((hr) =>
+          er.l < hr.l + hr.w && er.l + er.w > hr.l &&
+          er.t < hr.t + hr.h && er.t + er.h > hr.t
+        );
+        if (overlaps) {
+          ids.add(hl.id);
+          break;
+        }
+      }
+    }
+  }
+  return Array.from(ids);
+}
+
 function showHighlightPopover(anchorRect, draft) {
   if (!els.hlPopover || !anchorRect) return;
-  state.activeHlDraft = draft;
   const isEdit = draft.mode === 'edit';
-  els.hlPopoverDivider.hidden = !isEdit;
-  els.btnHlDelete.hidden = !isEdit;
+  const overlapIds = !isEdit && Array.isArray(draft.entries) ? findOverlappingHighlightIds(draft.entries) : [];
+  state.activeHlDraft = isEdit ? draft : { ...draft, overlapIds };
+  const canDelete = isEdit || overlapIds.length > 0;
+  els.hlPopoverDivider.hidden = !canDelete;
+  els.btnHlDelete.hidden = !canDelete;
 
   els.hlPopover.querySelectorAll('.hl-swatch').forEach((btn) => {
     btn.classList.toggle('active', isEdit && btn.dataset.color === draft.color);
@@ -1594,10 +1623,22 @@ function applyHighlightColor(color) {
 
 function deleteActiveHighlight() {
   const draft = state.activeHlDraft;
-  if (!draft || draft.mode !== 'edit') return;
-  const target = state.highlights.find((h) => h.id === draft.id);
-  state.highlights = state.highlights.filter((h) => h.id !== draft.id);
-  if (target) paintUserHighlightsOnPage(target.page - 1);
+  if (!draft) return;
+  const idsToDelete = draft.mode === 'edit'
+    ? [draft.id]
+    : Array.isArray(draft.overlapIds)
+      ? draft.overlapIds
+      : [];
+  if (!idsToDelete.length) return;
+  const delSet = new Set(idsToDelete);
+  const affectedPages = new Set(state.highlights.filter((h) => delSet.has(h.id)).map((h) => h.page - 1));
+  state.highlights = state.highlights.filter((h) => !delSet.has(h.id));
+  for (const idx of affectedPages) {
+    paintUserHighlightsOnPage(idx);
+  }
+  try {
+    window.getSelection()?.removeAllRanges?.();
+  } catch {}
   updateHighlightsUi();
   schedulePersistState();
   hideHighlightPopover();
@@ -2179,6 +2220,15 @@ function wireEvents() {
       updateHighlightsUi();
     }
   });
+  els.btnClearPageHighlights?.addEventListener('click', () => {
+    const targets = new Set(getFilteredSortedHighlights().map((h) => h.id));
+    if (!targets.size) return;
+    state.highlights = state.highlights.filter((h) => !targets.has(h.id));
+    hideHighlightPopover();
+    repaintRenderedHighlights();
+    updateHighlightsUi();
+    schedulePersistState();
+  });
   els.btnClearHighlights.addEventListener('click', () => {
     if (!state.highlights.length) return;
     state.highlights = [];
@@ -2186,6 +2236,19 @@ function wireEvents() {
     repaintRenderedHighlights();
     updateHighlightsUi();
     schedulePersistState();
+  });
+
+  // Right-click any existing highlight on a page to recolor or delete it cleanly
+  els.bookContainer.addEventListener('contextmenu', (e) => {
+    const pageNode = e.target.closest('.fb-page');
+    const hit = pageNode ? findHighlightAtClientPoint(pageNode, e.clientX, e.clientY) : null;
+    if (!hit) return;
+    e.preventDefault();
+    showHighlightPopover(hit.anchorRect, {
+      mode: 'edit',
+      id: hit.hl.id,
+      color: hit.hl.color,
+    });
   });
 
   // Track pointer position inside stage so keyboard +/- zoom anchors at cursor

@@ -116,7 +116,16 @@
         <button class="hl-swatch" data-color="pink" title="Pink highlight" aria-label="Pink highlight"></button>
         <button class="hl-swatch" data-color="orange" title="Orange highlight" aria-label="Orange highlight"></button>
         <span id="hlPopoverDivider" class="hl-popover-divider" hidden></span>
-        <button id="btnHlDelete" class="hl-delete-btn" title="Remove highlight" aria-label="Remove highlight" hidden>✕</button>
+        <button id="btnHlDelete" class="hl-delete-btn" title="Delete highlight" aria-label="Delete highlight" hidden>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+          <span>Delete</span>
+        </button>
       </div>
     </main>
 
@@ -231,7 +240,8 @@
           <div class="hl-header-btns">
             <button id="btnToggleNotesView" class="btn-small" title="View highlighted text on page as notes">Notes View</button>
             <button id="btnCopyPageNotes" class="btn-small" hidden title="Copy displayed notes">Copy</button>
-            <button id="btnClearHighlights" class="btn-small" hidden>Clear All</button>
+            <button id="btnClearPageHighlights" class="btn-small btn-danger-subtle" hidden title="Delete all highlights on this filtered page">Clear Page</button>
+            <button id="btnClearHighlights" class="btn-small btn-danger-subtle" hidden>Clear All</button>
           </div>
         </div>
         <div class="hl-filter-bar">
