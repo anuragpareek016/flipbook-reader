@@ -10,6 +10,7 @@ class FlipSound {
     this.rawBytesPromise = null;
     this.decoding = false;
     this.unlocked = false;
+    this.lastPlayedMs = 0;
   }
 
   setEnabled(val) {
@@ -73,6 +74,10 @@ class FlipSound {
 
   playFlip() {
     if (!this.enabled) return;
+    const nowMs = performance.now();
+    if (nowMs - this.lastPlayedMs < 72) return;
+    this.lastPlayedMs = nowMs;
+
     const ctx = this.ensureContext();
 
     if (ctx && this.audioBuffer) {
@@ -82,7 +87,7 @@ class FlipSound {
       src.playbackRate.value = 0.98 + Math.random() * 0.04;
 
       const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.9, now);
+      gain.gain.setValueAtTime(0.84, now);
 
       src.connect(gain);
       gain.connect(ctx.destination);
@@ -93,7 +98,7 @@ class FlipSound {
     // Immediate fallback if MP3 buffer is still decoding on first flip
     try {
       const el = new Audio(SOUND_URL);
-      el.volume = 0.9;
+      el.volume = 0.84;
       el.play().catch(() => {});
     } catch {
       // ignore

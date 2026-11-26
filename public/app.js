@@ -369,7 +369,7 @@ function initPageFlip(startIndex = 0) {
     height: sh,
     usePortrait: single,
     startPage: safeStart,
-    flippingTime: 540,
+    flippingTime: 360,
     showCover: state.showCover,
     showPageCorners: true,
     disableFlipByClick: state.clickMode === 'smart',
@@ -389,14 +389,31 @@ function initPageFlip(startIndex = 0) {
     onSpreadChanged(false);
   });
 
-  pf.on('flipStart', () => {
+  pf.on('flipStart', (e) => {
     flipSound.playFlip();
+    if (Number.isFinite(e.data?.page)) {
+      const fromIdx = clamp(e.data?.from ?? state.currentIndex, 0, state.totalPages - 1);
+      state.currentIndex = clamp(e.data.page, 0, state.totalPages - 1);
+      onSpreadChanged(false, 6);
+      const vis = getVisibleIndices();
+      const touchingCover =
+        state.showCover &&
+        (vis.includes(0) ||
+          vis.includes(state.totalPages - 1) ||
+          state.currentIndex <= 1 ||
+          fromIdx <= 1 ||
+          state.currentIndex >= state.totalPages - 2 ||
+          fromIdx >= state.totalPages - 2);
+      if (touchingCover) {
+        els.bookSpineShadow.style.opacity = '0';
+      }
+    }
   });
 
   pf.on('flip', (e) => {
     const nextIdx = clamp(e.data, 0, state.totalPages - 1);
     state.currentIndex = nextIdx;
-    onSpreadChanged(true);
+    onSpreadChanged(true, 6);
   });
 
   pf.on('changeState', (e) => {
@@ -520,14 +537,14 @@ async function renderPageNode(idx) {
 }
 
 function evictDistantPages(centerIdx) {
-  const maxKeep = state.committedZoom > 1.2 ? 6 : MAX_CACHED_CANVASES;
+  const maxKeep = state.committedZoom > 1.2 ? 6 : Math.max(MAX_CACHED_CANVASES, 24);
   if (state.renderedMap.size <= maxKeep) return;
   const entries = Array.from(state.renderedMap.keys())
     .sort((a, b) => Math.abs(b - centerIdx) - Math.abs(a - centerIdx));
 
   while (state.renderedMap.size > maxKeep && entries.length) {
     const farIdx = entries.shift();
-    if (Math.abs(farIdx - centerIdx) <= (state.committedZoom > 1.2 ? 1 : 4)) break;
+    if (Math.abs(farIdx - centerIdx) <= (state.committedZoom > 1.2 ? 1 : 10)) break;
     const rec = state.renderedMap.get(farIdx);
     try { rec?.renderTask?.cancel(); } catch {}
     state.renderedMap.delete(farIdx);
@@ -544,7 +561,7 @@ function evictDistantPages(centerIdx) {
   }
 }
 
-function queueNearbyRenders(centerIdx, radius = 3) {
+function queueNearbyRenders(centerIdx, radius = 5) {
   const effectiveRadius = state.committedZoom > 1.2 ? 1 : radius;
   const visible = getVisibleIndices(centerIdx);
   const priority = [...visible];
@@ -555,14 +572,14 @@ function queueNearbyRenders(centerIdx, radius = 3) {
     if (prev >= 0 && !priority.includes(prev)) priority.push(prev);
   }
   priority.forEach((idx, order) => {
-    if (order < visible.length) {
+    if (order < visible.length + 2) {
       renderPageNode(idx);
     } else {
       setTimeout(() => {
-        if (Math.abs(idx - state.currentIndex) <= effectiveRadius + 1) {
+        if (Math.abs(idx - state.currentIndex) <= effectiveRadius + 2) {
           renderPageNode(idx);
         }
-      }, 45 * order);
+      }, 12 * order);
     }
   });
 }
@@ -656,7 +673,7 @@ function updateBookDepthChrome() {
   }
 }
 
-function onSpreadChanged(persist = true) {
+function onSpreadChanged(persist = true, renderRadius = 5) {
   const visible = getVisibleIndices();
   const label = formatSpreadLabel(visible);
   if (document.activeElement !== els.pageInput) {
@@ -677,7 +694,7 @@ function onSpreadChanged(persist = true) {
   updateBookDepthChrome();
   updateBookmarkUi();
   highlightActiveThumbnail(visible);
-  queueNearbyRenders(state.currentIndex, 3);
+  queueNearbyRenders(state.currentIndex, renderRadius);
 
   if (els.sideDrawer && !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="text"]').classList.contains('active')) {
     refreshTextPane();
@@ -1577,16 +1594,24 @@ function wireEvents() {
 
     switch (e.key) {
       case 'ArrowLeft':
-      case 'PageUp':
+      case 'PageUp': {
         e.preventDefault();
+        const now = performance.now();
+        if (e.repeat && now - (state.lastKeyNavTime || 0) < 105) break;
+        state.lastKeyNavTime = now;
         goPrev();
         break;
+      }
       case 'ArrowRight':
       case 'PageDown':
-      case ' ':
+      case ' ': {
         e.preventDefault();
+        const now = performance.now();
+        if (e.repeat && now - (state.lastKeyNavTime || 0) < 105) break;
+        state.lastKeyNavTime = now;
         goNext();
         break;
+      }
       case 'Home':
         e.preventDefault();
         jumpToPage(1, false);

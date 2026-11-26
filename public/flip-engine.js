@@ -125,9 +125,13 @@ function cloneCanvasSnapshot(pageNode, pageW, pageH) {
   } else {
     const ph = document.createElement('div');
     ph.className = 'fb-page-num-placeholder';
-    const num = pageNode ? Number(pageNode.dataset.pageIndex || 0) + 1 : '';
+    const rawIdx = pageNode ? Number(pageNode.dataset.pageIndex) : NaN;
+    const num = Number.isFinite(rawIdx) ? rawIdx + 1 : '';
     ph.textContent = String(num);
     wrap.appendChild(ph);
+    if (Number.isFinite(rawIdx)) {
+      wrap.dataset.pendingPageIdx = String(rawIdx);
+    }
   }
   wrap.style.width = `${pageW}px`;
   wrap.style.height = `${pageH}px`;
@@ -166,9 +170,12 @@ export class FlipBookEngine {
     this.maskSize = m;
     this.sideTop = (m - this.pageH) / 2;
 
-    // Active flip state
-    this.activeFlip = null;
+    // Active flip state (interactive curl separated from concurrent serial flips)
+    this.interactiveFlip = null;
+    this.flyingFlips = [];
+    this.flipSeq = 0;
     this.rafId = null;
+    this._lastLoopTime = null;
     this.isPointerDown = false;
     this.pointerMoved = false;
     this.pointerDownPos = null;
@@ -248,6 +255,8 @@ export class FlipBookEngine {
   destroy() {
     this._stopRaf();
     this._detachEvents();
+    this.interactiveFlip = null;
+    this.flyingFlips = [];
     this.host.innerHTML = '';
     this.events.clear();
     this.pageNodes = [];
@@ -261,7 +270,7 @@ export class FlipBookEngine {
     this.maskSize = m;
     this.sideTop = (m - this.pageH) / 2;
 
-    if (this.activeFlip) this._cancelActiveFlipImmediate();
+    if (this.interactiveFlip || this.flyingFlips.length) this._cancelAllFlipsImmediate();
 
     const totalW = this.single ? this.pageW : this.pageW * 2;
     if (this.stage) {
@@ -344,28 +353,25 @@ export class FlipBookEngine {
     return { left: idx, right: null };
   }
 
+  _setSlotPage(slotEl, pageIdx) {
+    if (!slotEl) return;
+    slotEl.innerHTML = '';
+    if (pageIdx !== null && pageIdx !== undefined && this.pageNodes[pageIdx]) {
+      const node = this.pageNodes[pageIdx];
+      node.style.cssText = 'display:block;position:relative;width:100%;height:100%;';
+      slotEl.appendChild(node);
+      slotEl.style.visibility = 'visible';
+    } else {
+      slotEl.style.visibility = 'hidden';
+    }
+  }
+
   _renderStaticSpread() {
     const slots = this._getSpreadSlots(this.currentSpreadIndex);
-    this.leftSlot.innerHTML = '';
-    this.rightSlot.innerHTML = '';
-
-    if (!this.single && slots.left !== null && this.pageNodes[slots.left]) {
-      const node = this.pageNodes[slots.left];
-      node.style.cssText = 'display:block;position:relative;width:100%;height:100%;';
-      this.leftSlot.appendChild(node);
-      this.leftSlot.style.visibility = 'visible';
-    } else if (!this.single) {
-      this.leftSlot.style.visibility = 'hidden';
+    if (!this.single) {
+      this._setSlotPage(this.leftSlot, slots.left);
     }
-
-    if (slots.right !== null && this.pageNodes[slots.right]) {
-      const node = this.pageNodes[slots.right];
-      node.style.cssText = 'display:block;position:relative;width:100%;height:100%;';
-      this.rightSlot.appendChild(node);
-      this.rightSlot.style.visibility = 'visible';
-    } else {
-      this.rightSlot.style.visibility = 'hidden';
-    }
+    this._setSlotPage(this.rightSlot, slots.right);
 
     const sp = this.spreads[this.currentSpreadIndex] || [0];
     this.currentPageIndex = sp[0];
@@ -472,13 +478,16 @@ export class FlipBookEngine {
     this.moveVelX = 0;
 
     const chosenSide = side || (this.single ? (bp.x < this.pageW / 2 ? 'left' : 'right') : bp.x < this.pageW ? 'left' : 'right');
-    if (this.activeFlip && !this.activeFlip.animating) {
-      // Grabbed already-curled hover corner seamlessly -> anchor to actual cursor point
-      this.activeFlip.mode = 'drag';
-      this.activeFlip.from.y = clamp(bp.y + (bp.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
-      this.activeFlip.target = this._bookToSpine(bp);
+    if (this.flyingFlips.length) {
+      this._settleAllFlyingFlips();
+    }
+    if (this.interactiveFlip) {
+      // Grabbed already-curled hover/fallback corner seamlessly -> anchor to actual cursor point
+      this.interactiveFlip.mode = 'drag';
+      this.interactiveFlip.from.y = clamp(bp.y + (bp.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
+      this.interactiveFlip.target = this._bookToSpine(bp);
       this._setState('user_fold');
-    } else if (!this.activeFlip) {
+    } else {
       this._beginInteractiveTurn(chosenSide, bp, 'drag');
     }
   }
@@ -486,7 +495,7 @@ export class FlipBookEngine {
   _handleMouseMove(e) {
     const bp = this._clientToBook(e.clientX, e.clientY);
 
-    if (this.isPointerDown && this.activeFlip && this.activeFlip.mode === 'drag') {
+    if (this.isPointerDown && this.interactiveFlip && this.interactiveFlip.mode === 'drag') {
       const dx = bp.x - this.pointerDownPos.x;
       const dy = bp.y - this.pointerDownPos.y;
       if (Math.hypot(dx, dy) > 5) this.pointerMoved = true;
@@ -495,14 +504,14 @@ export class FlipBookEngine {
         this.moveVelX = bp.x - this.lastMovePos.x;
       }
       this.lastMovePos = bp;
-      this.activeFlip.target = this._bookToSpine(bp);
+      this.interactiveFlip.target = this._bookToSpine(bp);
       this._ensureRaf();
       return;
     }
 
     // Hover corner-tip curl only (FlipHTML5 aroundCorner behavior)
     if (!this.settings.showPageCorners || this.isPointerDown) return;
-    if (this.activeFlip && this.activeFlip.mode === 'animate') return;
+    if (this.flyingFlips.length > 0) return;
 
     const side = this._hitHoverCorner(bp);
     if (side) {
@@ -512,24 +521,24 @@ export class FlipBookEngine {
       const peekX = side === 'right' ? w - 24 : -w + 24;
       const peekY = isBottom ? h - 22 : 22;
 
-      if (!this.activeFlip) {
+      if (!this.interactiveFlip) {
         this._beginInteractiveTurn(side, bp, 'hover');
-        if (this.activeFlip) this.activeFlip.target = { x: peekX, y: peekY };
-      } else if (this.activeFlip.mode === 'hover' || this.activeFlip.mode === 'fallback') {
-        if (this.activeFlip.side !== side) {
-          this._cancelActiveFlipImmediate();
+        if (this.interactiveFlip) this.interactiveFlip.target = { x: peekX, y: peekY };
+      } else if (this.interactiveFlip.mode === 'hover' || this.interactiveFlip.mode === 'fallback') {
+        if (this.interactiveFlip.side !== side) {
+          this._cancelInteractiveFlipImmediate();
           this._beginInteractiveTurn(side, bp, 'hover');
-          if (this.activeFlip) this.activeFlip.target = { x: peekX, y: peekY };
+          if (this.interactiveFlip) this.interactiveFlip.target = { x: peekX, y: peekY };
         } else {
-          this.activeFlip.mode = 'hover';
-          this.activeFlip.target = { x: peekX, y: peekY };
+          this.interactiveFlip.mode = 'hover';
+          this.interactiveFlip.target = { x: peekX, y: peekY };
           this._ensureRaf();
         }
       }
-    } else if (this.activeFlip && this.activeFlip.mode === 'hover') {
+    } else if (this.interactiveFlip && this.interactiveFlip.mode === 'hover') {
       // Smoothly spring back to flat when cursor leaves the corner tip
-      this.activeFlip.mode = 'fallback';
-      this.activeFlip.target = { ...this.activeFlip.from };
+      this.interactiveFlip.mode = 'fallback';
+      this.interactiveFlip.target = { ...this.interactiveFlip.from };
       this._ensureRaf();
     }
   }
@@ -539,27 +548,26 @@ export class FlipBookEngine {
     this.isPointerDown = false;
     const bp = this._clientToBook(e.clientX, e.clientY);
 
-    if (!this.activeFlip) return;
+    if (!this.interactiveFlip) return;
 
     if (!this.pointerMoved) {
       // Simple click on edge -> trigger full animated page turn!
-      const side = this.activeFlip.side;
-      this._finishTurnAnimated(side);
+      this._finishTurnAnimated();
       return;
     }
 
     const sp = this._bookToSpine(bp);
-    const dir = this.activeFlip.side === 'right' ? 1 : -1; // +1 forward, -1 back
+    const dir = this.interactiveFlip.side === 'right' ? 1 : -1; // +1 forward, -1 back
     const midX = this.single ? this.pageW / 2 : 0;
     const crossedCenter = dir === 1 ? sp.x < midX : sp.x > midX;
     const flicked = dir === 1 ? this.moveVelX < -4 && sp.x < this.pageW * 0.72 : this.moveVelX > 4 && sp.x > (this.single ? this.pageW * 0.25 : -this.pageW * 0.65);
 
     if (crossedCenter || flicked) {
-      this._finishTurnAnimated(this.activeFlip.side);
+      this._finishTurnAnimated();
     } else {
       // Release early -> smoothly spring back!
-      this.activeFlip.mode = 'fallback';
-      this.activeFlip.target = { ...this.activeFlip.from };
+      this.interactiveFlip.mode = 'fallback';
+      this.interactiveFlip.target = { ...this.interactiveFlip.from };
       this._ensureRaf();
     }
   }
@@ -584,22 +592,215 @@ export class FlipBookEngine {
   }
 
   /* ---------- Interactive Flip Construction & rAF Spring Loop ---------- */
-  _beginInteractiveTurn(side, bookPos, mode) {
-    const dir = side === 'right' ? 1 : -1;
-    const nextSpread = this.currentSpreadIndex + dir;
-    if (nextSpread < 0 || nextSpread >= this.spreads.length) return false;
+  _createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder, seq }) {
+    const els = [];
+    let underEl = null;
 
-    const curSlots = this._getSpreadSlots(this.currentSpreadIndex);
-    const nextSlots = this._getSpreadSlots(nextSpread);
+    if (withUnder) {
+      underEl = document.createElement('div');
+      underEl.className = `fh-under ${this.single ? 'fh-under-single' : side === 'right' ? 'fh-under-right' : 'fh-under-left'}`;
+      underEl.style.width = `${this.pageW}px`;
+      underEl.style.height = `${this.pageH}px`;
+      if (underIdx !== null && underIdx !== undefined) {
+        underEl.appendChild(cloneCanvasSnapshot(this.pageNodes[underIdx], this.pageW, this.pageH));
+      } else {
+        underEl.style.display = 'none';
+      }
+      this.flipLayer.appendChild(underEl);
+      els.push(underEl);
+    }
 
-    const isHard =
+    const frontZ = String(2000 - seq * 4);
+    const castZ = String(2000 - seq * 4 - 1);
+    const flapDropZ = String(3000 + seq * 4);
+    const backZ = String(3000 + seq * 4 + 1);
+
+    if (isHard) {
+      const hardCard = document.createElement('div');
+      hardCard.className = `fh-hard-card ${this.single ? 'fh-hard-left' : side === 'right' ? 'fh-hard-right' : 'fh-hard-left'}`;
+      if (this.single && side === 'left') {
+        hardCard.style.left = '0';
+        hardCard.style.transformOrigin = '0% 50%';
+      }
+      hardCard.style.width = `${this.pageW}px`;
+      hardCard.style.height = `${this.pageH}px`;
+      hardCard.style.zIndex = frontZ;
+
+      const hardFront = document.createElement('div');
+      hardFront.className = 'fh-hard-face fh-hard-front';
+      if (fromIdx !== null && fromIdx !== undefined) {
+        hardFront.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH));
+      }
+
+      const hardBack = document.createElement('div');
+      hardBack.className = 'fh-hard-face fh-hard-back';
+      if (toIdx !== null && toIdx !== undefined) {
+        hardBack.appendChild(cloneCanvasSnapshot(this.pageNodes[toIdx], this.pageW, this.pageH));
+      }
+
+      const hardShade = document.createElement('div');
+      hardShade.className = 'fh-hard-shade';
+
+      hardCard.appendChild(hardFront);
+      hardCard.appendChild(hardBack);
+      hardCard.appendChild(hardShade);
+      this.flipLayer.appendChild(hardCard);
+      els.push(hardCard);
+
+      return { isHard: true, seq, underEl, underIdx, hardCard, hardShade, els };
+    }
+
+    let underShadow = null;
+    if (underEl) {
+      underShadow = document.createElement('div');
+      underShadow.className = 'fh-under-shadow';
+      underEl.appendChild(underShadow);
+    }
+
+    // Cast shadow falling from the fold crease onto the revealed underlying page
+    const castBounds = document.createElement('div');
+    castBounds.className = 'fh-cast-bounds';
+    castBounds.style.zIndex = castZ;
+
+    const castMask = document.createElement('div');
+    castMask.className = `fh-cast-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
+    castMask.style.width = `${this.maskSize}px`;
+    castMask.style.height = `${this.maskSize}px`;
+    castMask.style.marginTop = `${-this.maskSize / 2}px`;
+
+    const castGradient = document.createElement('div');
+    castGradient.className = 'fh-cast-gradient';
+    castMask.appendChild(castGradient);
+    castBounds.appendChild(castMask);
+
+    // downMask: clips turning page front side
+    const downMask = document.createElement('div');
+    downMask.className = `fh-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
+    downMask.style.width = `${this.maskSize}px`;
+    downMask.style.height = `${this.maskSize}px`;
+    downMask.style.marginTop = `${-this.maskSize / 2}px`;
+    downMask.style.zIndex = frontZ;
+
+    const downSide = document.createElement('div');
+    downSide.className = 'fh-down-side';
+    downSide.style.width = `${this.pageW}px`;
+    downSide.style.height = `${this.pageH}px`;
+    downSide.style.top = `${this.sideTop}px`;
+    if (fromIdx !== null && fromIdx !== undefined) {
+      downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH));
+    }
+
+    const lightW = this.maskSize;
+    const lightH = this.maskSize * 2;
+    const frontHighlight = document.createElement('div');
+    frontHighlight.className = 'fh-crease-lighting fh-front-sheen';
+    frontHighlight.style.width = `${lightW}px`;
+    frontHighlight.style.height = `${lightH}px`;
+    frontHighlight.style.margin = `${-lightH / 2}px 0 0 ${-lightW}px`;
+    downSide.appendChild(frontHighlight);
+    downMask.appendChild(downSide);
+
+    // Flap drop shadow cast by floating curled flap onto underlying stack
+    const flapDropBounds = document.createElement('div');
+    flapDropBounds.className = 'fh-cast-bounds fh-cast-bounds-flap';
+    flapDropBounds.style.zIndex = flapDropZ;
+
+    const flapDropMask = document.createElement('div');
+    flapDropMask.className = `fh-flap-drop-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
+    flapDropMask.style.width = `${this.maskSize}px`;
+    flapDropMask.style.height = `${this.maskSize}px`;
+    flapDropMask.style.marginTop = `${-this.maskSize / 2}px`;
+
+    const flapCaster = document.createElement('div');
+    flapCaster.className = 'fh-flap-caster';
+    flapCaster.style.width = `${this.pageW}px`;
+    flapCaster.style.height = `${this.pageH}px`;
+    flapCaster.style.top = `${this.sideTop}px`;
+    flapDropMask.appendChild(flapCaster);
+    flapDropBounds.appendChild(flapDropMask);
+
+    // upMask: clips curled-over back side of the turning sheet
+    const upMask = document.createElement('div');
+    upMask.className = `fh-mask fh-up-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
+    upMask.style.width = `${this.maskSize}px`;
+    upMask.style.height = `${this.maskSize}px`;
+    upMask.style.marginTop = `${-this.maskSize / 2}px`;
+    upMask.style.zIndex = backZ;
+
+    const upSide = document.createElement('div');
+    upSide.className = 'fh-up-side';
+    upSide.style.width = `${this.pageW}px`;
+    upSide.style.height = `${this.pageH}px`;
+    upSide.style.top = `${this.sideTop}px`;
+    if (toIdx !== null && toIdx !== undefined) {
+      upSide.appendChild(cloneCanvasSnapshot(this.pageNodes[toIdx], this.pageW, this.pageH));
+    }
+
+    const backShade = document.createElement('div');
+    backShade.className = 'fh-crease-lighting fh-back-sheen';
+    backShade.style.width = `${lightW}px`;
+    backShade.style.height = `${lightH}px`;
+    backShade.style.margin = `${-lightH / 2}px 0 0 ${-lightW}px`;
+    upSide.appendChild(backShade);
+    upMask.appendChild(upSide);
+
+    this.flipLayer.appendChild(castBounds);
+    this.flipLayer.appendChild(downMask);
+    this.flipLayer.appendChild(flapDropBounds);
+    this.flipLayer.appendChild(upMask);
+    els.push(castBounds, downMask, flapDropBounds, upMask);
+
+    return {
+      isHard: false,
+      seq,
+      underEl,
+      underIdx,
+      castBounds,
+      castMask,
+      castGradient,
+      flapDropBounds,
+      flapDropMask,
+      flapCaster,
+      downMask,
+      downSide,
+      upMask,
+      upSide,
+      underShadow,
+      frontHighlight,
+      backShade,
+      els,
+    };
+  }
+
+  _isHardSpreadStep(prevSpread, nextSpread, side) {
+    return (
       (this.single && side === 'left') ||
       (this.settings.showCover &&
         !this.single &&
-        (this.currentSpreadIndex === 0 ||
+        (prevSpread === 0 ||
           nextSpread === 0 ||
-          this.currentSpreadIndex === this.spreads.length - 1 ||
-          nextSpread === this.spreads.length - 1));
+          prevSpread === this.spreads.length - 1 ||
+          nextSpread === this.spreads.length - 1))
+    );
+  }
+
+  _getFlipIndices(prevSpread, nextSpread, side) {
+    const curSlots = this._getSpreadSlots(prevSpread);
+    const nextSlots = this._getSpreadSlots(nextSpread);
+    const fromIdx = this.single ? curSlots.right : side === 'right' ? curSlots.right : curSlots.left;
+    const toIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.left : nextSlots.right;
+    const underIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.right : nextSlots.left;
+    return { fromIdx, toIdx, underIdx };
+  }
+
+  _beginInteractiveTurn(side, bookPos, mode) {
+    const dir = side === 'right' ? 1 : -1;
+    const prevSpread = this.currentSpreadIndex;
+    const nextSpread = prevSpread + dir;
+    if (nextSpread < 0 || nextSpread >= this.spreads.length) return false;
+
+    const isHard = this._isHardSpreadStep(prevSpread, nextSpread, side);
+    const { fromIdx, toIdx, underIdx } = this._getFlipIndices(prevSpread, nextSpread, side);
 
     const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
     const clampedY =
@@ -610,207 +811,30 @@ export class FlipBookEngine {
         : clamp(bookPos.y + (bookPos.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
     const fromPoint = { x: startX, y: clampedY };
 
-    // Build flip layer DOM
-    this.flipLayer.innerHTML = '';
-    const flipSide = document.createElement('div');
+    const seq = ++this.flipSeq;
+    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: true, seq });
 
-    if (isHard) {
-      // Hard cover / single-left 3D perspective turn
-      const frontIdx = this.single ? curSlots.right : side === 'right' ? curSlots.right : curSlots.left;
-      const backIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.left : nextSlots.right;
+    if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
+    else this.leftSlot.style.visibility = 'hidden';
 
-      // Underlying static reveal on target side
-      const underEl = document.createElement('div');
-      underEl.className = `fh-under ${this.single ? 'fh-under-single' : side === 'right' ? 'fh-under-right' : 'fh-under-left'}`;
-      underEl.style.width = `${this.pageW}px`;
-      underEl.style.height = `${this.pageH}px`;
-      const revealIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.right : nextSlots.left;
-      if (revealIdx !== null) {
-        underEl.appendChild(cloneCanvasSnapshot(this.pageNodes[revealIdx], this.pageW, this.pageH));
-      } else {
-        underEl.style.display = 'none';
-      }
-
-      const hardCard = document.createElement('div');
-      hardCard.className = `fh-hard-card ${this.single ? 'fh-hard-left' : side === 'right' ? 'fh-hard-right' : 'fh-hard-left'}`;
-      if (this.single && side === 'left') {
-        hardCard.style.left = '0';
-        hardCard.style.transformOrigin = '0% 50%';
-      }
-      hardCard.style.width = `${this.pageW}px`;
-      hardCard.style.height = `${this.pageH}px`;
-
-      const hardFront = document.createElement('div');
-      hardFront.className = 'fh-hard-face fh-hard-front';
-      if (frontIdx !== null) hardFront.appendChild(cloneCanvasSnapshot(this.pageNodes[frontIdx], this.pageW, this.pageH));
-
-      const hardBack = document.createElement('div');
-      hardBack.className = 'fh-hard-face fh-hard-back';
-      if (backIdx !== null) hardBack.appendChild(cloneCanvasSnapshot(this.pageNodes[backIdx], this.pageW, this.pageH));
-
-      const hardShade = document.createElement('div');
-      hardShade.className = 'fh-hard-shade';
-
-      hardCard.appendChild(hardFront);
-      hardCard.appendChild(hardBack);
-      hardCard.appendChild(hardShade);
-
-      this.flipLayer.appendChild(underEl);
-      this.flipLayer.appendChild(hardCard);
-
-      // Hide original active slot so underEl shows cleanly
-      if (side === 'right') this.rightSlot.style.visibility = 'hidden';
-      else this.leftSlot.style.visibility = 'hidden';
-
-      this.activeFlip = {
-        side,
-        dir,
-        nextSpread,
-        isHard: true,
-        mode,
-        from: fromPoint,
-        coord: { ...fromPoint },
-        target: this._bookToSpine(bookPos),
-        hardCard,
-        hardShade,
-      };
-    } else {
-      // Soft page dual-mask curl (FlipHTML5 architecture)
-      const curTurningIdx = this.single ? curSlots.right : side === 'right' ? curSlots.right : curSlots.left;
-      const backTurningIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.left : nextSlots.right;
-      const underRevealIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.right : nextSlots.left;
-
-      const underEl = document.createElement('div');
-      underEl.className = `fh-under ${this.single ? 'fh-under-single' : side === 'right' ? 'fh-under-right' : 'fh-under-left'}`;
-      underEl.style.width = `${this.pageW}px`;
-      underEl.style.height = `${this.pageH}px`;
-      if (underRevealIdx !== null) {
-        underEl.appendChild(cloneCanvasSnapshot(this.pageNodes[underRevealIdx], this.pageW, this.pageH));
-      }
-      const underShadow = document.createElement('div');
-      underShadow.className = 'fh-under-shadow';
-      underEl.appendChild(underShadow);
-
-      // Cast shadow falling from the fold crease onto the revealed underlying page
-      const castBounds = document.createElement('div');
-      castBounds.className = 'fh-cast-bounds';
-
-      const castMask = document.createElement('div');
-      castMask.className = `fh-cast-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
-      castMask.style.width = `${this.maskSize}px`;
-      castMask.style.height = `${this.maskSize}px`;
-      castMask.style.marginTop = `${-this.maskSize / 2}px`;
-
-      const castGradient = document.createElement('div');
-      castGradient.className = 'fh-cast-gradient';
-      castMask.appendChild(castGradient);
-      castBounds.appendChild(castMask);
-
-      // downMask: clips turning page front side (replaces current page slot visually)
-      const downMask = document.createElement('div');
-      downMask.className = `fh-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
-      downMask.style.width = `${this.maskSize}px`;
-      downMask.style.height = `${this.maskSize}px`;
-      downMask.style.marginTop = `${-this.maskSize / 2}px`;
-
-      const downSide = document.createElement('div');
-      downSide.className = 'fh-down-side';
-      downSide.style.width = `${this.pageW}px`;
-      downSide.style.height = `${this.pageH}px`;
-      downSide.style.top = `${this.sideTop}px`;
-      if (curTurningIdx !== null) {
-        downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[curTurningIdx], this.pageW, this.pageH));
-      }
-      const frontHighlight = document.createElement('div');
-      frontHighlight.className = 'fh-crease-lighting fh-front-sheen';
-      const lightW = this.maskSize;
-      const lightH = this.maskSize * 2;
-      frontHighlight.style.width = `${lightW}px`;
-      frontHighlight.style.height = `${lightH}px`;
-      frontHighlight.style.margin = `${-lightH / 2}px 0 0 ${-lightW}px`;
-      downSide.appendChild(frontHighlight);
-      downMask.appendChild(downSide);
-
-      // Flap drop shadow cast by floating curled flap onto left/down page
-      const flapDropBounds = document.createElement('div');
-      flapDropBounds.className = 'fh-cast-bounds fh-cast-bounds-flap';
-
-      const flapDropMask = document.createElement('div');
-      flapDropMask.className = `fh-flap-drop-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
-      flapDropMask.style.width = `${this.maskSize}px`;
-      flapDropMask.style.height = `${this.maskSize}px`;
-      flapDropMask.style.marginTop = `${-this.maskSize / 2}px`;
-
-      const flapCaster = document.createElement('div');
-      flapCaster.className = 'fh-flap-caster';
-      flapCaster.style.width = `${this.pageW}px`;
-      flapCaster.style.height = `${this.pageH}px`;
-      flapCaster.style.top = `${this.sideTop}px`;
-      flapDropMask.appendChild(flapCaster);
-      flapDropBounds.appendChild(flapDropMask);
-
-      // upMask: clips curled-over back side of the turning sheet
-      const upMask = document.createElement('div');
-      upMask.className = `fh-mask fh-up-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
-      upMask.style.width = `${this.maskSize}px`;
-      upMask.style.height = `${this.maskSize}px`;
-      upMask.style.marginTop = `${-this.maskSize / 2}px`;
-
-      const upSide = document.createElement('div');
-      upSide.className = 'fh-up-side';
-      upSide.style.width = `${this.pageW}px`;
-      upSide.style.height = `${this.pageH}px`;
-      upSide.style.top = `${this.sideTop}px`;
-      if (backTurningIdx !== null) {
-        upSide.appendChild(cloneCanvasSnapshot(this.pageNodes[backTurningIdx], this.pageW, this.pageH));
-      }
-      const backShade = document.createElement('div');
-      backShade.className = 'fh-crease-lighting fh-back-sheen';
-      backShade.style.width = `${lightW}px`;
-      backShade.style.height = `${lightH}px`;
-      backShade.style.margin = `${-lightH / 2}px 0 0 ${-lightW}px`;
-      upSide.appendChild(backShade);
-      upMask.appendChild(upSide);
-
-      this.flipLayer.appendChild(underEl);
-      this.flipLayer.appendChild(castBounds);
-      this.flipLayer.appendChild(downMask);
-      this.flipLayer.appendChild(flapDropBounds);
-      this.flipLayer.appendChild(upMask);
-
-      if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
-      else this.leftSlot.style.visibility = 'hidden';
-
-      this.activeFlip = {
-        side,
-        dir,
-        nextSpread,
-        isHard: false,
-        mode,
-        from: fromPoint,
-        coord: { ...fromPoint },
-        target: this._bookToSpine(bookPos),
-        castMask,
-        castGradient,
-        flapDropMask,
-        flapCaster,
-        downMask,
-        downSide,
-        upMask,
-        upSide,
-        underShadow,
-        frontHighlight,
-        backShade,
-      };
-    }
+    this.interactiveFlip = {
+      ...dom,
+      side,
+      dir,
+      prevSpread,
+      nextSpread,
+      mode,
+      from: fromPoint,
+      coord: { ...fromPoint },
+      target: this._bookToSpine(bookPos),
+    };
 
     this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
     this._ensureRaf();
     return true;
   }
 
-  _applyFlipFrame(coord) {
-    const f = this.activeFlip;
+  _applyFlipFrame(f, coord) {
     if (!f) return;
     f.coord = coord;
 
@@ -819,6 +843,9 @@ export class FlipBookEngine {
       const progress = clamp(Math.abs(coord.x - f.from.x) / span, 0, 1);
       const deg = f.side === 'right' ? -180 * progress : 180 * progress;
       f.hardCard.style.transform = `perspective(3600px) rotateY(${deg}deg)`;
+      if (f.seq) {
+        f.hardCard.style.zIndex = String(progress <= 0.5 ? 2000 - f.seq * 4 : 3000 + f.seq * 4 + 1);
+      }
       const shadeAlpha = Math.sin(progress * Math.PI) * 0.24;
       f.hardShade.style.opacity = String(shadeAlpha);
       return;
@@ -850,35 +877,58 @@ export class FlipBookEngine {
     f.castGradient.style.transform = `scaleX(${widthScale})`;
     f.castGradient.style.opacity = String(clamp(edgeFade * 0.9, 0, 0.88));
     f.flapCaster.style.opacity = String(clamp(liftBell * 0.95, 0, 0.92));
-    f.underShadow.style.opacity = String(clamp(liftBell * 0.18, 0, 0.12));
+    if (f.underShadow) {
+      f.underShadow.style.opacity = String(clamp(liftBell * 0.18, 0, 0.12));
+    }
     f.frontHighlight.style.opacity = String(clamp(edgeFade * 0.92, 0, 0.88));
     f.backShade.style.opacity = String(clamp(edgeFade * 0.95, 0, 0.92));
   }
 
-  _finishTurnAnimated(side) {
-    if (!this.activeFlip) return;
-    const f = this.activeFlip;
-    const targetX = this.single ? (f.side === 'right' ? -this.pageW : this.pageW) : f.side === 'right' ? -this.pageW : this.pageW;
-    const targetY = f.from.y;
+  _finishTurnAnimated() {
+    const f = this.interactiveFlip;
+    if (!f) return;
+    this.interactiveFlip = null;
+
+    // Promote interactive curl to flying queue so rapid follow-ups cascade smoothly instead of snapping back
+    if (f.underEl) {
+      f.underEl.remove();
+      f.els = f.els.filter((el) => el !== f.underEl);
+      f.underEl = null;
+    }
+
+    const fromPage = this.currentPageIndex;
+    this.currentSpreadIndex = f.nextSpread;
+    this.currentPageIndex = (this.spreads[f.nextSpread] || [0])[0];
+
+    const targetSlot = this.single || f.side === 'right' ? this.rightSlot : this.leftSlot;
+    this._setSlotPage(targetSlot, f.underIdx);
+
+    const targetX = f.side === 'right' ? -this.pageW : this.pageW;
+    const remainingRatio = clamp(Math.abs(targetX - f.coord.x) / (2 * this.pageW), 0.2, 1);
+    const dur = Math.max(170, this.settings.flippingTime * remainingRatio);
 
     f.mode = 'animate';
     f.animStartX = f.coord.x;
     f.animStartY = f.coord.y;
     f.animToX = targetX;
-    f.animToY = targetY;
-    f.animStartTime = performance.now();
-
-    const remainingRatio = clamp(Math.abs(targetX - f.coord.x) / (2 * this.pageW), 0.22, 1);
-    f.animDuration = Math.max(220, this.settings.flippingTime * remainingRatio);
+    f.animToY = f.from.y;
+    f.progress = 0;
+    f.delayMs = 0;
+    f.elapsedMs = 0;
+    f.rate = 1 / dur;
+    f.baseRate = f.rate;
     f.arcMode = false;
+    f.reversed = false;
 
-    this._emit('flipStart', { from: this.currentPageIndex, side: f.side });
+    this.flyingFlips.push(f);
+    this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: f.side });
     this._setState('flipping');
     this._ensureRaf();
   }
 
   _ensureRaf() {
     if (this.rafId === null) {
+      this._lastLoopTime = performance.now();
       this.rafId = requestAnimationFrame(this._tick);
     }
   }
@@ -888,76 +938,156 @@ export class FlipBookEngine {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    this._lastLoopTime = null;
+  }
+
+  _refreshPendingSnapshots() {
+    if (!this.flipLayer) return;
+    const pending = this.flipLayer.querySelectorAll('.fh-snap[data-pending-page-idx]');
+    if (!pending.length) return;
+    for (const wrap of pending) {
+      const idx = Number(wrap.dataset.pendingPageIdx);
+      const srcCanvas = Number.isFinite(idx) ? this.pageNodes[idx]?.querySelector('canvas.fb-canvas') : null;
+      if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+        const snap = document.createElement('canvas');
+        snap.className = 'fh-snap-canvas';
+        snap.width = srcCanvas.width;
+        snap.height = srcCanvas.height;
+        snap.getContext('2d', { alpha: false }).drawImage(srcCanvas, 0, 0);
+        wrap.innerHTML = '';
+        wrap.appendChild(snap);
+        delete wrap.dataset.pendingPageIdx;
+      }
+    }
+  }
+
+  _removeFlipDom(f) {
+    if (!f?.els) return;
+    for (const el of f.els) el.remove();
   }
 
   _loop(now) {
     this.rafId = null;
-    const f = this.activeFlip;
-    if (!f) return;
+    const dt = this._lastLoopTime !== null ? clamp(now - this._lastLoopTime, 1, 48) : 16.67;
+    this._lastLoopTime = now;
 
-    if (f.mode === 'animate') {
-      const elapsed = now - f.animStartTime;
-      const t = clamp(elapsed / f.animDuration, 0, 1);
-      const ease = f.arcMode ? easeInOutSine(t) : easeOutSine(t);
-      const nx = f.animStartX + (f.animToX - f.animStartX) * ease;
-      let ny = f.animStartY + (f.animToY - f.animStartY) * ease;
-
-      if (f.arcMode && !f.isHard) {
-        const arc = Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
-        ny = this.pageH - 0.06 * arc;
-      }
-
-      this._applyFlipFrame({ x: nx, y: ny });
-
-      if (t >= 1) {
-        this._commitTurn(f.nextSpread);
-        return;
-      }
-      this._ensureRaf();
-      return;
+    if (this.flyingFlips.length || this.interactiveFlip) {
+      this._refreshPendingSnapshots();
     }
 
-    // Spring-damped 0.22 FlipHTML5 tracking for hover, drag, and fallback release
-    const lerp = 0.22;
-    const dx = f.target.x - f.coord.x;
-    const dy = f.target.y - f.coord.y;
-    const nx = f.coord.x + dx * lerp;
-    const ny = f.coord.y + dy * lerp;
+    // Step all concurrent cascading animated flips independently (continuous dt integration)
+    if (this.flyingFlips.length) {
+      const finished = [];
+      for (const f of this.flyingFlips) {
+        f.elapsedMs += dt;
+        let activeDt = dt;
+        if (f.delayMs > 0) {
+          const used = Math.min(f.delayMs, dt);
+          f.delayMs -= used;
+          activeDt = dt - used;
+        }
+        if (activeDt > 0) {
+          f.progress = Math.min(1, f.progress + activeDt * f.rate);
+        }
 
-    if (f.mode === 'fallback' && Math.hypot(dx, dy) < 1.5) {
-      this._cancelActiveFlipImmediate();
-      return;
+        const ease = f.arcMode ? easeInOutSine(f.progress) : easeOutSine(f.progress);
+        const nx = f.animStartX + (f.animToX - f.animStartX) * ease;
+        let ny = f.animStartY + (f.animToY - f.animStartY) * ease;
+
+        if (f.arcMode && !f.isHard && !f.reversed) {
+          const arc = Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
+          ny = this.pageH - 0.06 * arc;
+        }
+
+        this._applyFlipFrame(f, { x: nx, y: ny });
+        if (f.progress >= 1) finished.push(f);
+      }
+
+      if (finished.length) {
+        for (const f of finished) {
+          this._removeFlipDom(f);
+        }
+        const doneSet = new Set(finished);
+        this.flyingFlips = this.flyingFlips.filter((f) => !doneSet.has(f));
+
+        if (this.flyingFlips.length === 0) {
+          this._renderStaticSpread();
+          if (!this.interactiveFlip) {
+            this._setState('read');
+          }
+          this._emit('flip', this.currentPageIndex);
+        } else {
+          // Update the trailing slot to the page just landed underneath remaining flying sheets
+          const lastDone = finished[finished.length - 1];
+          const slots = this._getSpreadSlots(lastDone.nextSpread);
+          if (!this.single) {
+            if (lastDone.dir === 1) this._setSlotPage(this.leftSlot, slots.left);
+            else this._setSlotPage(this.rightSlot, slots.right);
+          }
+        }
+      }
     }
 
-    this._applyFlipFrame({ x: nx, y: ny });
+    // Step interactive corner hover / drag / release fallback spring (0.22 lerp)
+    let keepInteractive = false;
+    const activeI = this.interactiveFlip;
+    if (activeI) {
+      const lerp = 0.22;
+      const dx = activeI.target.x - activeI.coord.x;
+      const dy = activeI.target.y - activeI.coord.y;
+      const nx = activeI.coord.x + dx * lerp;
+      const ny = activeI.coord.y + dy * lerp;
 
-    if (f.mode === 'fallback' || Math.hypot(dx, dy) >= 0.15) {
+      if (activeI.mode === 'fallback' && Math.hypot(dx, dy) < 1.5) {
+        this._cancelInteractiveFlipImmediate();
+      } else {
+        this._applyFlipFrame(activeI, { x: nx, y: ny });
+        keepInteractive = activeI.mode === 'fallback' || Math.hypot(dx, dy) >= 0.15;
+      }
+    }
+
+    if (this.flyingFlips.length > 0 || keepInteractive) {
       this._ensureRaf();
+    } else {
+      this._lastLoopTime = null;
     }
   }
 
-  _commitTurn(nextSpread) {
-    this._stopRaf();
-    this.flipLayer.innerHTML = '';
-    this.activeFlip = null;
-    this.currentSpreadIndex = clamp(nextSpread, 0, Math.max(0, this.spreads.length - 1));
+  _settleAllFlyingFlips() {
+    if (!this.flyingFlips.length) return;
+    for (const f of this.flyingFlips) {
+      this._removeFlipDom(f);
+    }
+    this.flyingFlips = [];
     this._renderStaticSpread();
-    this._setState('read');
+    if (!this.interactiveFlip) {
+      this._setState('read');
+    }
     this._emit('flip', this.currentPageIndex);
   }
 
-  _cancelActiveFlipImmediate() {
+  _cancelInteractiveFlipImmediate() {
+    if (!this.interactiveFlip) return;
+    this._removeFlipDom(this.interactiveFlip);
+    this.interactiveFlip = null;
+    if (!this.flyingFlips.length) {
+      this._renderStaticSpread();
+      this._setState('read');
+    }
+  }
+
+  _cancelAllFlipsImmediate() {
     this._stopRaf();
     this.flipLayer.innerHTML = '';
-    this.activeFlip = null;
-    if (this.leftSlot) this.leftSlot.style.visibility = this._getSpreadSlots(this.currentSpreadIndex).left !== null ? 'visible' : 'hidden';
-    if (this.rightSlot) this.rightSlot.style.visibility = this._getSpreadSlots(this.currentSpreadIndex).right !== null ? 'visible' : 'hidden';
+    this.interactiveFlip = null;
+    this.flyingFlips = [];
+    this._renderStaticSpread();
     this._setState('read');
   }
 
   /* ---------- Public Navigation API ---------- */
   turnToPage(pageIdx) {
-    this._cancelActiveFlipImmediate();
+    this._cancelAllFlipsImmediate();
     const targetSpread = this._findSpreadByPage(clamp(pageIdx, 0, Math.max(0, this.pageNodes.length - 1)));
     this.currentSpreadIndex = targetSpread;
     this._renderStaticSpread();
@@ -965,66 +1095,163 @@ export class FlipBookEngine {
   }
 
   turnToNextPage() {
+    this._settleAllFlyingFlips();
     if (this.currentSpreadIndex < this.spreads.length - 1) {
-      this._cancelActiveFlipImmediate();
-      this._emit('flipStart', { from: this.currentPageIndex, side: 'right' });
+      this._cancelInteractiveFlipImmediate();
+      const fromPage = this.currentPageIndex;
       this.currentSpreadIndex++;
       this._renderStaticSpread();
+      this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: 'right' });
       this._emit('flip', this.currentPageIndex);
     }
   }
 
   turnToPrevPage() {
+    this._settleAllFlyingFlips();
     if (this.currentSpreadIndex > 0) {
-      this._cancelActiveFlipImmediate();
-      this._emit('flipStart', { from: this.currentPageIndex, side: 'left' });
+      this._cancelInteractiveFlipImmediate();
+      const fromPage = this.currentPageIndex;
       this.currentSpreadIndex--;
       this._renderStaticSpread();
+      this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: 'left' });
       this._emit('flip', this.currentPageIndex);
     }
   }
 
-  flipNext(corner = 'bottom') {
-    if (this.currentSpreadIndex >= this.spreads.length - 1) return;
-    if (this.activeFlip) this._cancelActiveFlipImmediate();
+  _startSerialFlip(dir, corner = 'bottom') {
+    const side = dir === 1 ? 'right' : 'left';
+    this._cancelInteractiveFlipImmediate();
+
+    // Smoothly reverse a single opposite mid-flight sheet instead of snapping back
+    if (this.flyingFlips.some((f) => f.dir !== dir || f.reversed)) {
+      if (this.flyingFlips.length === 1 && !this.flyingFlips[0].reversed && this.flyingFlips[0].progress < 0.72) {
+        const rev = this.flyingFlips[0];
+        const fromPage = this.currentPageIndex;
+        const targetSpread = rev.prevSpread;
+        rev.reversed = true;
+        rev.dir = dir;
+        rev.prevSpread = this.currentSpreadIndex;
+        rev.nextSpread = targetSpread;
+        rev.animStartX = rev.coord.x;
+        rev.animStartY = rev.coord.y;
+        rev.animToX = rev.from.x;
+        rev.animToY = rev.from.y;
+        rev.arcMode = false;
+        rev.delayMs = 0;
+        rev.progress = 0;
+        const backFrac = clamp(Math.abs(rev.animToX - rev.coord.x) / (2 * this.pageW), 0.18, 1);
+        const dur = Math.max(150, this.settings.flippingTime * backFrac);
+        rev.rate = 1 / dur;
+        rev.baseRate = rev.rate;
+        this.currentSpreadIndex = targetSpread;
+        this.currentPageIndex = (this.spreads[targetSpread] || [0])[0];
+        this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side, reversed: true });
+        this._setState('flipping');
+        this._ensureRaf();
+        return;
+      }
+      this._settleAllFlyingFlips();
+    }
+
+    const prevSpread = this.currentSpreadIndex;
+    const nextSpread = prevSpread + dir;
+    if (nextSpread < 0 || nextSpread >= this.spreads.length) return;
+
+    // Bound simultaneous active DOM flip sheets cleanly while advancing at full speed
+    if (this.flyingFlips.length >= 6) {
+      const oldest = this.flyingFlips.shift();
+      this._removeFlipDom(oldest);
+      if (!this.single) {
+        const landedSlots = this._getSpreadSlots(oldest.nextSpread);
+        if (oldest.dir === 1) this._setSlotPage(this.leftSlot, landedSlots.left);
+        else this._setSlotPage(this.rightSlot, landedSlots.right);
+      }
+    }
+
+    let delayMs = 0;
+    const isCascading = this.flyingFlips.length > 0;
+    if (isCascading) {
+      const newest = this.flyingFlips[this.flyingFlips.length - 1];
+      const minGap = 68;
+      delayMs = newest.delayMs > 0 ? newest.delayMs + minGap : Math.max(0, minGap - newest.elapsedMs);
+      for (const old of this.flyingFlips) {
+        old.rate = Math.max(old.rate, (old.baseRate || old.rate) * 1.38);
+      }
+    }
+
+    const fromPage = this.currentPageIndex;
+    this.currentSpreadIndex = nextSpread;
+    this.currentPageIndex = (this.spreads[nextSpread] || [0])[0];
+
     const y = corner === 'top' ? 12 : this.pageH - 12;
-    const startBook = { x: this.single ? this.pageW - 2 : this.pageW * 2 - 2, y };
-    if (!this._beginInteractiveTurn('right', startBook, 'animate')) return;
-    const f = this.activeFlip;
-    f.animStartX = this.pageW;
-    f.animStartY = y;
-    f.animToX = -this.pageW;
-    f.animToY = this.pageH;
-    f.animStartTime = performance.now();
-    f.animDuration = this.settings.flippingTime;
-    f.arcMode = !f.isHard;
-    this._emit('flipStart', { from: this.currentPageIndex, side: 'right' });
+    const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
+    const targetX = side === 'right' ? -this.pageW : this.pageW;
+    const fromPoint = { x: startX, y };
+
+    const isHard = this._isHardSpreadStep(prevSpread, nextSpread, side);
+    const { fromIdx, toIdx, underIdx } = this._getFlipIndices(prevSpread, nextSpread, side);
+    const prevSlots = this._getSpreadSlots(prevSpread);
+    const nextSlots = this._getSpreadSlots(nextSpread);
+
+    // Keep trailing slot on the first departing spread until oldest leaf lands; reveal leading slot immediately
+    if (!this.single) {
+      if (!isCascading) {
+        if (dir === 1) this._setSlotPage(this.leftSlot, prevSlots.left);
+        else this._setSlotPage(this.rightSlot, prevSlots.right);
+      }
+      if (dir === 1) this._setSlotPage(this.rightSlot, nextSlots.right);
+      else this._setSlotPage(this.leftSlot, nextSlots.left);
+    } else {
+      this._setSlotPage(this.rightSlot, nextSlots.right);
+    }
+
+    const seq = ++this.flipSeq;
+    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: false, seq });
+
+    const baseDuration = isCascading ? Math.max(220, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
+    const baseRate = 1 / baseDuration;
+
+    const flipObj = {
+      ...dom,
+      side,
+      dir,
+      prevSpread,
+      nextSpread,
+      mode: 'animate',
+      from: fromPoint,
+      coord: { ...fromPoint },
+      animStartX: startX,
+      animStartY: y,
+      animToX: targetX,
+      animToY: this.pageH,
+      progress: 0,
+      delayMs,
+      elapsedMs: 0,
+      rate: baseRate,
+      baseRate,
+      arcMode: !isHard,
+      reversed: false,
+    };
+
+    this.flyingFlips.push(flipObj);
+    this._applyFlipFrame(flipObj, fromPoint);
+    this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side });
     this._setState('flipping');
     this._ensureRaf();
   }
 
+  flipNext(corner = 'bottom') {
+    this._startSerialFlip(1, corner);
+  }
+
   flipPrev(corner = 'bottom') {
-    if (this.currentSpreadIndex <= 0) return;
-    if (this.activeFlip) this._cancelActiveFlipImmediate();
-    const y = corner === 'top' ? 12 : this.pageH - 12;
-    const startBook = { x: 2, y };
-    if (!this._beginInteractiveTurn('left', startBook, 'animate')) return;
-    const f = this.activeFlip;
-    f.animStartX = -this.pageW;
-    f.animStartY = y;
-    f.animToX = this.pageW;
-    f.animToY = this.pageH;
-    f.animStartTime = performance.now();
-    f.animDuration = this.settings.flippingTime;
-    f.arcMode = !f.isHard;
-    this._emit('flipStart', { from: this.currentPageIndex, side: 'left' });
-    this._setState('flipping');
-    this._ensureRaf();
+    this._startSerialFlip(-1, corner);
   }
 
   flip(pageIdx, corner = 'bottom') {
     const targetSpread = this._findSpreadByPage(clamp(pageIdx, 0, Math.max(0, this.pageNodes.length - 1)));
     if (targetSpread === this.currentSpreadIndex) return;
+    this._settleAllFlyingFlips();
     if (targetSpread > this.currentSpreadIndex) {
       this.currentSpreadIndex = targetSpread - 1;
       this.flipNext(corner);
