@@ -20,17 +20,28 @@
         </button>
       </div>
       <div class="top-bar-right" id="topBarRight" hidden>
-        <button id="btnBookmarkPage" class="icon-chip" title="Bookmark Current Spread (B)" aria-label="Bookmark page">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
-          </svg>
-        </button>
         <div id="zoomPill" class="zoom-pill" hidden>
           <button id="btnZoomOut" title="Zoom Out (-)">−</button>
           <span id="zoomLabel">100%</span>
           <button id="btnZoomInPill" title="Zoom In (+)">+</button>
           <button id="btnZoomReset" title="Reset Zoom (0)">Reset</button>
         </div>
+        <button id="btnDarkRead" class="icon-chip" title="Dark Mode Reading (D)" aria-label="Toggle dark reading mode">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/>
+          </svg>
+        </button>
+        <button id="btnHighlightsTop" class="icon-chip" title="Highlights & Notes (H)" aria-label="Open highlights and notes">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m9 11-6 6v3h9l3-3"/>
+            <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
+          </svg>
+        </button>
+        <button id="btnBookmarkPage" class="icon-chip" title="Bookmark Current Page (B)" aria-label="Bookmark page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -69,7 +80,7 @@
         <div class="drop-box">Drop PDF book to open</div>
       </div>
 
-      <!-- Zoom/Pan Container -->
+      <!-- Zoom/Pan Container (Book Flip Mode) -->
       <div class="zoom-viewport" id="zoomViewport">
         <div class="book-center-shift" id="bookCenterShift">
           <div class="book-shell" id="bookShell" hidden>
@@ -80,6 +91,11 @@
             <div class="book-spine-shadow" id="bookSpineShadow"></div>
           </div>
         </div>
+      </div>
+
+      <!-- Continuous Scroll Container -->
+      <div class="scroll-viewport" id="scrollViewport" hidden>
+        <div class="scroll-pages" id="scrollPages"></div>
       </div>
 
       <!-- Mid-height side chevron arrows (FlipHTML5 style) -->
@@ -144,6 +160,10 @@
         <span class="menu-val" id="valPageNotesCount">0</span>
       </button>
       <div class="menu-divider"></div>
+      <button class="menu-item" id="menuScrollMode">
+        <span>Reading Mode</span>
+        <span class="menu-val" id="valScrollMode">Book Flip</span>
+      </button>
       <button class="menu-item" id="menuPageMode">
         <span>Page View</span>
         <span class="menu-val" id="valPageMode">Double</span>
@@ -246,10 +266,9 @@
         </div>
         <div class="hl-filter-bar">
           <div id="hlPageChips" class="hl-page-chips"></div>
-          <label class="hl-page-jump" title="Filter highlights by specific page number">
-            <span>Pg</span>
-            <input id="hlFilterPageInput" type="number" min="1" step="1" placeholder="All" aria-label="Specific page number" />
-          </label>
+          <select id="hlPageSelect" class="hl-page-select" aria-label="Select highlighted page">
+            <option value="">All Pages</option>
+          </select>
         </div>
         <div id="highlightsList" class="bookmarks-list"></div>
         <div id="hlNotesSheet" class="hl-notes-sheet" hidden></div>

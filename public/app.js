@@ -14,6 +14,8 @@ const els = {
   topBarRight: document.getElementById('topBarRight'),
   btnOpenTop: document.getElementById('btnOpenTop'),
   bookTitleLabel: document.getElementById('bookTitleLabel'),
+  btnDarkRead: document.getElementById('btnDarkRead'),
+  btnHighlightsTop: document.getElementById('btnHighlightsTop'),
   btnBookmarkPage: document.getElementById('btnBookmarkPage'),
   zoomPill: document.getElementById('zoomPill'),
   zoomLabel: document.getElementById('zoomLabel'),
@@ -31,6 +33,8 @@ const els = {
   dropOverlay: document.getElementById('dropOverlay'),
 
   zoomViewport: document.getElementById('zoomViewport'),
+  scrollViewport: document.getElementById('scrollViewport'),
+  scrollPages: document.getElementById('scrollPages'),
   bookCenterShift: document.getElementById('bookCenterShift'),
   bookShell: document.getElementById('bookShell'),
   bookDropShadow: document.getElementById('bookDropShadow'),
@@ -49,6 +53,8 @@ const els = {
   menuLibrary: document.getElementById('menuLibrary'),
   menuPageNotes: document.getElementById('menuPageNotes'),
   valPageNotesCount: document.getElementById('valPageNotesCount'),
+  menuScrollMode: document.getElementById('menuScrollMode'),
+  valScrollMode: document.getElementById('valScrollMode'),
   menuPageMode: document.getElementById('menuPageMode'),
   valPageMode: document.getElementById('valPageMode'),
   menuHardCover: document.getElementById('menuHardCover'),
@@ -79,7 +85,7 @@ const els = {
   btnClearPageHighlights: document.getElementById('btnClearPageHighlights'),
   btnClearHighlights: document.getElementById('btnClearHighlights'),
   hlPageChips: document.getElementById('hlPageChips'),
-  hlFilterPageInput: document.getElementById('hlFilterPageInput'),
+  hlPageSelect: document.getElementById('hlPageSelect'),
   highlightsList: document.getElementById('highlightsList'),
   hlNotesSheet: document.getElementById('hlNotesSheet'),
   hlPopover: document.getElementById('hlPopover'),
@@ -123,9 +129,11 @@ const state = {
   pageW: 400,
   pageH: 550,
   orientation: 'landscape', // 'landscape' | 'portrait'
+  scrollMode: 'flip', // 'flip' | 'scroll'
   pageMode: 'auto', // 'auto' | 'double' | 'single'
   showCover: true,
   clickMode: 'smart', // 'smart' | 'anywhere'
+  readDark: false,
   soundEnabled: true,
   soundPreset: DEFAULT_SOUND_PRESET,
   theme: 'charcoal',
@@ -155,6 +163,8 @@ const state = {
 
   thumbObserver: null,
   thumbRendered: new Set(),
+  scrollObserver: null,
+  scrollSyncTimer: null,
   zoomRerenderTimer: null,
   persistTimer: null,
   resizeTimer: null,
@@ -192,7 +202,7 @@ function isEffectiveSingleMode() {
 function getVisibleIndices(idx = state.currentIndex) {
   if (!state.totalPages) return [];
   const i = clamp(idx, 0, state.totalPages - 1);
-  if (isEffectiveSingleMode() || state.orientation === 'portrait') {
+  if (state.scrollMode === 'scroll' || isEffectiveSingleMode() || state.orientation === 'portrait') {
     return [i];
   }
   if (state.showCover) {
@@ -227,6 +237,7 @@ async function fetchLibrary() {
 
 function applySavedSettings(settings) {
   if (settings.theme) setTheme(settings.theme, false);
+  if (typeof settings.readDark === 'boolean') setReadDark(settings.readDark, false);
   if (settings.soundPreset) {
     state.soundPreset = settings.soundPreset;
   }
@@ -234,6 +245,9 @@ function applySavedSettings(settings) {
     state.soundEnabled = settings.soundEnabled;
   }
   updateSoundUi();
+  if (settings.scrollMode === 'scroll' || settings.scrollMode === 'flip') {
+    state.scrollMode = settings.scrollMode;
+  }
   if (settings.pageMode) state.pageMode = settings.pageMode;
   if (typeof settings.showCover === 'boolean') state.showCover = settings.showCover;
   if (settings.clickMode) state.clickMode = settings.clickMode;
@@ -246,6 +260,8 @@ function schedulePersistState() {
     const payload = {
       settings: {
         theme: state.theme,
+        readDark: state.readDark,
+        scrollMode: state.scrollMode,
         soundEnabled: state.soundEnabled,
         soundPreset: state.soundPreset,
         pageMode: state.pageMode,
@@ -281,13 +297,13 @@ function schedulePersistState() {
 }
 
 /* ---------- Book Sizing & PageFlip Lifecycle ---------- */
-function computeBookGeometry() {
+function computeBookGeometry(forceSingle = false) {
   const stageW = Math.max(320, els.stage.clientWidth);
   const stageH = Math.max(260, els.stage.clientHeight);
-  const single = isEffectiveSingleMode();
+  const single = forceSingle || isEffectiveSingleMode();
 
-  const horizReserve = single ? 140 : 190;
-  const vertReserve = 104;
+  const horizReserve = forceSingle ? 96 : single ? 140 : 190;
+  const vertReserve = forceSingle ? 86 : 104;
   const maxBookW = Math.max(240, stageW - horizReserve);
   const maxBookH = Math.max(200, stageH - vertReserve);
 
@@ -319,11 +335,18 @@ function disposeBook() {
     state.thumbObserver.disconnect();
     state.thumbObserver = null;
   }
+  if (state.scrollObserver) {
+    state.scrollObserver.disconnect();
+    state.scrollObserver = null;
+  }
   if (state.pageFlip) {
     try { state.pageFlip.destroy(); } catch {}
     state.pageFlip = null;
   }
   els.bookContainer.innerHTML = '';
+  els.scrollPages.innerHTML = '';
+  els.scrollViewport.hidden = true;
+  document.body.classList.remove('mode-scroll');
   els.thumbScroller.innerHTML = '';
   els.tocList.innerHTML = '';
   els.searchResults.innerHTML = '';
@@ -359,6 +382,86 @@ function buildPageElements() {
   return frag;
 }
 
+function initReaderView(startIndex = 0) {
+  if (!state.pdfDoc) return;
+  if (state.scrollMode === 'scroll') {
+    initScrollView(startIndex);
+  } else {
+    initPageFlip(startIndex);
+  }
+}
+
+function initScrollView(startIndex = 0) {
+  if (!state.pdfDoc) return;
+
+  for (const entry of state.renderedMap.values()) {
+    try { entry.renderTask?.cancel(); } catch {}
+  }
+  state.renderedMap.clear();
+  if (state.scrollObserver) {
+    state.scrollObserver.disconnect();
+    state.scrollObserver = null;
+  }
+  if (state.pageFlip) {
+    try { state.pageFlip.destroy(); } catch {}
+    state.pageFlip = null;
+  }
+
+  els.bookContainer.innerHTML = '';
+  els.bookShell.hidden = true;
+  els.zoomViewport.hidden = true;
+  document.body.classList.add('mode-scroll');
+
+  computeBookGeometry(true);
+  state.committedZoom = state.zoom;
+  const sw = Math.max(120, Math.round(state.pageW * state.zoom));
+  const sh = Math.max(160, Math.round(state.pageH * state.zoom));
+
+  buildPageElements();
+  els.scrollPages.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < state.pageNodes.length; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'scroll-page-wrap';
+    wrap.dataset.pageIndex = String(i);
+    wrap.style.width = `${sw}px`;
+    wrap.style.height = `${sh}px`;
+    wrap.appendChild(state.pageNodes[i]);
+    frag.appendChild(wrap);
+  }
+  els.scrollPages.appendChild(frag);
+  els.scrollViewport.hidden = false;
+
+  els.welcomeOverlay.hidden = true;
+  els.topBarRight.hidden = false;
+  els.btnPrevArrow.hidden = false;
+  els.btnNextArrow.hidden = false;
+  els.btnFirstPage.hidden = false;
+  els.btnLastPage.hidden = false;
+
+  state.scrollObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const idx = Number(entry.target.dataset.pageIndex);
+      if (Number.isFinite(idx)) {
+        renderPageNode(idx);
+      }
+    }
+  }, { root: els.scrollViewport, rootMargin: '650px 0px' });
+
+  for (const wrap of els.scrollPages.children) {
+    state.scrollObserver.observe(wrap);
+  }
+
+  const safeStart = clamp(startIndex, 0, Math.max(0, state.totalPages - 1));
+  state.currentIndex = safeStart;
+  const targetWrap = els.scrollPages.children[safeStart];
+  if (targetWrap) {
+    els.scrollViewport.scrollTop = Math.max(0, targetWrap.offsetTop - 54);
+  }
+  onSpreadChanged(false, 4);
+}
+
 function initPageFlip(startIndex = 0) {
   if (!state.pdfDoc) return;
 
@@ -366,6 +469,14 @@ function initPageFlip(startIndex = 0) {
     try { entry.renderTask?.cancel(); } catch {}
   }
   state.renderedMap.clear();
+  if (state.scrollObserver) {
+    state.scrollObserver.disconnect();
+    state.scrollObserver = null;
+  }
+  els.scrollPages.innerHTML = '';
+  els.scrollViewport.hidden = true;
+  els.zoomViewport.hidden = false;
+  document.body.classList.remove('mode-scroll');
 
   if (state.pageFlip) {
     try { state.pageFlip.destroy(); } catch {}
@@ -764,18 +875,39 @@ function onSpreadChanged(persist = true, renderRadius = 5) {
 
 /* ---------- Navigation Actions ---------- */
 function goPrev() {
+  if (state.scrollMode === 'scroll') {
+    if (state.totalPages > 0) jumpToPage(Math.max(1, state.currentIndex), true);
+    return;
+  }
   if (!state.pageFlip) return;
   state.pageFlip.flipPrev('bottom');
 }
 
 function goNext() {
+  if (state.scrollMode === 'scroll') {
+    if (state.totalPages > 0) jumpToPage(Math.min(state.totalPages, state.currentIndex + 2), true);
+    return;
+  }
   if (!state.pageFlip) return;
   state.pageFlip.flipNext('bottom');
 }
 
 function jumpToPage(oneBasedPage, animate = false) {
-  if (!state.pageFlip || !state.totalPages) return;
+  if (!state.totalPages) return;
   const targetIdx = clamp(Math.floor(oneBasedPage) - 1, 0, state.totalPages - 1);
+  if (state.scrollMode === 'scroll') {
+    const wrap = els.scrollPages.children[targetIdx];
+    if (wrap) {
+      els.scrollViewport.scrollTo({
+        top: Math.max(0, wrap.offsetTop - 54),
+        behavior: animate ? 'smooth' : 'auto',
+      });
+    }
+    state.currentIndex = targetIdx;
+    onSpreadChanged(true, 4);
+    return;
+  }
+  if (!state.pageFlip) return;
   if (animate && Math.abs(targetIdx - state.currentIndex) <= 2) {
     state.pageFlip.flip(targetIdx, 'bottom');
   } else {
@@ -835,9 +967,63 @@ function applyZoomTransform(rerender = true, immediate = false) {
 function setZoom(nextZoom, immediate = false, anchor = null) {
   const prevZoom = state.zoom || 1;
   const z = clamp(Number(nextZoom) || 1, 1, 3.5);
-  state.zoom = z;
-  if (z <= 1.01) {
-    state.zoom = 1;
+  state.zoom = z <= 1.01 ? 1 : z;
+
+  if (state.scrollMode === 'scroll') {
+    hideHighlightPopover();
+    const zoomed = state.zoom > 1.01;
+    els.zoomPill.hidden = !zoomed;
+    els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+
+    if (state.pdfDoc && els.scrollPages.children.length) {
+      const sv = els.scrollViewport;
+      const svRect = sv.getBoundingClientRect();
+      const targetX = anchor && Number.isFinite(anchor.clientX) ? anchor.clientX : svRect.left + svRect.width / 2;
+      const targetY = anchor && Number.isFinite(anchor.clientY) ? anchor.clientY : svRect.top + svRect.height / 2;
+      const vpX = targetX - svRect.left;
+      const vpY = targetY - svRect.top;
+
+      let anchorWrap = els.scrollPages.children[state.currentIndex] || els.scrollPages.children[0];
+      let bestDist = Infinity;
+      const approxIdx = clamp(state.currentIndex, 0, els.scrollPages.children.length - 1);
+      const lo = Math.max(0, approxIdx - 6);
+      const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 6);
+      for (let i = lo; i <= hi; i++) {
+        const w = els.scrollPages.children[i];
+        const r = w.getBoundingClientRect();
+        const dist = targetY < r.top ? r.top - targetY : targetY > r.bottom ? targetY - r.bottom : 0;
+        if (dist < bestDist) {
+          bestDist = dist;
+          anchorWrap = w;
+        }
+      }
+
+      const prevR = anchorWrap.getBoundingClientRect();
+      const relX = prevR.width > 0 ? (targetX - prevR.left) / prevR.width : 0.5;
+      const relY = prevR.height > 0 ? (targetY - prevR.top) / prevR.height : 0.5;
+
+      const sw = Math.max(120, Math.round(state.pageW * state.zoom));
+      const sh = Math.max(160, Math.round(state.pageH * state.zoom));
+      for (const wrap of els.scrollPages.children) {
+        wrap.style.width = `${sw}px`;
+        wrap.style.height = `${sh}px`;
+      }
+
+      sv.scrollLeft = Math.max(0, anchorWrap.offsetLeft + relX * sw - vpX);
+      sv.scrollTop = Math.max(0, anchorWrap.offsetTop + relY * sh - vpY);
+
+      clearTimeout(state.zoomRerenderTimer);
+      const commitScroll = () => {
+        state.committedZoom = state.zoom;
+        queueNearbyRenders(state.currentIndex, 3);
+      };
+      if (immediate) commitScroll();
+      else state.zoomRerenderTimer = setTimeout(commitScroll, 85);
+    }
+    return;
+  }
+
+  if (state.zoom === 1) {
     state.panX = 0;
     state.panY = 0;
     if (!state.pdfDoc) state.committedZoom = 1;
@@ -1283,11 +1469,14 @@ function updateHighlightsUi() {
     els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
     els.btnToggleNotesView.textContent = state.hlNotesView ? 'List View' : 'Notes View';
   }
-  if (els.hlFilterPageInput && document.activeElement !== els.hlFilterPageInput) {
-    els.hlFilterPageInput.value = state.hlFilterMode === 'page' && state.hlFilterPage ? String(state.hlFilterPage) : '';
+  if (els.btnHighlightsTop) {
+    const spreadHasHl = visiblePages.some((p) => perPageCounts.has(p));
+    els.btnHighlightsTop.classList.toggle('has-hl', spreadHasHl);
+    const hlTabActive = !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="highlights"]')?.classList.contains('active');
+    els.btnHighlightsTop.classList.toggle('active', !!hlTabActive);
   }
 
-  // Page filter chips (All / This Page / each page that has highlights)
+  // Compact filter chips (All / This Page) + dropdown select for specific highlighted pages
   if (els.hlPageChips) {
     els.hlPageChips.innerHTML = '';
     const addChip = (label, active, onClick) => {
@@ -1309,16 +1498,27 @@ function updateHighlightsUi() {
       state.hlFilterPage = null;
       updateHighlightsUi();
     });
+  }
 
+  if (els.hlPageSelect) {
     const pages = Array.from(perPageCounts.keys()).sort((a, b) => a - b);
+    els.hlPageSelect.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.textContent = pages.length ? `Filter by page (${pages.length})` : 'No pages highlighted';
+    els.hlPageSelect.appendChild(defaultOpt);
+
     for (const p of pages) {
-      addChip(`Pg ${p} (${perPageCounts.get(p)})`, state.hlFilterMode === 'page' && state.hlFilterPage === p, () => {
-        state.hlFilterMode = 'page';
-        state.hlFilterPage = p;
-        jumpToPage(p, false);
-        updateHighlightsUi();
-      });
+      const n = perPageCounts.get(p);
+      const opt = document.createElement('option');
+      opt.value = String(p);
+      opt.textContent = `Page ${p} (${n} ${n === 1 ? 'note' : 'notes'})`;
+      els.hlPageSelect.appendChild(opt);
     }
+    els.hlPageSelect.value = state.hlFilterMode === 'page' && state.hlFilterPage && perPageCounts.has(state.hlFilterPage)
+      ? String(state.hlFilterPage)
+      : '';
+    els.hlPageSelect.disabled = pages.length === 0;
   }
 
   els.highlightsList.hidden = !!state.hlNotesView;
@@ -1470,9 +1670,16 @@ function extractSelectionHighlightDraft() {
     return null;
   }
 
-  const visibleIndices = getVisibleIndices();
+  const candidateIndices = new Set(getVisibleIndices());
+  const startPageIdx = Number(startEl.closest('.fb-page')?.dataset.pageIndex);
+  const endPageIdx = Number(endEl.closest('.fb-page')?.dataset.pageIndex);
+  if (Number.isInteger(startPageIdx) && Number.isInteger(endPageIdx)) {
+    const lo = clamp(Math.min(startPageIdx, endPageIdx), 0, Math.max(0, state.totalPages - 1));
+    const hi = clamp(Math.max(startPageIdx, endPageIdx), 0, Math.max(0, state.totalPages - 1));
+    for (let idx = lo; idx <= hi; idx++) candidateIndices.add(idx);
+  }
   const pageEntries = [];
-  for (const idx of visibleIndices) {
+  for (const idx of candidateIndices) {
     const node = state.pageNodes[idx];
     if (!node) continue;
     const pageRect = node.getBoundingClientRect();
@@ -1728,7 +1935,7 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     document.title = `${title} — FlipBook Reader`;
 
     const startIdx = clamp((targetPage || 1) - 1, 0, Math.max(0, state.totalPages - 1));
-    initPageFlip(startIdx);
+    initReaderView(startIdx);
     buildOutline();
     if (!els.thumbnailsStrip.hidden) buildThumbnailsStrip();
     updateBookmarkUi();
@@ -1818,10 +2025,20 @@ function renderLibraryLists() {
 /* ---------- UI Modes & Theme ---------- */
 function setTheme(theme, persist = true) {
   state.theme = theme;
-  document.body.className = `theme-${theme}`;
+  document.body.classList.remove('theme-charcoal', 'theme-slate', 'theme-obsidian', 'theme-warm');
+  document.body.classList.add(`theme-${theme}`);
   document.querySelectorAll('.theme-dot').forEach((d) => {
     d.classList.toggle('active', d.dataset.theme === theme);
   });
+  if (persist) schedulePersistState();
+}
+
+function setReadDark(enabled, persist = true) {
+  state.readDark = !!enabled;
+  document.body.classList.toggle('read-dark', state.readDark);
+  if (els.btnDarkRead) {
+    els.btnDarkRead.classList.toggle('active', state.readDark);
+  }
   if (persist) schedulePersistState();
 }
 
@@ -1851,6 +2068,9 @@ function updateSoundUi() {
 }
 
 function updateMenuValues() {
+  if (els.valScrollMode) {
+    els.valScrollMode.textContent = state.scrollMode === 'scroll' ? 'Continuous Scroll' : 'Book Flip';
+  }
   els.valPageMode.textContent = state.pageMode === 'single' ? 'Single' : state.pageMode === 'double' ? 'Double' : 'Auto (Double)';
   els.valHardCover.textContent = state.showCover ? 'On' : 'Off';
   els.valClickMode.textContent = state.clickMode === 'smart' ? 'Corner + Select' : 'Click Anywhere';
@@ -2034,19 +2254,38 @@ function wireEvents() {
   els.btnDrawer.addEventListener('click', () => {
     els.sideDrawer.hidden = !els.sideDrawer.hidden;
     els.btnDrawer.classList.toggle('active', !els.sideDrawer.hidden);
+    updateHighlightsUi();
   });
   els.btnCloseDrawer.addEventListener('click', () => {
     els.sideDrawer.hidden = true;
     els.btnDrawer.classList.remove('active');
+    updateHighlightsUi();
   });
 
   document.querySelectorAll('.drawer-tab').forEach((tab) => {
-    tab.addEventListener('click', () => openDrawerTab(tab.dataset.tab));
+    tab.addEventListener('click', () => {
+      openDrawerTab(tab.dataset.tab);
+      updateHighlightsUi();
+    });
   });
 
   els.searchForm.addEventListener('submit', (e) => {
     e.preventDefault();
     runSearch(els.searchInput.value);
+  });
+
+  els.btnDarkRead?.addEventListener('click', () => {
+    setReadDark(!state.readDark, true);
+  });
+  els.btnHighlightsTop?.addEventListener('click', () => {
+    const isHlActive = !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="highlights"]')?.classList.contains('active');
+    if (isHlActive) {
+      els.sideDrawer.hidden = true;
+      els.btnDrawer.classList.remove('active');
+      updateHighlightsUi();
+    } else {
+      openDrawerTab('highlights');
+    }
   });
 
   els.btnBookmarkPage.addEventListener('click', toggleBookmarkCurrent);
@@ -2077,23 +2316,29 @@ function wireEvents() {
     state.hlNotesView = true;
     openDrawerTab('highlights');
   });
+  els.menuScrollMode?.addEventListener('click', () => {
+    state.scrollMode = state.scrollMode === 'scroll' ? 'flip' : 'scroll';
+    updateMenuValues();
+    schedulePersistState();
+    if (state.pdfDoc) initReaderView(state.currentIndex);
+  });
   els.menuPageMode.addEventListener('click', () => {
     state.pageMode = state.pageMode === 'auto' ? 'single' : state.pageMode === 'single' ? 'double' : 'auto';
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initPageFlip(state.currentIndex);
+    if (state.pdfDoc) initReaderView(state.currentIndex);
   });
   els.menuHardCover.addEventListener('click', () => {
     state.showCover = !state.showCover;
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initPageFlip(state.currentIndex);
+    if (state.pdfDoc) initReaderView(state.currentIndex);
   });
   els.menuClickMode.addEventListener('click', () => {
     state.clickMode = state.clickMode === 'smart' ? 'anywhere' : 'smart';
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initPageFlip(state.currentIndex);
+    if (state.pdfDoc) initReaderView(state.currentIndex);
   });
   els.menuAutoFlip.addEventListener('click', toggleAutoFlip);
 
@@ -2205,8 +2450,8 @@ function wireEvents() {
       setTimeout(() => { els.btnCopyPageNotes.textContent = 'Copy'; }, 1200);
     } catch {}
   });
-  els.hlFilterPageInput?.addEventListener('input', () => {
-    const raw = els.hlFilterPageInput.value.trim();
+  els.hlPageSelect?.addEventListener('change', () => {
+    const raw = els.hlPageSelect.value.trim();
     if (!raw) {
       state.hlFilterMode = 'all';
       state.hlFilterPage = null;
@@ -2217,6 +2462,7 @@ function wireEvents() {
     if (Number.isInteger(p) && p >= 1) {
       state.hlFilterMode = 'page';
       state.hlFilterPage = clamp(p, 1, Math.max(1, state.totalPages || p));
+      jumpToPage(state.hlFilterPage, false);
       updateHighlightsUi();
     }
   });
@@ -2238,8 +2484,26 @@ function wireEvents() {
     schedulePersistState();
   });
 
+  // Scroll tracking & on-demand buffering in Continuous Scroll mode
+  els.scrollViewport.addEventListener('scroll', () => {
+    if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
+    hideHighlightPopover();
+    const sv = els.scrollViewport;
+    const itemStride = Math.round(state.pageH * state.zoom) + 18;
+    const centerOffset = sv.scrollTop + sv.clientHeight * 0.38 - 54;
+    const estIdx = clamp(Math.floor(centerOffset / Math.max(40, itemStride)), 0, state.totalPages - 1);
+    if (estIdx !== state.currentIndex) {
+      state.currentIndex = estIdx;
+      onSpreadChanged(true, 3);
+    }
+    clearTimeout(state.scrollSyncTimer);
+    state.scrollSyncTimer = setTimeout(() => {
+      queueNearbyRenders(state.currentIndex, 3);
+    }, 90);
+  }, { passive: true });
+
   // Right-click any existing highlight on a page to recolor or delete it cleanly
-  els.bookContainer.addEventListener('contextmenu', (e) => {
+  els.stage.addEventListener('contextmenu', (e) => {
     const pageNode = e.target.closest('.fb-page');
     const hit = pageNode ? findHighlightAtClientPoint(pageNode, e.clientX, e.clientY) : null;
     if (!hit) return;
@@ -2382,8 +2646,16 @@ function wireEvents() {
         break;
       }
       case 'ArrowRight':
-      case 'PageDown':
+      case 'PageDown': {
+        e.preventDefault();
+        const now = performance.now();
+        if (e.repeat && now - (state.lastKeyNavTime || 0) < 105) break;
+        state.lastKeyNavTime = now;
+        goNext();
+        break;
+      }
       case ' ': {
+        if (state.scrollMode === 'scroll') break;
         e.preventDefault();
         const now = performance.now();
         if (e.repeat && now - (state.lastKeyNavTime || 0) < 105) break;
@@ -2398,6 +2670,14 @@ function wireEvents() {
       case 'End':
         e.preventDefault();
         jumpToPage(state.totalPages, false);
+        break;
+      case 'd':
+      case 'D':
+        setReadDark(!state.readDark, true);
+        break;
+      case 'h':
+      case 'H':
+        els.btnHighlightsTop?.click();
         break;
       case 'f':
       case 'F':
@@ -2441,7 +2721,7 @@ function wireEvents() {
     if (!state.pdfDoc) return;
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
-      initPageFlip(state.currentIndex);
+      initReaderView(state.currentIndex);
     }, 180);
   });
 }
