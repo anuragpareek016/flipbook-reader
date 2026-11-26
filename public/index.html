@@ -130,6 +130,10 @@
         <span>Recent Books Library</span>
         <kbd>L</kbd>
       </button>
+      <button class="menu-item" id="menuPageNotes">
+        <span>Highlight Notes</span>
+        <span class="menu-val" id="valPageNotesCount">0</span>
+      </button>
       <div class="menu-divider"></div>
       <button class="menu-item" id="menuPageMode">
         <span>Page View</span>
@@ -222,11 +226,23 @@
       </div>
 
       <div id="paneHighlights" class="drawer-pane">
-        <div class="bookmarks-actions">
+        <div class="bookmarks-actions hl-actions-head">
           <span id="highlightsSummary">0 highlights</span>
-          <button id="btnClearHighlights" class="btn-small" hidden>Clear All</button>
+          <div class="hl-header-btns">
+            <button id="btnToggleNotesView" class="btn-small" title="View highlighted text on page as notes">Notes View</button>
+            <button id="btnCopyPageNotes" class="btn-small" hidden title="Copy displayed notes">Copy</button>
+            <button id="btnClearHighlights" class="btn-small" hidden>Clear All</button>
+          </div>
+        </div>
+        <div class="hl-filter-bar">
+          <div id="hlPageChips" class="hl-page-chips"></div>
+          <label class="hl-page-jump" title="Filter highlights by specific page number">
+            <span>Pg</span>
+            <input id="hlFilterPageInput" type="number" min="1" step="1" placeholder="All" aria-label="Specific page number" />
+          </label>
         </div>
         <div id="highlightsList" class="bookmarks-list"></div>
+        <div id="hlNotesSheet" class="hl-notes-sheet" hidden></div>
       </div>
 
       <div id="paneText" class="drawer-pane">

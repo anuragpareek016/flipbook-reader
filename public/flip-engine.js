@@ -430,15 +430,25 @@ export class FlipBookEngine {
     return { x: bookPos.x - this.pageW, y: bookPos.y };
   }
 
-  isPointInFlipZone(clientX, clientY) {
+  isPointInFlipZone(clientX, clientY, onTextSpan = false) {
     const bp = this._clientToBook(clientX, clientY);
-    return !!this._hitEdgeSide(bp);
+    const side = this._hitEdgeSide(bp);
+    if (!side) return false;
+    if (!onTextSpan) return true;
+    // When clicking directly on a text glyph span, only treat the outermost rim (<= 24px) as a flip grab
+    // so paragraph words near corners/margins remain selectable for highlighting.
+    const totalW = this.single ? this.pageW : this.pageW * 2;
+    const strictRim = Math.min(26, this.pageW * 0.05);
+    return side === 'left' ? bp.x <= strictRim : bp.x >= totalW - strictRim;
   }
 
   _hitEdgeSide(bp) {
     const totalW = this.single ? this.pageW : this.pageW * 2;
     if (bp.y <= 0 || bp.y >= this.pageH) return null;
-    const edgeBand = Math.min(this.pageW * 0.24, Math.max(76, this.pageW * 0.16));
+    const inCornerBand = bp.y < 0.16 * this.pageH || bp.y > 0.84 * this.pageH;
+    const edgeBand = inCornerBand
+      ? Math.min(this.pageW * 0.22, Math.max(68, this.pageW * 0.15))
+      : Math.min(48, Math.max(32, this.pageW * 0.085));
 
     if (this.single) {
       if (bp.x < 0 || bp.x > this.pageW) return null;
@@ -489,7 +499,19 @@ export class FlipBookEngine {
     let tx = clamp(sp.x, -this.pageW, this.pageW);
     if (side === 'right' && tx > fromPoint.x) tx = fromPoint.x;
     if (side === 'left' && tx < fromPoint.x) tx = fromPoint.x;
-    const constrained = constrainToBindingCircles(tx, sp.y, fromPoint.x, fromPoint.y, this.pageH);
+
+    // Near the outer edge (before dragging deeply into the page), bound vertical tilt proportionally
+    // to horizontal pull so clicking or resting at the outer edge never slices the page horizontally.
+    const pull = Math.abs(tx - fromPoint.x);
+    let ty = sp.y;
+    const edgeGuardSpan = Math.min(48, this.pageW * 0.14);
+    if (pull < edgeGuardSpan) {
+      const safeSlope = Math.min(0.65, (this.pageW * 0.72) / Math.max(1, this.pageH));
+      const maxDy = pull * safeSlope;
+      ty = fromPoint.y + clamp(ty - fromPoint.y, -maxDy, maxDy);
+    }
+
+    const constrained = constrainToBindingCircles(tx, ty, fromPoint.x, fromPoint.y, this.pageH);
     return { x: constrained.fx, y: constrained.fy };
   }
 
@@ -514,10 +536,12 @@ export class FlipBookEngine {
       this._settleAllFlyingFlips();
     }
     if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
-      // Grabbed already-curled hover/fallback corner seamlessly -> anchor to actual cursor point
+      // Grabbed already-curled hover/fallback corner cleanly without sudden angle jump
       this.interactiveFlip.mode = 'drag';
-      this.interactiveFlip.from.y = clamp(bp.y + (bp.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
+      this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
       this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, chosenSide);
+      const coordAsBook = this.single ? { ...this.interactiveFlip.coord } : { x: this.interactiveFlip.coord.x + this.pageW, y: this.interactiveFlip.coord.y };
+      this.interactiveFlip.coord = this._clampDragTarget(coordAsBook, this.interactiveFlip.from, chosenSide);
       this._setState('user_fold');
     } else {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
@@ -863,7 +887,7 @@ export class FlipBookEngine {
         ? bookPos.y > this.pageH / 2
           ? this.pageH - 4
           : 4
-        : clamp(bookPos.y + (bookPos.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
+        : clamp(bookPos.y, 0, this.pageH);
     const fromPoint = { x: startX, y: clampedY };
 
     const seq = ++this.flipSeq;

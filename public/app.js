@@ -47,6 +47,8 @@ const els = {
   moreMenu: document.getElementById('moreMenu'),
   menuOpenPdf: document.getElementById('menuOpenPdf'),
   menuLibrary: document.getElementById('menuLibrary'),
+  menuPageNotes: document.getElementById('menuPageNotes'),
+  valPageNotesCount: document.getElementById('valPageNotesCount'),
   menuPageMode: document.getElementById('menuPageMode'),
   valPageMode: document.getElementById('valPageMode'),
   menuHardCover: document.getElementById('menuHardCover'),
@@ -72,8 +74,13 @@ const els = {
   btnToggleCurrentBookmark: document.getElementById('btnToggleCurrentBookmark'),
   bookmarksList: document.getElementById('bookmarksList'),
   highlightsSummary: document.getElementById('highlightsSummary'),
+  btnToggleNotesView: document.getElementById('btnToggleNotesView'),
+  btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
   btnClearHighlights: document.getElementById('btnClearHighlights'),
+  hlPageChips: document.getElementById('hlPageChips'),
+  hlFilterPageInput: document.getElementById('hlFilterPageInput'),
   highlightsList: document.getElementById('highlightsList'),
+  hlNotesSheet: document.getElementById('hlNotesSheet'),
   hlPopover: document.getElementById('hlPopover'),
   hlPopoverDivider: document.getElementById('hlPopoverDivider'),
   btnHlDelete: document.getElementById('btnHlDelete'),
@@ -137,6 +144,9 @@ const state = {
   textCache: new Map(), // 1-based pageNum -> string
   bookmarks: [],
   highlights: [],
+  hlFilterMode: 'all', // 'all' | 'current' | 'page'
+  hlFilterPage: null,
+  hlNotesView: false,
   activeHlDraft: null,
   searchQuery: '',
   searchAbortId: 0,
@@ -319,6 +329,8 @@ function disposeBook() {
   els.searchStatus.textContent = '';
   state.pageNodes = [];
   state.highlights = [];
+  state.hlFilterMode = 'all';
+  state.hlFilterPage = null;
   hideHighlightPopover();
 }
 
@@ -732,6 +744,9 @@ function onSpreadChanged(persist = true, renderRadius = 5) {
   updateCenterShift();
   updateBookDepthChrome();
   updateBookmarkUi();
+  if (els.valPageNotesCount || (els.sideDrawer && !els.sideDrawer.hidden)) {
+    updateHighlightsUi();
+  }
   highlightActiveThumbnail(visible);
   queueNearbyRenders(state.currentIndex, renderRadius);
 
@@ -1200,50 +1215,190 @@ function repaintRenderedHighlights() {
   }
 }
 
-function updateHighlightsUi() {
-  if (!els.highlightsList || !els.highlightsSummary) return;
-  const count = state.highlights.length;
-  els.highlightsSummary.textContent = count === 1 ? '1 highlight' : `${count} highlights`;
-  els.btnClearHighlights.hidden = count === 0;
+function getFilteredSortedHighlights() {
+  const visiblePages = new Set(getVisibleIndices().map((i) => i + 1));
+  let list = state.highlights;
+  if (state.hlFilterMode === 'current') {
+    list = state.highlights.filter((h) => visiblePages.has(h.page));
+  } else if (state.hlFilterMode === 'page' && Number.isInteger(state.hlFilterPage) && state.hlFilterPage >= 1) {
+    list = state.highlights.filter((h) => h.page === state.hlFilterPage);
+  }
+  return [...list].sort((a, b) => {
+    if (a.page !== b.page) return a.page - b.page;
+    const dt = (a.rects[0]?.t ?? 0) - (b.rects[0]?.t ?? 0);
+    if (Math.abs(dt) > 0.35) return dt;
+    return (a.rects[0]?.l ?? 0) - (b.rects[0]?.l ?? 0);
+  });
+}
 
-  els.highlightsList.innerHTML = '';
-  if (!count) {
-    els.highlightsList.innerHTML = '<div class="search-status">Select any text on a PDF page and pick a color to highlight it.</div>';
+function formatHighlightsAsNotesText(list) {
+  if (!list.length) return '';
+  const groups = new Map();
+  for (const hl of list) {
+    if (!groups.has(hl.page)) groups.set(hl.page, []);
+    groups.get(hl.page).push(hl);
+  }
+  const sections = [];
+  for (const [pageNum, items] of groups.entries()) {
+    const lines = items.map((hl) => `- ${hl.text || '(Highlighted region)'}`);
+    sections.push(`Page ${pageNum}\n${lines.join('\n')}`);
+  }
+  return sections.join('\n\n');
+}
+
+function removeHighlightById(id) {
+  const target = state.highlights.find((h) => h.id === id);
+  if (!target) return;
+  state.highlights = state.highlights.filter((x) => x.id !== id);
+  if (state.activeHlDraft?.mode === 'edit' && state.activeHlDraft.id === id) {
+    hideHighlightPopover();
+  }
+  paintUserHighlightsOnPage(target.page - 1);
+  updateHighlightsUi();
+  schedulePersistState();
+}
+
+function updateHighlightsUi() {
+  if (els.valPageNotesCount) {
+    els.valPageNotesCount.textContent = String(state.highlights.length);
+  }
+  if (!els.highlightsList || !els.highlightsSummary) return;
+
+  const totalCount = state.highlights.length;
+  const filtered = getFilteredSortedHighlights();
+  const visiblePages = getVisibleIndices().map((i) => i + 1);
+  const perPageCounts = new Map();
+  for (const hl of state.highlights) {
+    perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
+  }
+
+  if (state.hlFilterMode === 'page' && state.hlFilterPage) {
+    els.highlightsSummary.textContent = `Page ${state.hlFilterPage}: ${filtered.length} ${filtered.length === 1 ? 'note' : 'notes'}`;
+  } else if (state.hlFilterMode === 'current') {
+    const lbl = visiblePages.length === 2 ? `Pages ${visiblePages[0]}-${visiblePages[1]}` : `Page ${visiblePages[0] || 1}`;
+    els.highlightsSummary.textContent = `${lbl}: ${filtered.length} ${filtered.length === 1 ? 'note' : 'notes'}`;
+  } else {
+    els.highlightsSummary.textContent = totalCount === 1 ? '1 highlight' : `${totalCount} highlights`;
+  }
+
+  els.btnClearHighlights.hidden = totalCount === 0;
+  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = filtered.length === 0;
+  if (els.btnToggleNotesView) {
+    els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
+    els.btnToggleNotesView.textContent = state.hlNotesView ? 'List View' : 'Notes View';
+  }
+  if (els.hlFilterPageInput && document.activeElement !== els.hlFilterPageInput) {
+    els.hlFilterPageInput.value = state.hlFilterMode === 'page' && state.hlFilterPage ? String(state.hlFilterPage) : '';
+  }
+
+  // Page filter chips (All / This Page / each page that has highlights)
+  if (els.hlPageChips) {
+    els.hlPageChips.innerHTML = '';
+    const addChip = (label, active, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `hl-page-chip${active ? ' active' : ''}`;
+      btn.textContent = label;
+      btn.addEventListener('click', onClick);
+      els.hlPageChips.appendChild(btn);
+    };
+
+    addChip(`All (${totalCount})`, state.hlFilterMode === 'all', () => {
+      state.hlFilterMode = 'all';
+      state.hlFilterPage = null;
+      updateHighlightsUi();
+    });
+    addChip('This Page', state.hlFilterMode === 'current', () => {
+      state.hlFilterMode = 'current';
+      state.hlFilterPage = null;
+      updateHighlightsUi();
+    });
+
+    const pages = Array.from(perPageCounts.keys()).sort((a, b) => a - b);
+    for (const p of pages) {
+      addChip(`Pg ${p} (${perPageCounts.get(p)})`, state.hlFilterMode === 'page' && state.hlFilterPage === p, () => {
+        state.hlFilterMode = 'page';
+        state.hlFilterPage = p;
+        jumpToPage(p, false);
+        updateHighlightsUi();
+      });
+    }
+  }
+
+  els.highlightsList.hidden = !!state.hlNotesView;
+  if (els.hlNotesSheet) els.hlNotesSheet.hidden = !state.hlNotesView;
+
+  if (!filtered.length) {
+    const emptyMsg = totalCount === 0
+      ? 'Select any text on a PDF page and pick a color to highlight it.'
+      : 'No highlights on the selected page yet.';
+    els.highlightsList.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
+    if (els.hlNotesSheet) els.hlNotesSheet.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
     return;
   }
 
-  const sorted = [...state.highlights].sort((a, b) => {
-    if (a.page !== b.page) return a.page - b.page;
-    return (a.rects[0]?.t ?? 0) - (b.rects[0]?.t ?? 0);
-  });
-
-  for (const hl of sorted) {
-    const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
-    const row = document.createElement('div');
-    row.className = 'hl-item';
-    row.dataset.hlId = hl.id;
-    row.innerHTML = `
-      <span class="hl-item-dot color-${color}"></span>
-      <div class="hl-item-body">
-        <div class="hl-item-meta">Page ${hl.page}</div>
-        <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
-      </div>
-      <button class="drawer-close" title="Remove highlight" aria-label="Remove highlight">✕</button>
-    `;
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('button')) {
-        state.highlights = state.highlights.filter((x) => x.id !== hl.id);
-        if (state.activeHlDraft?.mode === 'edit' && state.activeHlDraft.id === hl.id) {
-          hideHighlightPopover();
+  if (!state.hlNotesView) {
+    els.highlightsList.innerHTML = '';
+    for (const hl of filtered) {
+      const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
+      const row = document.createElement('div');
+      row.className = 'hl-item';
+      row.dataset.hlId = hl.id;
+      row.innerHTML = `
+        <span class="hl-item-dot color-${color}"></span>
+        <div class="hl-item-body">
+          <div class="hl-item-meta">Page ${hl.page}</div>
+          <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
+        </div>
+        <button class="drawer-close" title="Remove highlight" aria-label="Remove highlight">✕</button>
+      `;
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) {
+          removeHighlightById(hl.id);
+          return;
         }
-        paintUserHighlightsOnPage(hl.page - 1);
-        updateHighlightsUi();
-        schedulePersistState();
-        return;
+        jumpToPage(hl.page, false);
+      });
+      els.highlightsList.appendChild(row);
+    }
+    return;
+  }
+
+  // Consolidated reading-order Page Notes view
+  if (els.hlNotesSheet) {
+    els.hlNotesSheet.innerHTML = '';
+    const groups = new Map();
+    for (const hl of filtered) {
+      if (!groups.has(hl.page)) groups.set(hl.page, []);
+      groups.get(hl.page).push(hl);
+    }
+    for (const [pageNum, items] of groups.entries()) {
+      const card = document.createElement('section');
+      card.className = 'hl-notes-group';
+
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'hl-notes-group-head';
+      head.innerHTML = `<span>Page ${pageNum} Notes</span><span class="toc-page">${items.length} ${items.length === 1 ? 'note' : 'notes'}</span>`;
+      head.addEventListener('click', () => jumpToPage(pageNum, false));
+      card.appendChild(head);
+
+      const listEl = document.createElement('div');
+      listEl.className = 'hl-notes-entries';
+      for (const hl of items) {
+        const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
+        const entry = document.createElement('div');
+        entry.className = `hl-note-entry color-${color}`;
+        entry.innerHTML = `
+          <div class="hl-note-text">${escapeHtml(hl.text || '(Highlighted region)')}</div>
+          <button class="drawer-close hl-note-del" title="Remove highlight" aria-label="Remove highlight">✕</button>
+        `;
+        entry.querySelector('.hl-note-del')?.addEventListener('click', () => removeHighlightById(hl.id));
+        listEl.appendChild(entry);
       }
-      jumpToPage(hl.page, false);
-    });
-    els.highlightsList.appendChild(row);
+      card.appendChild(listEl);
+      els.hlNotesSheet.appendChild(card);
+    }
   }
 }
 
@@ -1873,6 +2028,14 @@ function wireEvents() {
     fetchLibrary();
     els.libraryModal.hidden = false;
   });
+  els.menuPageNotes?.addEventListener('click', () => {
+    els.moreMenu.hidden = true;
+    els.btnMore.classList.remove('active');
+    state.hlFilterMode = 'current';
+    state.hlFilterPage = null;
+    state.hlNotesView = true;
+    openDrawerTab('highlights');
+  });
   els.menuPageMode.addEventListener('click', () => {
     state.pageMode = state.pageMode === 'auto' ? 'single' : state.pageMode === 'single' ? 'double' : 'auto';
     updateMenuValues();
@@ -1988,6 +2151,34 @@ function wireEvents() {
       deleteActiveHighlight();
     }
   });
+  els.btnToggleNotesView?.addEventListener('click', () => {
+    state.hlNotesView = !state.hlNotesView;
+    updateHighlightsUi();
+  });
+  els.btnCopyPageNotes?.addEventListener('click', async () => {
+    const txt = formatHighlightsAsNotesText(getFilteredSortedHighlights());
+    if (!txt) return;
+    try {
+      await navigator.clipboard.writeText(txt);
+      els.btnCopyPageNotes.textContent = 'Copied!';
+      setTimeout(() => { els.btnCopyPageNotes.textContent = 'Copy'; }, 1200);
+    } catch {}
+  });
+  els.hlFilterPageInput?.addEventListener('input', () => {
+    const raw = els.hlFilterPageInput.value.trim();
+    if (!raw) {
+      state.hlFilterMode = 'all';
+      state.hlFilterPage = null;
+      updateHighlightsUi();
+      return;
+    }
+    const p = parseInt(raw, 10);
+    if (Number.isInteger(p) && p >= 1) {
+      state.hlFilterMode = 'page';
+      state.hlFilterPage = clamp(p, 1, Math.max(1, state.totalPages || p));
+      updateHighlightsUi();
+    }
+  });
   els.btnClearHighlights.addEventListener('click', () => {
     if (!state.highlights.length) return;
     state.highlights = [];
@@ -2007,8 +2198,8 @@ function wireEvents() {
 
   // Smart Text Selection + Zoom Pan isolation inside bookContainer
   let isSelectingText = false;
-  const isOuterEdgeClick = (clientX, clientY) => {
-    return !!state.pageFlip?.isPointInFlipZone?.(clientX, clientY);
+  const isOuterEdgeClick = (clientX, clientY, onTextSpan) => {
+    return !!state.pageFlip?.isPointInFlipZone?.(clientX, clientY, onTextSpan);
   };
   const guardPageFlipPointer = (e) => {
     if (state.zoom > 1.01) {
@@ -2016,7 +2207,8 @@ function wireEvents() {
     }
     const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    if (state.clickMode === 'smart' && !isOuterEdgeClick(cx, cy) && e.target.closest('.textLayer span')) {
+    const onTextSpan = !!e.target.closest('.textLayer span');
+    if (state.clickMode === 'smart' && onTextSpan && !isOuterEdgeClick(cx, cy, true)) {
       // Allow clean text selection on words while outer edges/corners curl pages
       isSelectingText = true;
       e.stopPropagation();
