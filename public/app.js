@@ -11,6 +11,7 @@ const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 const els = {
   app: document.getElementById('app'),
   topBar: document.getElementById('topBar'),
+  bottomBar: document.getElementById('bottomBar'),
   topBarRight: document.getElementById('topBarRight'),
   btnOpenTop: document.getElementById('btnOpenTop'),
   bookTitleLabel: document.getElementById('bookTitleLabel'),
@@ -63,6 +64,8 @@ const els = {
   valClickMode: document.getElementById('valClickMode'),
   menuAutoFlip: document.getElementById('menuAutoFlip'),
   valAutoFlip: document.getElementById('valAutoFlip'),
+  menuAutoHideBars: document.getElementById('menuAutoHideBars'),
+  valAutoHideBars: document.getElementById('valAutoHideBars'),
 
   thumbnailsStrip: document.getElementById('thumbnailsStrip'),
   btnCloseThumbs: document.getElementById('btnCloseThumbs'),
@@ -134,6 +137,7 @@ const state = {
   showCover: true,
   clickMode: 'smart', // 'smart' | 'anywhere'
   readDark: false,
+  autoHideBars: true,
   soundEnabled: true,
   soundPreset: DEFAULT_SOUND_PRESET,
   theme: 'charcoal',
@@ -147,6 +151,8 @@ const state = {
   panMoved: false,
   panStart: null,
   lastStagePointer: null,
+  lastBarPointer: null,
+  barsHideTimer: null,
 
   pageNodes: [],
   renderedMap: new Map(), // pageIdx -> { scale, renderTask, textPromise }
@@ -238,6 +244,7 @@ async function fetchLibrary() {
 function applySavedSettings(settings) {
   if (settings.theme) setTheme(settings.theme, false);
   if (typeof settings.readDark === 'boolean') setReadDark(settings.readDark, false);
+  if (typeof settings.autoHideBars === 'boolean') state.autoHideBars = settings.autoHideBars;
   if (settings.soundPreset) {
     state.soundPreset = settings.soundPreset;
   }
@@ -261,6 +268,7 @@ function schedulePersistState() {
       settings: {
         theme: state.theme,
         readDark: state.readDark,
+        autoHideBars: state.autoHideBars,
         scrollMode: state.scrollMode,
         soundEnabled: state.soundEnabled,
         soundPreset: state.soundPreset,
@@ -303,7 +311,7 @@ function computeBookGeometry(forceSingle = false) {
   const single = forceSingle || isEffectiveSingleMode();
 
   const horizReserve = forceSingle ? 96 : single ? 140 : 190;
-  const vertReserve = forceSingle ? 86 : 104;
+  const vertReserve = forceSingle ? 116 : 132;
   const maxBookW = Math.max(240, stageW - horizReserve);
   const maxBookH = Math.max(200, stageH - vertReserve);
 
@@ -356,6 +364,7 @@ function disposeBook() {
   state.hlFilterMode = 'all';
   state.hlFilterPage = null;
   hideHighlightPopover();
+  showBars(false);
 }
 
 function buildPageElements() {
@@ -389,6 +398,7 @@ function initReaderView(startIndex = 0) {
   } else {
     initPageFlip(startIndex);
   }
+  showBars(true);
 }
 
 function initScrollView(startIndex = 0) {
@@ -2164,6 +2174,57 @@ function renderLibraryLists() {
   renderInto(els.libraryList);
 }
 
+/* ---------- Toolbar Auto-Hide ---------- */
+function shouldKeepBarsVisible() {
+  if (!state.pdfDoc || !state.autoHideBars) return true;
+  if (!els.moreMenu.hidden || !els.sideDrawer.hidden || !els.thumbnailsStrip.hidden ||
+      !els.libraryModal.hidden || !els.hlPopover.hidden) {
+    return true;
+  }
+  const active = document.activeElement;
+  if (active && (els.topBar.contains(active) || els.bottomBar?.contains(active)) &&
+      (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) {
+    return true;
+  }
+  if (els.topBar.matches(':hover') || els.bottomBar?.matches(':hover')) {
+    return true;
+  }
+  const p = state.lastBarPointer;
+  if (p && (p.clientY <= 58 || p.clientY >= window.innerHeight - 64)) {
+    return true;
+  }
+  return false;
+}
+
+function showBars(scheduleAutoHide = true) {
+  document.body.classList.remove('bars-hidden');
+  clearTimeout(state.barsHideTimer);
+  state.barsHideTimer = null;
+  if (scheduleAutoHide) {
+    scheduleHideBars();
+  }
+}
+
+function hideBars() {
+  clearTimeout(state.barsHideTimer);
+  state.barsHideTimer = null;
+  if (shouldKeepBarsVisible()) {
+    scheduleHideBars();
+    return;
+  }
+  document.body.classList.add('bars-hidden');
+}
+
+function scheduleHideBars(delayMs = 2200) {
+  clearTimeout(state.barsHideTimer);
+  state.barsHideTimer = null;
+  if (shouldKeepBarsVisible()) {
+    document.body.classList.remove('bars-hidden');
+    return;
+  }
+  state.barsHideTimer = setTimeout(hideBars, delayMs);
+}
+
 /* ---------- UI Modes & Theme ---------- */
 function setTheme(theme, persist = true) {
   state.theme = theme;
@@ -2217,6 +2278,9 @@ function updateMenuValues() {
   els.valHardCover.textContent = state.showCover ? 'On' : 'Off';
   els.valClickMode.textContent = state.clickMode === 'smart' ? 'Corner + Select' : 'Click Anywhere';
   els.valAutoFlip.textContent = state.autoFlipTimer ? 'On (4s)' : 'Off';
+  if (els.valAutoHideBars) {
+    els.valAutoHideBars.textContent = state.autoHideBars ? 'On' : 'Off';
+  }
 }
 
 function stopAutoFlip() {
@@ -2488,6 +2552,12 @@ function wireEvents() {
     if (state.pdfDoc) initReaderView(state.currentIndex);
   });
   els.menuAutoFlip.addEventListener('click', toggleAutoFlip);
+  els.menuAutoHideBars?.addEventListener('click', () => {
+    state.autoHideBars = !state.autoHideBars;
+    updateMenuValues();
+    schedulePersistState();
+    showBars(state.autoHideBars);
+  });
 
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
@@ -2662,6 +2732,44 @@ function wireEvents() {
     });
   });
 
+  // Auto-hide header & footer bars on idle pointer and wake on movement / edge hover
+  let lastWakePos = { x: -1, y: -1 };
+  window.addEventListener('mousemove', (e) => {
+    state.lastBarPointer = { clientX: e.clientX, clientY: e.clientY };
+    const inHotZone = e.clientY <= 58 || e.clientY >= window.innerHeight - 64;
+    const moved = Math.hypot(e.clientX - lastWakePos.x, e.clientY - lastWakePos.y) >= 2;
+    if (moved || inHotZone) {
+      lastWakePos = { x: e.clientX, y: e.clientY };
+      showBars(!inHotZone);
+    }
+  }, { passive: true });
+  window.addEventListener('touchstart', (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    if (t.clientY <= 58 || t.clientY >= window.innerHeight - 64) {
+      state.lastBarPointer = { clientX: t.clientX, clientY: t.clientY };
+      showBars(true);
+    }
+  }, { passive: true });
+  document.addEventListener('mouseleave', () => {
+    state.lastBarPointer = null;
+    if (state.pdfDoc) scheduleHideBars(600);
+  });
+  [els.topBar, els.bottomBar].forEach((bar) => {
+    if (!bar) return;
+    bar.addEventListener('mouseenter', () => showBars(false));
+    bar.addEventListener('mouseleave', () => scheduleHideBars());
+    bar.addEventListener('focusin', () => showBars(false));
+    bar.addEventListener('focusout', () => scheduleHideBars());
+  });
+  const overlayObserver = new MutationObserver(() => {
+    if (shouldKeepBarsVisible()) showBars(false);
+    else scheduleHideBars();
+  });
+  [els.moreMenu, els.sideDrawer, els.thumbnailsStrip, els.libraryModal, els.hlPopover]
+    .filter(Boolean)
+    .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
+
   // Track pointer position inside stage so keyboard +/- zoom anchors at cursor
   els.stage.addEventListener('mousemove', (e) => {
     state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
@@ -2821,6 +2929,7 @@ function wireEvents() {
       case 'd':
       case 'D':
         setReadDark(!state.readDark, true);
+        showBars(true);
         break;
       case 'h':
       case 'H':
@@ -2837,6 +2946,7 @@ function wireEvents() {
       case 'b':
       case 'B':
         toggleBookmarkCurrent();
+        showBars(true);
         break;
       case 'l':
       case 'L':
@@ -2845,12 +2955,15 @@ function wireEvents() {
       case '+':
       case '=':
         setZoom(state.zoom + 0.25, true, getStageZoomAnchor());
+        showBars(true);
         break;
       case '-':
         setZoom(state.zoom - 0.25, true, getStageZoomAnchor());
+        showBars(true);
         break;
       case '0':
         setZoom(1, true);
+        showBars(true);
         break;
       case 'Escape':
         if (!els.hlPopover.hidden) hideHighlightPopover();

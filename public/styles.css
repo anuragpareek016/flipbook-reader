@@ -53,6 +53,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   pointer-events: none;
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease, left 0.18s ease;
 }
 
 html.mac-native-window:not(.mac-fullscreen):not(:fullscreen) .top-bar {
@@ -64,6 +65,17 @@ html.mac-native-window:not(.mac-fullscreen):not(:fullscreen) .top-bar {
   align-items: center;
   gap: 8px;
   pointer-events: auto;
+}
+
+body.bars-hidden .top-bar {
+  transform: translateY(-56px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.bars-hidden .top-bar-left,
+body.bars-hidden .top-bar-right {
+  pointer-events: none;
 }
 
 .top-chip, .icon-chip {
@@ -103,29 +115,29 @@ html.mac-native-window:not(.mac-fullscreen):not(:fullscreen) .top-bar {
 }
 
 #btnDarkRead {
-  background: rgba(246, 247, 250, 0.90);
-  border-color: rgba(255, 255, 255, 0.96);
-  color: #1b1d22;
+  background: rgba(24, 26, 32, 0.90);
+  border-color: rgba(255, 255, 255, 0.20);
+  color: #f4f5f7;
 }
 
 #btnDarkRead:hover {
-  background: #ffffff;
+  background: rgba(38, 42, 52, 0.98);
 }
 
 #btnDarkRead.active {
-  background: rgba(30, 44, 78, 0.94);
-  border-color: #8ab4f8;
-  color: #ffd54f;
-  box-shadow: 0 0 10px rgba(138, 180, 248, 0.32);
+  background: rgba(246, 247, 250, 0.94);
+  border-color: rgba(255, 255, 255, 0.98);
+  color: #1b1d22;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.26);
 }
 
 #btnDarkRead.active:hover {
-  background: rgba(38, 56, 98, 0.98);
+  background: #ffffff;
 }
 
 #btnDarkRead.active svg {
-  fill: #ffd54f;
-  stroke: #ffd54f;
+  fill: #1b1d22;
+  stroke: #1b1d22;
 }
 
 #btnHighlightsTop.has-hl::after {
@@ -180,7 +192,7 @@ html.mac-native-window:not(.mac-fullscreen):not(:fullscreen) .top-bar {
   position: relative;
   flex: 1 1 auto;
   width: 100%;
-  height: calc(100% - var(--bar-height));
+  height: 100%;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -741,7 +753,7 @@ body.is-selecting-text .corner-nav {
 /* Corner First/Last Page Buttons */
 .corner-nav {
   position: absolute;
-  bottom: 14px;
+  bottom: calc(var(--bar-height) + 12px);
   z-index: 35;
   width: 34px;
   height: 34px;
@@ -753,7 +765,11 @@ body.is-selecting-text .corner-nav {
   border-radius: 6px;
   color: rgba(225, 225, 225, 0.55);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: bottom 0.26s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s ease, background 0.15s ease;
+}
+
+body.bars-hidden .corner-nav {
+  bottom: 14px;
 }
 
 .corner-nav:hover:not(:disabled) {
@@ -771,7 +787,10 @@ body.is-selecting-text .corner-nav {
 
 /* Bottom Toolbar (FlipHTML5 Popular Exact Feel) */
 .bottom-bar {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 50;
   height: var(--bar-height);
   width: 100%;
@@ -781,6 +800,13 @@ body.is-selecting-text .corner-nav {
   gap: 14px;
   background: var(--bg-bar);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+}
+
+body.bars-hidden .bottom-bar {
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .bottom-left, .bottom-right {
@@ -1383,6 +1409,7 @@ body.is-selecting-text .corner-nav {
 .welcome-overlay, .loading-overlay, .drop-overlay {
   position: absolute;
   inset: 0;
+  padding-bottom: var(--bar-height);
   z-index: 45;
   display: flex;
   flex-direction: column;
@@ -1895,7 +1922,7 @@ body.is-selecting-text .corner-nav {
   position: absolute;
   inset: 0;
   overflow: auto;
-  padding: 54px 32px 32px;
+  padding: 54px 32px 60px;
   box-sizing: border-box;
   user-select: none;
   -webkit-user-select: none;
