@@ -107,6 +107,17 @@
           <line x1="18" y1="5" x2="18" y2="19"/>
         </svg>
       </button>
+
+      <!-- Floating Text Highlighter Toolbar -->
+      <div id="hlPopover" class="hl-popover" hidden role="toolbar" aria-label="Text highlight colors">
+        <button class="hl-swatch" data-color="yellow" title="Yellow highlight" aria-label="Yellow highlight"></button>
+        <button class="hl-swatch" data-color="green" title="Green highlight" aria-label="Green highlight"></button>
+        <button class="hl-swatch" data-color="blue" title="Blue highlight" aria-label="Blue highlight"></button>
+        <button class="hl-swatch" data-color="pink" title="Pink highlight" aria-label="Pink highlight"></button>
+        <button class="hl-swatch" data-color="orange" title="Orange highlight" aria-label="Orange highlight"></button>
+        <span id="hlPopoverDivider" class="hl-popover-divider" hidden></span>
+        <button id="btnHlDelete" class="hl-delete-btn" title="Remove highlight" aria-label="Remove highlight" hidden>✕</button>
+      </div>
     </main>
 
     <!-- Extended '+' Menu Popover -->
@@ -185,6 +196,7 @@
         <button class="drawer-tab active" data-tab="toc">Contents</button>
         <button class="drawer-tab" data-tab="search">Search</button>
         <button class="drawer-tab" data-tab="bookmarks">Bookmarks</button>
+        <button class="drawer-tab" data-tab="highlights">Highlights</button>
         <button class="drawer-tab" data-tab="text">Text</button>
         <button id="btnCloseDrawer" class="drawer-close" aria-label="Close panel">✕</button>
       </div>
@@ -207,6 +219,14 @@
           <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark Current Page</button>
         </div>
         <div id="bookmarksList" class="bookmarks-list"></div>
+      </div>
+
+      <div id="paneHighlights" class="drawer-pane">
+        <div class="bookmarks-actions">
+          <span id="highlightsSummary">0 highlights</span>
+          <button id="btnClearHighlights" class="btn-small" hidden>Clear All</button>
+        </div>
+        <div id="highlightsList" class="bookmarks-list"></div>
       </div>
 
       <div id="paneText" class="drawer-pane">

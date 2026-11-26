@@ -6,6 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs
 
 const MAX_CACHED_CANVASES = 18;
 const ZOOM_STEPS = [1, 1.25, 1.5, 2, 2.5, 3];
+const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 
 const els = {
   app: document.getElementById('app'),
@@ -70,6 +71,12 @@ const els = {
   searchResults: document.getElementById('searchResults'),
   btnToggleCurrentBookmark: document.getElementById('btnToggleCurrentBookmark'),
   bookmarksList: document.getElementById('bookmarksList'),
+  highlightsSummary: document.getElementById('highlightsSummary'),
+  btnClearHighlights: document.getElementById('btnClearHighlights'),
+  highlightsList: document.getElementById('highlightsList'),
+  hlPopover: document.getElementById('hlPopover'),
+  hlPopoverDivider: document.getElementById('hlPopoverDivider'),
+  btnHlDelete: document.getElementById('btnHlDelete'),
   textPaneLabel: document.getElementById('textPaneLabel'),
   btnCopySpreadText: document.getElementById('btnCopySpreadText'),
   pageTextPreview: document.getElementById('pageTextPreview'),
@@ -121,12 +128,16 @@ const state = {
   panX: 0,
   panY: 0,
   isPanning: false,
+  panMoved: false,
   panStart: null,
+  lastStagePointer: null,
 
   pageNodes: [],
   renderedMap: new Map(), // pageIdx -> { scale, renderTask, textPromise }
   textCache: new Map(), // 1-based pageNum -> string
   bookmarks: [],
+  highlights: [],
+  activeHlDraft: null,
   searchQuery: '',
   searchAbortId: 0,
   libraryBooks: [],
@@ -236,6 +247,7 @@ function schedulePersistState() {
       payload.lastPage = state.currentIndex + 1;
       payload.totalPages = state.totalPages;
       payload.bookmarks = state.bookmarks;
+      payload.highlights = state.highlights;
     }
     fetch('/api/book-state', {
       method: 'POST',
@@ -248,6 +260,7 @@ function schedulePersistState() {
         localStorage.setItem(`flipbook:${state.bookId}`, JSON.stringify({
           lastPage: state.currentIndex + 1,
           bookmarks: state.bookmarks,
+          highlights: state.highlights,
         }));
       } catch {
         // ignore storage errors
@@ -305,6 +318,8 @@ function disposeBook() {
   els.searchResults.innerHTML = '';
   els.searchStatus.textContent = '';
   state.pageNodes = [];
+  state.highlights = [];
+  hideHighlightPopover();
 }
 
 function buildPageElements() {
@@ -382,6 +397,7 @@ function initPageFlip(startIndex = 0) {
     disableFlipByClick: state.clickMode === 'smart',
   });
 
+  pf.setInteractionDisabled(state.zoom > 1.01);
   pf.loadFromHTML(state.pageNodes);
 
   // Layer spine shadow inside .fh-stage at z-index:3 (above static slots [z:1], below flip layer [z:6])
@@ -417,6 +433,7 @@ function initPageFlip(startIndex = 0) {
 
   pf.on('flipStart', (e) => {
     flipSound.playFlip();
+    hideHighlightPopover();
     if (Number.isFinite(e.data?.page)) {
       const fromIdx = clamp(e.data?.from ?? state.currentIndex, 0, state.totalPages - 1);
       state.currentIndex = clamp(e.data.page, 0, state.totalPages - 1);
@@ -541,13 +558,18 @@ async function renderPageNode(idx) {
     textLayerDiv.className = 'textLayer';
     textLayerDiv.style.setProperty('--scale-factor', String(cssVp.scale));
 
+    const userHlLayer = document.createElement('div');
+    userHlLayer.className = 'fb-user-highlights';
+
     const hlLayer = document.createElement('div');
     hlLayer.className = 'fb-search-highlights';
 
     inner.innerHTML = '';
     inner.appendChild(canvas);
+    inner.appendChild(userHlLayer);
     inner.appendChild(hlLayer);
     inner.appendChild(textLayerDiv);
+    paintUserHighlightsOnPage(idx);
 
     const textLayer = new pdfjsLib.TextLayer({
       textContentSource: pdfPage.streamTextContent(),
@@ -811,6 +833,8 @@ function applyZoomTransform(rerender = true, immediate = false) {
   els.zoomViewport.classList.toggle('is-zoomed', zoomed);
   els.zoomPill.hidden = !zoomed;
   els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+  state.pageFlip?.setInteractionDisabled?.(zoomed);
+  hideHighlightPopover();
 
   if (rerender && state.pdfDoc) {
     clearTimeout(state.zoomRerenderTimer);
@@ -822,7 +846,7 @@ function applyZoomTransform(rerender = true, immediate = false) {
   }
 }
 
-function setZoom(nextZoom, immediate = false) {
+function setZoom(nextZoom, immediate = false, anchor = null) {
   const prevZoom = state.zoom || 1;
   const z = clamp(Number(nextZoom) || 1, 1, 3.5);
   state.zoom = z;
@@ -832,10 +856,32 @@ function setZoom(nextZoom, immediate = false) {
     state.panY = 0;
     if (!state.pdfDoc) state.committedZoom = 1;
   } else {
-    state.panX *= z / prevZoom;
-    state.panY *= z / prevZoom;
+    const ratio = state.zoom / prevZoom;
+    let dx = 0;
+    let dy = 0;
+    if (anchor && Number.isFinite(anchor.clientX) && Number.isFinite(anchor.clientY)) {
+      const zvRect = els.zoomViewport.getBoundingClientRect();
+      if (zvRect.width > 0 && zvRect.height > 0) {
+        const cx0 = zvRect.left + zvRect.width / 2 - state.panX;
+        const cy0 = zvRect.top + zvRect.height / 2 - state.panY;
+        dx = anchor.clientX - cx0;
+        dy = anchor.clientY - cy0;
+      }
+    }
+    state.panX = dx + (state.panX - dx) * ratio;
+    state.panY = dy + (state.panY - dy) * ratio;
   }
   applyZoomTransform(true, immediate || state.zoom === 1);
+}
+
+function getStageZoomAnchor() {
+  const p = state.lastStagePointer;
+  if (!p) return null;
+  const r = els.stage.getBoundingClientRect();
+  if (p.clientX < r.left || p.clientX > r.right || p.clientY < r.top || p.clientY > r.bottom) {
+    return null;
+  }
+  return p;
 }
 
 function cycleZoom() {
@@ -1125,8 +1171,340 @@ function toggleBookmarkCurrent() {
   schedulePersistState();
 }
 
+/* ---------- Text Highlights (Multi-Color + Persistence) ---------- */
+function normalizeHighlightsList(list) {
+  if (!Array.isArray(list)) return [];
+  const roundPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+  return list
+    .filter((h) => h && typeof h === 'object' && Number.isInteger(h.page) && h.page >= 1 && Array.isArray(h.rects))
+    .slice(0, 2000)
+    .map((h) => ({
+      id: String(h.id || '').slice(0, 64),
+      page: Math.floor(h.page),
+      color: HIGHLIGHT_COLORS.includes(h.color) ? h.color : 'yellow',
+      text: String(h.text || '').slice(0, 600),
+      createdAt: typeof h.createdAt === 'string' ? h.createdAt.slice(0, 40) : '',
+      rects: h.rects
+        .filter((r) => r && Number.isFinite(Number(r.l)) && Number.isFinite(Number(r.t)) && r.w > 0 && r.h > 0)
+        .slice(0, 120)
+        .map((r) => ({ l: roundPct(r.l), t: roundPct(r.t), w: roundPct(r.w), h: roundPct(r.h) })),
+    }))
+    .filter((h) => h.id && h.rects.length > 0);
+}
+
+function paintUserHighlightsOnPage(idx) {
+  const node = state.pageNodes[idx];
+  if (!node) return;
+  const layer = node.querySelector('.fb-user-highlights');
+  if (!layer) return;
+  layer.innerHTML = '';
+  const pageNum = idx + 1;
+  for (const hl of state.highlights) {
+    if (hl.page !== pageNum) continue;
+    const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
+    for (const r of hl.rects) {
+      const box = document.createElement('div');
+      box.className = `fb-hl-box color-${color}`;
+      box.dataset.hlId = hl.id;
+      box.style.left = `${r.l}%`;
+      box.style.top = `${r.t}%`;
+      box.style.width = `${r.w}%`;
+      box.style.height = `${r.h}%`;
+      layer.appendChild(box);
+    }
+  }
+}
+
+function repaintRenderedHighlights() {
+  const idxs = new Set([...state.renderedMap.keys(), ...getVisibleIndices()]);
+  for (const idx of idxs) {
+    paintUserHighlightsOnPage(idx);
+  }
+}
+
+function updateHighlightsUi() {
+  if (!els.highlightsList || !els.highlightsSummary) return;
+  const count = state.highlights.length;
+  els.highlightsSummary.textContent = count === 1 ? '1 highlight' : `${count} highlights`;
+  els.btnClearHighlights.hidden = count === 0;
+
+  els.highlightsList.innerHTML = '';
+  if (!count) {
+    els.highlightsList.innerHTML = '<div class="search-status">Select any text on a PDF page and pick a color to highlight it.</div>';
+    return;
+  }
+
+  const sorted = [...state.highlights].sort((a, b) => {
+    if (a.page !== b.page) return a.page - b.page;
+    return (a.rects[0]?.t ?? 0) - (b.rects[0]?.t ?? 0);
+  });
+
+  for (const hl of sorted) {
+    const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
+    const row = document.createElement('div');
+    row.className = 'hl-item';
+    row.dataset.hlId = hl.id;
+    row.innerHTML = `
+      <span class="hl-item-dot color-${color}"></span>
+      <div class="hl-item-body">
+        <div class="hl-item-meta">Page ${hl.page}</div>
+        <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
+      </div>
+      <button class="drawer-close" title="Remove highlight" aria-label="Remove highlight">✕</button>
+    `;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) {
+        state.highlights = state.highlights.filter((x) => x.id !== hl.id);
+        if (state.activeHlDraft?.mode === 'edit' && state.activeHlDraft.id === hl.id) {
+          hideHighlightPopover();
+        }
+        paintUserHighlightsOnPage(hl.page - 1);
+        updateHighlightsUi();
+        schedulePersistState();
+        return;
+      }
+      jumpToPage(hl.page, false);
+    });
+    els.highlightsList.appendChild(row);
+  }
+}
+
+function mergeSelectionLineRects(clientRects, pageRect) {
+  const valid = [];
+  for (const r of clientRects) {
+    if (!r || r.width < 1.5 || r.height < 2 || r.height > pageRect.height * 0.35) continue;
+    const left = Math.max(r.left, pageRect.left);
+    const right = Math.min(r.right, pageRect.right);
+    const top = Math.max(r.top, pageRect.top);
+    const bottom = Math.min(r.bottom, pageRect.bottom);
+    if (right - left < 1.5 || bottom - top < 2) continue;
+    valid.push({ left, top, right, bottom, height: bottom - top });
+  }
+  if (!valid.length) return [];
+
+  valid.sort((a, b) => {
+    const cyA = (a.top + a.bottom) / 2;
+    const cyB = (b.top + b.bottom) / 2;
+    if (Math.abs(cyA - cyB) > Math.min(a.height, b.height) * 0.5) return cyA - cyB;
+    return a.left - b.left;
+  });
+
+  const merged = [];
+  for (const cur of valid) {
+    const prev = merged[merged.length - 1];
+    if (prev) {
+      const cyPrev = (prev.top + prev.bottom) / 2;
+      const cyCur = (cur.top + cur.bottom) / 2;
+      const maxH = Math.max(prev.bottom - prev.top, cur.height);
+      const sameLine = Math.abs(cyPrev - cyCur) <= maxH * 0.55;
+      const closeHoriz = cur.left <= prev.right + maxH * 0.9 && cur.right >= prev.left - maxH * 0.5;
+      if (sameLine && closeHoriz) {
+        prev.left = Math.min(prev.left, cur.left);
+        prev.right = Math.max(prev.right, cur.right);
+        prev.top = Math.min(prev.top, cur.top);
+        prev.bottom = Math.max(prev.bottom, cur.bottom);
+        continue;
+      }
+    }
+    merged.push({ ...cur });
+  }
+
+  const pct = (v, total) => Math.max(0, Math.min(100, Math.round((v / total) * 100000) / 1000));
+  return merged.map((b) => ({
+    l: pct(b.left - pageRect.left, pageRect.width),
+    t: pct(b.top - pageRect.top, pageRect.height),
+    w: pct(b.right - b.left, pageRect.width),
+    h: pct(b.bottom - b.top, pageRect.height),
+  })).filter((b) => b.w > 0 && b.h > 0);
+}
+
+function extractSelectionHighlightDraft() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const text = sel.toString().replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+
+  const range = sel.getRangeAt(0);
+  const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const endEl = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement;
+  if (!startEl?.closest('.fb-page .textLayer') || !endEl?.closest('.fb-page .textLayer')) {
+    return null;
+  }
+
+  const visibleIndices = getVisibleIndices();
+  const pageEntries = [];
+  for (const idx of visibleIndices) {
+    const node = state.pageNodes[idx];
+    if (!node) continue;
+    const pageRect = node.getBoundingClientRect();
+    if (!pageRect.width || !pageRect.height) continue;
+    pageEntries.push({ idx, pageRect, rawRects: [] });
+  }
+  if (!pageEntries.length) return null;
+
+  const allClientRects = Array.from(range.getClientRects());
+  for (const r of allClientRects) {
+    if (!r.width || !r.height) continue;
+    const cx = (r.left + r.right) / 2;
+    const cy = (r.top + r.bottom) / 2;
+    for (const p of pageEntries) {
+      if (cx >= p.pageRect.left && cx <= p.pageRect.right && cy >= p.pageRect.top && cy <= p.pageRect.bottom) {
+        p.rawRects.push(r);
+        break;
+      }
+    }
+  }
+
+  const entries = [];
+  let minL = Infinity;
+  let minT = Infinity;
+  let maxR = -Infinity;
+  let maxB = -Infinity;
+
+  for (const p of pageEntries) {
+    if (!p.rawRects.length) continue;
+    const rects = mergeSelectionLineRects(p.rawRects, p.pageRect);
+    if (!rects.length) continue;
+    entries.push({ page: p.idx + 1, text, rects });
+    for (const r of p.rawRects) {
+      if (r.left < minL) minL = r.left;
+      if (r.top < minT) minT = r.top;
+      if (r.right > maxR) maxR = r.right;
+      if (r.bottom > maxB) maxB = r.bottom;
+    }
+  }
+
+  if (!entries.length || !Number.isFinite(minL)) return null;
+  return {
+    entries,
+    anchorRect: {
+      left: minL,
+      top: minT,
+      right: maxR,
+      bottom: maxB,
+      width: maxR - minL,
+      height: maxB - minT,
+    },
+  };
+}
+
+function hideHighlightPopover() {
+  if (!els.hlPopover) return;
+  els.hlPopover.hidden = true;
+  state.activeHlDraft = null;
+}
+
+function showHighlightPopover(anchorRect, draft) {
+  if (!els.hlPopover || !anchorRect) return;
+  state.activeHlDraft = draft;
+  const isEdit = draft.mode === 'edit';
+  els.hlPopoverDivider.hidden = !isEdit;
+  els.btnHlDelete.hidden = !isEdit;
+
+  els.hlPopover.querySelectorAll('.hl-swatch').forEach((btn) => {
+    btn.classList.toggle('active', isEdit && btn.dataset.color === draft.color);
+  });
+
+  els.hlPopover.style.left = '-9999px';
+  els.hlPopover.style.top = '-9999px';
+  els.hlPopover.hidden = false;
+
+  const popRect = els.hlPopover.getBoundingClientRect();
+  const margin = 10;
+  let left = anchorRect.left + anchorRect.width / 2 - popRect.width / 2;
+  left = clamp(left, margin, Math.max(margin, window.innerWidth - popRect.width - margin));
+
+  let top = anchorRect.top - popRect.height - 10;
+  if (top < 48) {
+    top = anchorRect.bottom + 10;
+  }
+  top = clamp(top, 48, Math.max(48, window.innerHeight - popRect.height - 62));
+
+  els.hlPopover.style.left = `${Math.round(left)}px`;
+  els.hlPopover.style.top = `${Math.round(top)}px`;
+}
+
+function applyHighlightColor(color) {
+  const safeColor = HIGHLIGHT_COLORS.includes(color) ? color : 'yellow';
+  const draft = state.activeHlDraft;
+  if (!draft) return;
+
+  if (draft.mode === 'edit') {
+    const target = state.highlights.find((h) => h.id === draft.id);
+    if (target) {
+      target.color = safeColor;
+      paintUserHighlightsOnPage(target.page - 1);
+    }
+  } else if (draft.mode === 'create' && Array.isArray(draft.entries)) {
+    const now = new Date().toISOString();
+    for (const ent of draft.entries) {
+      const id = `hl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      state.highlights.push({
+        id,
+        page: ent.page,
+        color: safeColor,
+        text: ent.text,
+        rects: ent.rects,
+        createdAt: now,
+      });
+      paintUserHighlightsOnPage(ent.page - 1);
+    }
+    try {
+      window.getSelection()?.removeAllRanges?.();
+    } catch {}
+  }
+
+  updateHighlightsUi();
+  schedulePersistState();
+  hideHighlightPopover();
+}
+
+function deleteActiveHighlight() {
+  const draft = state.activeHlDraft;
+  if (!draft || draft.mode !== 'edit') return;
+  const target = state.highlights.find((h) => h.id === draft.id);
+  state.highlights = state.highlights.filter((h) => h.id !== draft.id);
+  if (target) paintUserHighlightsOnPage(target.page - 1);
+  updateHighlightsUi();
+  schedulePersistState();
+  hideHighlightPopover();
+}
+
+function findHighlightAtClientPoint(pageNode, clientX, clientY) {
+  if (!pageNode) return null;
+  const pageIdx = Number(pageNode.dataset.pageIndex);
+  if (!Number.isFinite(pageIdx)) return null;
+  const pageNum = pageIdx + 1;
+  const pageRect = pageNode.getBoundingClientRect();
+  if (!pageRect.width || !pageRect.height) return null;
+
+  const px = ((clientX - pageRect.left) / pageRect.width) * 100;
+  const py = ((clientY - pageRect.top) / pageRect.height) * 100;
+
+  for (let i = state.highlights.length - 1; i >= 0; i--) {
+    const hl = state.highlights[i];
+    if (hl.page !== pageNum) continue;
+    for (const r of hl.rects) {
+      if (px >= r.l - 0.4 && px <= r.l + r.w + 0.4 && py >= r.t - 0.5 && py <= r.t + r.h + 0.5) {
+        return {
+          hl,
+          anchorRect: {
+            left: pageRect.left + (r.l / 100) * pageRect.width,
+            top: pageRect.top + (r.t / 100) * pageRect.height,
+            width: (r.w / 100) * pageRect.width,
+            height: (r.h / 100) * pageRect.height,
+            right: pageRect.left + ((r.l + r.w) / 100) * pageRect.width,
+            bottom: pageRect.top + ((r.t + r.h) / 100) * pageRect.height,
+          },
+        };
+      }
+    }
+  }
+  return null;
+}
+
 /* ---------- Opening Books ---------- */
-async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [] } = {}) {
+async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], highlights = [] } = {}) {
   els.loadingText.textContent = `Opening ${title}…`;
   els.loadingOverlay.hidden = false;
   els.libraryModal.hidden = true;
@@ -1151,14 +1529,18 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     state.bookTitle = title;
     state.bookId = bookId;
     state.bookmarks = Array.isArray(bookmarks) ? [...bookmarks] : [];
+    state.highlights = normalizeHighlightsList(highlights);
 
-    // Recover saved local progress if no explicit startPage
+    // Recover saved local progress if missing from server entry
     let targetPage = startPage;
-    if (!targetPage && bookId) {
+    if (bookId) {
       try {
         const local = JSON.parse(localStorage.getItem(`flipbook:${bookId}`) || 'null');
-        if (local?.lastPage) targetPage = local.lastPage;
+        if (!targetPage && local?.lastPage) targetPage = local.lastPage;
         if (Array.isArray(local?.bookmarks) && !state.bookmarks.length) state.bookmarks = local.bookmarks;
+        if (Array.isArray(local?.highlights) && !state.highlights.length) {
+          state.highlights = normalizeHighlightsList(local.highlights);
+        }
       } catch {
         // ignore
       }
@@ -1176,6 +1558,7 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     buildOutline();
     if (!els.thumbnailsStrip.hidden) buildThumbnailsStrip();
     updateBookmarkUi();
+    updateHighlightsUi();
     fetchLibrary();
   } catch (err) {
     alert(`Failed to open PDF: ${err.message || err}`);
@@ -1196,6 +1579,7 @@ async function openBookById(bookId, overridePage = null) {
     bookId: book.id,
     startPage: targetPage,
     bookmarks: book.bookmarks || [],
+    highlights: book.highlights || [],
   });
 }
 
@@ -1226,6 +1610,7 @@ async function pickFileViaHost() {
         bookId: data.id,
         startPage: data.lastPage || 1,
         bookmarks: data.bookmarks || [],
+        highlights: data.highlights || [],
       });
     }
   } catch {
@@ -1332,6 +1717,7 @@ function openDrawerTab(tabName) {
     toc: 'paneToc',
     search: 'paneSearch',
     bookmarks: 'paneBookmarks',
+    highlights: 'paneHighlights',
     text: 'paneText',
   };
   document.getElementById(targetMap[tabName])?.classList.add('active');
@@ -1341,6 +1727,8 @@ function openDrawerTab(tabName) {
     refreshTextPane();
   } else if (tabName === 'bookmarks') {
     updateBookmarkUi();
+  } else if (tabName === 'highlights') {
+    updateHighlightsUi();
   }
 }
 
@@ -1576,12 +1964,67 @@ function wireEvents() {
     }
   });
 
-  // Close popover when clicking outside
+  // Close popover when clicking outside, or edit existing highlight on click
   document.addEventListener('click', (e) => {
     if (!els.moreMenu.hidden && !e.target.closest('#moreMenu') && !e.target.closest('#btnMore')) {
       els.moreMenu.hidden = true;
       els.btnMore.classList.remove('active');
     }
+
+    const sel = window.getSelection();
+    const hasSelection = !!(sel && !sel.isCollapsed && sel.toString().trim());
+    if (!e.target.closest('#hlPopover') && !hasSelection) {
+      const wasPanDrag = state.panMoved;
+      state.panMoved = false;
+      const pageNode = !wasPanDrag && !state.pageFlip?.pointerMoved
+        ? e.target.closest('.fb-page')
+        : null;
+      const hit = pageNode ? findHighlightAtClientPoint(pageNode, e.clientX, e.clientY) : null;
+      if (hit) {
+        showHighlightPopover(hit.anchorRect, {
+          mode: 'edit',
+          id: hit.hl.id,
+          color: hit.hl.color,
+        });
+      } else {
+        hideHighlightPopover();
+      }
+    } else {
+      state.panMoved = false;
+    }
+  });
+
+  // Floating highlight color picker & clear button
+  els.hlPopover.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  els.hlPopover.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const swatch = e.target.closest('.hl-swatch');
+    if (swatch?.dataset.color) {
+      applyHighlightColor(swatch.dataset.color);
+      return;
+    }
+    if (e.target.closest('#btnHlDelete')) {
+      deleteActiveHighlight();
+    }
+  });
+  els.btnClearHighlights.addEventListener('click', () => {
+    if (!state.highlights.length) return;
+    state.highlights = [];
+    hideHighlightPopover();
+    repaintRenderedHighlights();
+    updateHighlightsUi();
+    schedulePersistState();
+  });
+
+  // Track pointer position inside stage so keyboard +/- zoom anchors at cursor
+  els.stage.addEventListener('mousemove', (e) => {
+    state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
+  });
+  els.stage.addEventListener('mouseleave', () => {
+    state.lastStagePointer = null;
   });
 
   // Smart Text Selection + Zoom Pan isolation inside bookContainer
@@ -1591,7 +2034,6 @@ function wireEvents() {
   };
   const guardPageFlipPointer = (e) => {
     if (state.zoom > 1.01) {
-      e.stopPropagation();
       return;
     }
     const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
@@ -1607,7 +2049,7 @@ function wireEvents() {
   els.bookContainer.addEventListener('mousedown', guardPageFlipPointer, true);
   els.bookContainer.addEventListener('touchstart', guardPageFlipPointer, true);
   window.addEventListener('mousemove', (e) => {
-    if (state.zoom > 1.01 || isSelectingText) {
+    if (state.zoom <= 1.01 && isSelectingText) {
       e.stopPropagation();
     }
   }, true);
@@ -1620,41 +2062,61 @@ function wireEvents() {
   window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
   window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
 
-  // Panning when zoomed + double click to zoom
+  // Panning when zoomed + double click to zoom anchored at cursor + text highlight selection trigger
   els.zoomViewport.addEventListener('dblclick', (e) => {
     if (!state.pdfDoc) return;
-    if (e.target.closest('.textLayer span')) return;
-    setZoom(state.zoom > 1.05 ? 1 : 1.75, true);
+    if (e.target.closest('.textLayer span') || e.target.closest('#hlPopover')) return;
+    setZoom(state.zoom > 1.05 ? 1 : 1.75, true, { clientX: e.clientX, clientY: e.clientY });
   });
 
+  let panDownPos = null;
   els.zoomViewport.addEventListener('mousedown', (e) => {
     if (state.zoom <= 1.01) return;
     if (e.button !== 0) return;
+    if (e.target.closest('#hlPopover') || e.target.closest('.textLayer span')) return;
     state.isPanning = true;
+    state.panMoved = false;
+    panDownPos = { x: e.clientX, y: e.clientY };
     state.panStart = { x: e.clientX - state.panX, y: e.clientY - state.panY };
     els.zoomViewport.classList.add('is-panning');
   });
   window.addEventListener('mousemove', (e) => {
     if (!state.isPanning || !state.panStart) return;
+    if (panDownPos && Math.hypot(e.clientX - panDownPos.x, e.clientY - panDownPos.y) > 4) {
+      state.panMoved = true;
+    }
     state.panX = e.clientX - state.panStart.x;
     state.panY = e.clientY - state.panStart.y;
     applyZoomTransform(false);
   });
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('mouseup', (e) => {
+    const panWasMoved = state.panMoved;
     if (state.isPanning) {
       state.isPanning = false;
       state.panStart = null;
+      panDownPos = null;
       els.zoomViewport.classList.remove('is-panning');
+    }
+    if (!e.target?.closest?.('#hlPopover')) {
+      setTimeout(() => {
+        if (panWasMoved || state.isFlipping) return;
+        const draft = extractSelectionHighlightDraft();
+        if (draft) {
+          showHighlightPopover(draft.anchorRect, { mode: 'create', entries: draft.entries });
+        }
+      }, 0);
     }
   });
 
-  // Trackpad pinch / Ctrl+Wheel zoom
+  // Trackpad pinch / Ctrl+Wheel zoom anchored at cursor
   els.stage.addEventListener('wheel', (e) => {
     if (!state.pdfDoc) return;
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      const delta = -e.deltaY * 0.008;
-      setZoom(state.zoom + delta);
+      if (!e.deltaY) return;
+      state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
+      const nextZoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.003), 1, 3.5);
+      setZoom(nextZoom, false, { clientX: e.clientX, clientY: e.clientY });
     }
   }, { passive: false });
 
@@ -1722,16 +2184,17 @@ function wireEvents() {
         break;
       case '+':
       case '=':
-        setZoom(state.zoom + 0.25, true);
+        setZoom(state.zoom + 0.25, true, getStageZoomAnchor());
         break;
       case '-':
-        setZoom(state.zoom - 0.25, true);
+        setZoom(state.zoom - 0.25, true, getStageZoomAnchor());
         break;
       case '0':
         setZoom(1, true);
         break;
       case 'Escape':
-        if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
+        if (!els.hlPopover.hidden) hideHighlightPopover();
+        else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
         else if (!els.sideDrawer.hidden) { els.sideDrawer.hidden = true; els.btnDrawer.classList.remove('active'); }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }

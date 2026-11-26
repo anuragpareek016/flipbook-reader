@@ -122,6 +122,10 @@ function cloneCanvasSnapshot(pageNode, pageW, pageH) {
     const ctx = snap.getContext('2d', { alpha: false });
     ctx.drawImage(srcCanvas, 0, 0);
     wrap.appendChild(snap);
+    const userHl = pageNode.querySelector('.fb-user-highlights');
+    if (userHl && userHl.children.length > 0) {
+      wrap.appendChild(userHl.cloneNode(true));
+    }
   } else {
     const ph = document.createElement('div');
     ph.className = 'fb-page-num-placeholder';
@@ -182,6 +186,7 @@ export class FlipBookEngine {
     this.pointerDownPos = null;
     this.lastMovePos = null;
     this.moveVelX = 0;
+    this.interactionDisabled = false;
 
     this._onMouseDown = this._handleMouseDown.bind(this);
     this._onMouseMove = this._handleMouseMove.bind(this);
@@ -463,7 +468,15 @@ export class FlipBookEngine {
     return null;
   }
 
+  setInteractionDisabled(disabled) {
+    this.interactionDisabled = !!disabled;
+    if (this.interactionDisabled && this.interactiveFlip && !this.isPointerDown) {
+      this._cancelInteractiveFlipImmediate();
+    }
+  }
+
   _handleMouseDown(e) {
+    if (this.interactionDisabled) return;
     if (e.button !== 0) return;
     if (['A', 'BUTTON', 'INPUT'].includes(e.target?.tagName)) return;
     const bp = this._clientToBook(e.clientX, e.clientY);
@@ -495,6 +508,7 @@ export class FlipBookEngine {
   }
 
   _handleMouseMove(e) {
+    if (this.interactionDisabled && !this.isPointerDown) return;
     const bp = this._clientToBook(e.clientX, e.clientY);
 
     if (this.isPointerDown && this.interactiveFlip && this.interactiveFlip.mode === 'drag') {

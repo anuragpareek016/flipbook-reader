@@ -93,6 +93,7 @@ function registerLocalPdf(filePath, initialPage = null) {
       size: stat.size,
       lastPage: Number.isFinite(initialPage) && initialPage >= 1 ? Math.floor(initialPage) : 1,
       bookmarks: [],
+      highlights: [],
       lastOpened: now,
     });
   }
@@ -319,6 +320,28 @@ const server = http.createServer(async (req, res) => {
           }
           if (Array.isArray(body.bookmarks)) {
             entry.bookmarks = body.bookmarks.filter((n) => Number.isInteger(n) && n >= 1);
+          }
+          if (Array.isArray(body.highlights)) {
+            const validColors = new Set(['yellow', 'green', 'blue', 'pink', 'orange']);
+            const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+            entry.highlights = body.highlights
+              .filter((h) => h && typeof h === 'object' && Number.isInteger(h.page) && h.page >= 1 && Array.isArray(h.rects))
+              .slice(0, 2000)
+              .map((h) => {
+                const rects = h.rects
+                  .filter((r) => r && Number.isFinite(Number(r.l)) && Number.isFinite(Number(r.t)) && Number(r.w) > 0 && Number(r.h) > 0)
+                  .slice(0, 120)
+                  .map((r) => ({ l: clampPct(r.l), t: clampPct(r.t), w: clampPct(r.w), h: clampPct(r.h) }));
+                return {
+                  id: String(h.id || '').slice(0, 64),
+                  page: Math.floor(h.page),
+                  color: validColors.has(h.color) ? h.color : 'yellow',
+                  text: String(h.text || '').slice(0, 600),
+                  rects,
+                  createdAt: typeof h.createdAt === 'string' ? h.createdAt.slice(0, 40) : '',
+                };
+              })
+              .filter((h) => h.id && h.rects.length > 0);
           }
           entry.lastOpened = new Date().toISOString();
         }
