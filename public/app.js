@@ -607,7 +607,148 @@ function initPageFlip(startIndex = 0) {
   onSpreadChanged(false);
 }
 
-/* ---------- On-Demand PDF Canvas + TextLayer Rendering ---------- */
+/* ---------- On-Demand PDF Canvas + TextLayer Rendering + Selection Stabilizer ---------- */
+const textLayerEndMap = new Map();
+let textSelectionGuardWired = false;
+let prevSelectionRange = null;
+
+function pruneDisconnectedTextLayers() {
+  for (const div of textLayerEndMap.keys()) {
+    if (!div.isConnected) textLayerEndMap.delete(div);
+  }
+}
+
+function resetAllTextLayersSelecting() {
+  document.body.classList.remove('is-selecting-text');
+  for (const [div, endDiv] of textLayerEndMap.entries()) {
+    if (!div.isConnected) {
+      textLayerEndMap.delete(div);
+      continue;
+    }
+    if (endDiv.parentElement !== div || endDiv.nextSibling !== null) {
+      div.append(endDiv);
+    }
+    endDiv.style.width = '';
+    endDiv.style.height = '';
+    div.classList.remove('selecting', 'selecting-origin');
+  }
+  prevSelectionRange = null;
+}
+
+function wireGlobalTextLayerSelectionGuard() {
+  if (textSelectionGuardWired) return;
+  textSelectionGuardWired = true;
+  let isPointerDown = false;
+
+  document.addEventListener('pointerdown', () => {
+    isPointerDown = true;
+  });
+  document.addEventListener('pointerup', () => {
+    isPointerDown = false;
+    resetAllTextLayersSelecting();
+  });
+  window.addEventListener('blur', () => {
+    isPointerDown = false;
+    resetAllTextLayersSelecting();
+  });
+  document.addEventListener('keyup', () => {
+    if (!isPointerDown) resetAllTextLayersSelecting();
+  });
+
+  // Dynamically anchor .endOfContent right beside the live selection boundary so dragging
+  // into word/line gaps never snaps selection to top/bottom of page or random blocks.
+  document.addEventListener('selectionchange', () => {
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      if (!isPointerDown) resetAllTextLayersSelecting();
+      return;
+    }
+
+    const activeLayers = new Set();
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const r = selection.getRangeAt(i);
+      for (const div of textLayerEndMap.keys()) {
+        if (!div.isConnected) {
+          textLayerEndMap.delete(div);
+          continue;
+        }
+        if (!activeLayers.has(div) && r.intersectsNode(div)) {
+          activeLayers.add(div);
+        }
+      }
+    }
+
+    for (const [div, endDiv] of textLayerEndMap.entries()) {
+      if (activeLayers.has(div)) {
+        div.classList.add('selecting');
+      } else if (!div.classList.contains('selecting-origin')) {
+        if (endDiv.parentElement !== div || endDiv.nextSibling !== null) div.append(endDiv);
+        endDiv.style.width = '';
+        endDiv.style.height = '';
+        div.classList.remove('selecting');
+      }
+    }
+
+    const range = selection.getRangeAt(0);
+    const modifyStart = prevSelectionRange && (
+      range.compareBoundaryPoints(Range.END_TO_END, prevSelectionRange) === 0 ||
+      range.compareBoundaryPoints(Range.START_TO_END, prevSelectionRange) === 0
+    );
+    let anchor = modifyStart ? range.startContainer : range.endContainer;
+    if (anchor && anchor.nodeType === Node.TEXT_NODE) {
+      anchor = anchor.parentNode;
+    }
+    const parentLayer = anchor?.parentElement?.closest?.('.textLayer');
+    const endDiv = parentLayer ? textLayerEndMap.get(parentLayer) : null;
+    if (endDiv && anchor?.parentElement && (anchor.parentElement === parentLayer || parentLayer.contains(anchor.parentElement))) {
+      endDiv.style.width = `${parentLayer.clientWidth || parentLayer.offsetWidth}px`;
+      endDiv.style.height = `${parentLayer.clientHeight || parentLayer.offsetHeight}px`;
+      anchor.parentElement.insertBefore(endDiv, modifyStart ? anchor : anchor.nextSibling);
+    }
+    try {
+      prevSelectionRange = range.cloneRange();
+    } catch {
+      prevSelectionRange = null;
+    }
+  });
+}
+
+function registerTextLayerForSelection(textLayerDiv) {
+  wireGlobalTextLayerSelectionGuard();
+  pruneDisconnectedTextLayers();
+  const endOfContent = document.createElement('div');
+  endOfContent.className = 'endOfContent';
+  textLayerDiv.append(endOfContent);
+  textLayerEndMap.set(textLayerDiv, endOfContent);
+
+  textLayerDiv.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    resetAllTextLayersSelecting();
+    textLayerDiv.classList.add('selecting', 'selecting-origin');
+    document.body.classList.add('is-selecting-text');
+  });
+}
+
+function isClientNearSelectableText(targetEl, clientX, clientY) {
+  if (!targetEl) return false;
+  const directSpan = targetEl.closest('.textLayer span');
+  if (directSpan && !directSpan.classList.contains('markedContent')) return true;
+  const textLayer = targetEl.closest('.textLayer');
+  if (!textLayer) return false;
+  const spans = textLayer.querySelectorAll('span:not(.markedContent)');
+  const padX = 10;
+  const padY = 8;
+  for (const s of spans) {
+    if (!s.textContent) continue;
+    const r = s.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    if (clientY >= r.top - padY && clientY <= r.bottom + padY && clientX >= r.left - padX && clientX <= r.right + padX) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function renderPageNode(idx) {
   if (!state.pdfDoc || idx < 0 || idx >= state.totalPages) return;
   const pageNode = state.pageNodes[idx];
@@ -685,6 +826,7 @@ async function renderPageNode(idx) {
     await textLayer.render();
     if (state.renderedMap.get(idx) !== token) return;
 
+    registerTextLayerForSelection(textLayerDiv);
     paintSearchHighlightsOnPage(idx);
     evictDistantPages(state.currentIndex);
   } catch (err) {
@@ -2534,9 +2676,9 @@ function wireEvents() {
     }
     const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    const onTextSpan = !!e.target.closest('.textLayer span');
-    if (state.clickMode === 'smart' && onTextSpan && !isOuterEdgeClick(cx, cy, true)) {
-      // Allow clean text selection on words while outer edges/corners curl pages
+    const nearText = isClientNearSelectableText(e.target, cx, cy);
+    if (state.clickMode === 'smart' && nearText && !isOuterEdgeClick(cx, cy, true)) {
+      // Allow clean text selection on words/inter-line gaps while outer edges/corners curl pages
       isSelectingText = true;
       e.stopPropagation();
     } else {
@@ -2562,7 +2704,7 @@ function wireEvents() {
   // Panning when zoomed + double click to zoom anchored at cursor + text highlight selection trigger
   els.zoomViewport.addEventListener('dblclick', (e) => {
     if (!state.pdfDoc) return;
-    if (e.target.closest('.textLayer span') || e.target.closest('#hlPopover')) return;
+    if (e.target.closest('#hlPopover') || isClientNearSelectableText(e.target, e.clientX, e.clientY)) return;
     setZoom(state.zoom > 1.05 ? 1 : 1.75, true, { clientX: e.clientX, clientY: e.clientY });
   });
 
@@ -2570,7 +2712,7 @@ function wireEvents() {
   els.zoomViewport.addEventListener('mousedown', (e) => {
     if (state.zoom <= 1.01) return;
     if (e.button !== 0) return;
-    if (e.target.closest('#hlPopover') || e.target.closest('.textLayer span')) return;
+    if (e.target.closest('#hlPopover') || isClientNearSelectableText(e.target, e.clientX, e.clientY)) return;
     state.isPanning = true;
     state.panMoved = false;
     panDownPos = { x: e.clientX, y: e.clientY };

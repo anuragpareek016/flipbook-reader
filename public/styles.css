@@ -575,6 +575,8 @@ body.is-flip-dragging .fb-page .textLayer {
   background: #ffffff;
   overflow: hidden;
   position: relative;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .fb-page-inner {
@@ -583,6 +585,8 @@ body.is-flip-dragging .fb-page .textLayer {
   height: 100%;
   background: #ffffff;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .fb-page canvas.fb-canvas {
@@ -603,6 +607,8 @@ body.is-flip-dragging .fb-page .textLayer {
   color: #ccc;
   font-size: 13px;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* PDF.js TextLayer overlay */
@@ -615,8 +621,27 @@ body.is-flip-dragging .fb-page .textLayer {
   width: 100% !important;
   height: 100% !important;
   z-index: 4;
+  overflow: clip;
+  line-height: 1;
   user-select: text;
   -webkit-user-select: text;
+  cursor: text;
+}
+
+.fb-page .textLayer .endOfContent {
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.is-selecting-text .fb-page .textLayer:not(.selecting-origin) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.is-selecting-text .side-nav,
+body.is-selecting-text .corner-nav {
+  pointer-events: none;
 }
 
 .fb-page .textLayer ::selection {
@@ -1587,19 +1612,18 @@ body.is-flip-dragging .fb-page .textLayer {
 }
 
 .hl-delete-btn {
+  width: 24px;
   height: 24px;
-  padding: 0 9px 0 7px;
+  padding: 0;
   border: 1px solid rgba(255, 102, 102, 0.35);
-  border-radius: 999px;
+  border-radius: 50%;
   background: rgba(255, 86, 86, 0.16);
   color: #ff9c9c;
-  font-size: 11.5px;
-  font-weight: 500;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
 }
 
 .hl-delete-btn:hover {
@@ -1848,6 +1872,8 @@ body.is-flip-dragging .fb-page .textLayer {
   overflow: auto;
   padding: 54px 32px 32px;
   box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .scroll-pages {
@@ -1867,6 +1893,8 @@ body.is-flip-dragging .fb-page .textLayer {
   border-radius: 2px;
   overflow: hidden;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .scroll-page-wrap .fb-page {
