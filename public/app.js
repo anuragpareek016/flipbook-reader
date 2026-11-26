@@ -369,7 +369,7 @@ function initPageFlip(startIndex = 0) {
     height: sh,
     usePortrait: single,
     startPage: safeStart,
-    flippingTime: 360,
+    flippingTime: 300,
     showCover: state.showCover,
     showPageCorners: true,
     disableFlipByClick: state.clickMode === 'smart',

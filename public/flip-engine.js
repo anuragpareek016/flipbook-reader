@@ -146,7 +146,7 @@ export class FlipBookEngine {
       height: 550,
       usePortrait: false,
       startPage: 0,
-      flippingTime: 560,
+      flippingTime: 300,
       showCover: true,
       showPageCorners: true,
       disableFlipByClick: true,
@@ -995,11 +995,12 @@ export class FlipBookEngine {
         let ny = f.animStartY + (f.animToY - f.animStartY) * ease;
 
         if (f.arcMode && !f.isHard && !f.reversed) {
-          const arc = Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
-          ny = this.pageH - 0.06 * arc;
+          const arc = 0.05 * Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
+          ny = f.from.y === 0 ? arc : this.pageH - arc;
         }
 
-        this._applyFlipFrame(f, { x: nx, y: ny });
+        const coord = f.delayMs > 0 ? f.from : { x: nx, y: ny };
+        this._applyFlipFrame(f, coord);
         if (f.progress >= 1) finished.push(f);
       }
 
@@ -1183,10 +1184,14 @@ export class FlipBookEngine {
     this.currentSpreadIndex = nextSpread;
     this.currentPageIndex = (this.spreads[nextSpread] || [0])[0];
 
-    const y = corner === 'top' ? 12 : this.pageH - 12;
+    const cornerY = corner === 'top' ? 0 : this.pageH;
     const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
     const targetX = side === 'right' ? -this.pageW : this.pageW;
-    const fromPoint = { x: startX, y };
+    const fromPoint = { x: startX, y: cornerY };
+    const initCoord = {
+      x: startX + (side === 'right' ? -2 : 2),
+      y: corner === 'top' ? 2 : this.pageH - 2,
+    };
 
     const isHard = this._isHardSpreadStep(prevSpread, nextSpread, side);
     const { fromIdx, toIdx, underIdx } = this._getFlipIndices(prevSpread, nextSpread, side);
@@ -1208,7 +1213,7 @@ export class FlipBookEngine {
     const seq = ++this.flipSeq;
     const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: false, seq });
 
-    const baseDuration = isCascading ? Math.max(220, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
+    const baseDuration = isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
     const baseRate = 1 / baseDuration;
 
     const flipObj = {
@@ -1219,11 +1224,11 @@ export class FlipBookEngine {
       nextSpread,
       mode: 'animate',
       from: fromPoint,
-      coord: { ...fromPoint },
-      animStartX: startX,
-      animStartY: y,
+      coord: delayMs > 0 ? { ...fromPoint } : { ...initCoord },
+      animStartX: initCoord.x,
+      animStartY: initCoord.y,
       animToX: targetX,
-      animToY: this.pageH,
+      animToY: cornerY,
       progress: 0,
       delayMs,
       elapsedMs: 0,
@@ -1234,7 +1239,7 @@ export class FlipBookEngine {
     };
 
     this.flyingFlips.push(flipObj);
-    this._applyFlipFrame(flipObj, fromPoint);
+    this._applyFlipFrame(flipObj, delayMs > 0 ? fromPoint : initCoord);
     this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side });
     this._setState('flipping');
     this._ensureRaf();
