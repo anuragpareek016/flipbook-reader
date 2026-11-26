@@ -481,13 +481,14 @@ export class FlipBookEngine {
     if (this.flyingFlips.length) {
       this._settleAllFlyingFlips();
     }
-    if (this.interactiveFlip) {
+    if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
       // Grabbed already-curled hover/fallback corner seamlessly -> anchor to actual cursor point
       this.interactiveFlip.mode = 'drag';
       this.interactiveFlip.from.y = clamp(bp.y + (bp.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
       this.interactiveFlip.target = this._bookToSpine(bp);
       this._setState('user_fold');
     } else {
+      if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
       this._beginInteractiveTurn(chosenSide, bp, 'drag');
     }
   }
@@ -652,6 +653,11 @@ export class FlipBookEngine {
 
     let underShadow = null;
     if (underEl) {
+      if (!this.single && underIdx !== null && underIdx !== undefined) {
+        const underSpine = document.createElement('div');
+        underSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
+        underEl.appendChild(underSpine);
+      }
       underShadow = document.createElement('div');
       underShadow.className = 'fh-under-shadow';
       underEl.appendChild(underShadow);
@@ -688,6 +694,11 @@ export class FlipBookEngine {
     downSide.style.top = `${this.sideTop}px`;
     if (fromIdx !== null && fromIdx !== undefined) {
       downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH));
+    }
+    if (!this.single) {
+      const downSpine = document.createElement('div');
+      downSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
+      downSide.appendChild(downSpine);
     }
 
     const lightW = this.maskSize;

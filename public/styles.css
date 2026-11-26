@@ -262,6 +262,51 @@ html.mac-native-window .top-bar {
   transition: opacity 0.2s ease;
 }
 
+/* Inner-edge spine shading carried by resting/underneath spread halves during interactive hover/hold & flips */
+.fh-inner-spine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: clamp(46px, 11.2%, 170px);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.fh-inner-spine-left {
+  right: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0) 39.2%,
+    rgba(0, 0, 0, 0.008) 46.4%,
+    rgba(0, 0, 0, 0.035) 52.6%,
+    rgba(0, 0, 0, 0.071) 59.2%,
+    rgba(0, 0, 0, 0.118) 66.0%,
+    rgba(0, 0, 0, 0.161) 72.8%,
+    rgba(0, 0, 0, 0.200) 79.6%,
+    rgba(0, 0, 0, 0.243) 86.4%,
+    rgba(0, 0, 0, 0.278) 93.2%,
+    rgba(0, 0, 0, 0.294) 98.2%,
+    rgba(0, 0, 0, 0.298) 100%
+  );
+}
+
+.fh-inner-spine-right {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.298) 0%,
+    rgba(0, 0, 0, 0.282) 3.4%,
+    rgba(0, 0, 0, 0.255) 6.8%,
+    rgba(0, 0, 0, 0.196) 13.6%,
+    rgba(0, 0, 0, 0.129) 20.4%,
+    rgba(0, 0, 0, 0.063) 27.2%,
+    rgba(0, 0, 0, 0.012) 34.0%,
+    rgba(0, 0, 0, 0) 39.0%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
 /* Native FlipHTML5 Engine Layers */
 .fh-stage {
   position: relative;
