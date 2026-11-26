@@ -400,35 +400,18 @@ function initPageFlip(startIndex = 0) {
   pf.setInteractionDisabled(state.zoom > 1.01);
   pf.loadFromHTML(state.pageNodes);
 
-  // Layer spine shadow inside .fh-stage at z-index:3 (above static slots [z:1], below flip layer [z:6])
-  // plus top landing overlay [z:7] so the final settling deceleration blends seamlessly with zero cutoff line.
+  // Layer spine shadow inside .fh-stage at z-index:3 (above static slots [z:1], below flip layer [z:6]).
+  // Turning leaves carry their own edge-aligned binding spine inside .fh-flip-layer so no static
+  // overlay ever slices across mid-turn or tilted dragged pages.
   const fhStage = host.querySelector('.fh-stage');
   if (fhStage) {
-    if (!els.bookSpineTop) {
-      els.bookSpineTop = document.createElement('div');
-      els.bookSpineTop.className = 'book-spine-shadow book-spine-top';
-      els.bookSpineTop.id = 'bookSpineTop';
-    }
     fhStage.appendChild(els.bookSpineShadow);
-    fhStage.appendChild(els.bookSpineTop);
   }
 
   pf.on('init', (e) => {
     state.orientation = pf.getOrientation();
     state.currentIndex = clamp(e.data?.page ?? safeStart, 0, state.totalPages - 1);
     onSpreadChanged(false);
-  });
-
-  pf.on('spineBlend', (e) => {
-    if (!els.bookSpineTop) return;
-    if (!state.allowSpine) {
-      els.bookSpineShadow.style.opacity = '0';
-      els.bookSpineTop.style.opacity = '0';
-      return;
-    }
-    const b = clamp(e.data ?? 0, 0, 1);
-    els.bookSpineShadow.style.opacity = String(1 - b);
-    els.bookSpineTop.style.opacity = String(b);
   });
 
   pf.on('flipStart', (e) => {
@@ -447,7 +430,6 @@ function initPageFlip(startIndex = 0) {
       if (touchingCover) {
         state.allowSpine = false;
         els.bookSpineShadow.style.opacity = '0';
-        if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       }
     }
   });
@@ -460,6 +442,7 @@ function initPageFlip(startIndex = 0) {
 
   pf.on('changeState', (e) => {
     state.isFlipping = e.data === 'flipping' || e.data === 'user_fold';
+    document.body.classList.toggle('is-flip-dragging', e.data === 'user_fold');
     if (e.data === 'user_fold') {
       // Pre-render pages revealed during corner drag
       queueNearbyRenders(state.currentIndex, 4);
@@ -473,7 +456,6 @@ function initPageFlip(startIndex = 0) {
       if (touchingCover) {
         state.allowSpine = false;
         els.bookSpineShadow.style.opacity = '0';
-        if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       }
     }
     if (e.data === 'read') {
@@ -678,7 +660,6 @@ function updateBookDepthChrome() {
 
     state.allowSpine = false;
     els.bookSpineShadow.style.opacity = '0';
-    if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
     return;
@@ -698,7 +679,6 @@ function updateBookDepthChrome() {
       els.bookStackRight.style.left = 'auto';
 
       els.bookSpineShadow.style.opacity = '0';
-      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
     } else {
@@ -711,7 +691,6 @@ function updateBookDepthChrome() {
       els.bookStackRight.style.width = '0px';
 
       els.bookSpineShadow.style.opacity = '0';
-      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
     }
@@ -727,7 +706,6 @@ function updateBookDepthChrome() {
 
     if (!state.isFlipping) {
       els.bookSpineShadow.style.opacity = '1';
-      if (els.bookSpineTop) els.bookSpineTop.style.opacity = '0';
     }
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;

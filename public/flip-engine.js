@@ -14,6 +14,31 @@ function easeInOutSine(t) {
 }
 
 /**
+ * Constrain folded corner position (fx, fy) to the two rigid paper circles
+ * anchored at top spine (0, 0) and bottom spine (0, pageH), using continuous
+ * radial scaling so dragging off-page onto the dark background never sign-flips.
+ */
+function constrainToBindingCircles(fx, fy, ex, ey, pageH) {
+  let x = fx;
+  let y = fy;
+  const rBot = Math.hypot(ex, ey - pageH);
+  const dBot = Math.hypot(x, y - pageH);
+  if (dBot > rBot && dBot > 1e-6) {
+    const k = rBot / dBot;
+    x *= k;
+    y = pageH + (y - pageH) * k;
+  }
+  const rTop = Math.hypot(ex, ey);
+  const dTop = Math.hypot(x, y);
+  if (dTop > rTop && dTop > 1e-6) {
+    const k = rTop / dTop;
+    x *= k;
+    y *= k;
+  }
+  return { fx: x, fy: y };
+}
+
+/**
  * Exact FlipHTML5 fold geometry solver.
  * Coordinates are spine-centered: x in [-pageW, +pageW], y in [0, pageH].
  * fromPoint (ex, ey) is the grabbed point on the outer edge (ex = +pageW or -pageW).
@@ -40,23 +65,7 @@ function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
     };
   }
 
-  // Spine binding constraint 1: bottom spine corner (0, pageH)
-  const rBot = Math.hypot(ex, ey - pageH);
-  if (Math.hypot(fx, fy - pageH) > rBot) {
-    const a = Math.atan((fy - pageH) / (fx === 0 ? 1e-6 : fx));
-    const k = Math.abs(Math.cos(a) * rBot);
-    fy = pageH - Math.abs(Math.sin(a) * rBot);
-    fx = fx > 0 ? k : -k;
-  }
-
-  // Spine binding constraint 2: top spine corner (0, 0)
-  const rTop = Math.hypot(ex, ey);
-  if (Math.hypot(fx, fy) > rTop) {
-    const a = Math.atan(fy / (fx === 0 ? 1e-6 : fx));
-    const k = Math.abs(Math.cos(a) * rTop);
-    fy = Math.abs(Math.sin(a) * rTop);
-    fx = fx > 0 ? k : -k;
-  }
+  ({ fx, fy } = constrainToBindingCircles(fx, fy, ex, ey, pageH));
 
   if (Math.abs(fx - ex) < 0.25) {
     return {
@@ -475,6 +484,15 @@ export class FlipBookEngine {
     }
   }
 
+  _clampDragTarget(bp, fromPoint, side) {
+    const sp = this._bookToSpine(bp);
+    let tx = clamp(sp.x, -this.pageW, this.pageW);
+    if (side === 'right' && tx > fromPoint.x) tx = fromPoint.x;
+    if (side === 'left' && tx < fromPoint.x) tx = fromPoint.x;
+    const constrained = constrainToBindingCircles(tx, sp.y, fromPoint.x, fromPoint.y, this.pageH);
+    return { x: constrained.fx, y: constrained.fy };
+  }
+
   _handleMouseDown(e) {
     if (this.interactionDisabled) return;
     if (e.button !== 0) return;
@@ -499,7 +517,7 @@ export class FlipBookEngine {
       // Grabbed already-curled hover/fallback corner seamlessly -> anchor to actual cursor point
       this.interactiveFlip.mode = 'drag';
       this.interactiveFlip.from.y = clamp(bp.y + (bp.y > this.pageH / 2 ? 6 : -6), 6, this.pageH - 6);
-      this.interactiveFlip.target = this._bookToSpine(bp);
+      this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, chosenSide);
       this._setState('user_fold');
     } else {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
@@ -520,7 +538,7 @@ export class FlipBookEngine {
         this.moveVelX = bp.x - this.lastMovePos.x;
       }
       this.lastMovePos = bp;
-      this.interactiveFlip.target = this._bookToSpine(bp);
+      this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, this.interactiveFlip.side);
       this._ensureRaf();
       return;
     }
@@ -608,7 +626,7 @@ export class FlipBookEngine {
   }
 
   /* ---------- Interactive Flip Construction & rAF Spring Loop ---------- */
-  _createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder, seq }) {
+  _createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder, seq, fromHasSpine = !this.single, toHasSpine = !this.single }) {
     const els = [];
     let underEl = null;
 
@@ -669,7 +687,7 @@ export class FlipBookEngine {
     let underShadow = null;
     let underSpine = null;
     if (underEl) {
-      if (!this.single && underIdx !== null && underIdx !== undefined) {
+      if (toHasSpine && underIdx !== null && underIdx !== undefined) {
         underSpine = document.createElement('div');
         underSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
         underEl.appendChild(underSpine);
@@ -711,7 +729,7 @@ export class FlipBookEngine {
     if (fromIdx !== null && fromIdx !== undefined) {
       downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH));
     }
-    if (!this.single) {
+    if (fromHasSpine) {
       const downSpine = document.createElement('div');
       downSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
       downSide.appendChild(downSpine);
@@ -763,6 +781,14 @@ export class FlipBookEngine {
       upSide.appendChild(cloneCanvasSnapshot(this.pageNodes[toIdx], this.pageW, this.pageH));
     }
 
+    let upSpine = null;
+    if (toHasSpine && toIdx !== null && toIdx !== undefined) {
+      upSpine = document.createElement('div');
+      upSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-left' : 'fh-inner-spine-right'}`;
+      upSpine.style.opacity = '0';
+      upSide.appendChild(upSpine);
+    }
+
     const backShade = document.createElement('div');
     backShade.className = 'fh-crease-lighting fh-back-sheen';
     backShade.style.width = `${lightW}px`;
@@ -783,6 +809,7 @@ export class FlipBookEngine {
       underEl,
       underIdx,
       underSpine,
+      upSpine,
       castBounds,
       castMask,
       castGradient,
@@ -840,7 +867,9 @@ export class FlipBookEngine {
     const fromPoint = { x: startX, y: clampedY };
 
     const seq = ++this.flipSeq;
-    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: true, seq });
+    const fromHasSpine = !this.single && (this.spreads[prevSpread]?.length === 2);
+    const toHasSpine = !this.single && (this.spreads[nextSpread]?.length === 2);
+    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: true, seq, fromHasSpine, toHasSpine });
 
     if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
     else this.leftSlot.style.visibility = 'hidden';
@@ -854,7 +883,7 @@ export class FlipBookEngine {
       mode,
       from: fromPoint,
       coord: { ...fromPoint },
-      target: this._bookToSpine(bookPos),
+      target: this._clampDragTarget(bookPos, fromPoint, side),
     };
 
     this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
@@ -913,6 +942,10 @@ export class FlipBookEngine {
     }
     f.frontHighlight.style.opacity = String(clamp(edgeFade * 0.92, 0, 0.88));
     f.backShade.style.opacity = String(clamp(edgeFade * 0.95, 0, 0.92));
+    if (f.upSpine) {
+      const spineAppear = travel > 0.78 ? clamp((travel - 0.78) / 0.18, 0, 1) : 0;
+      f.upSpine.style.opacity = String(spineAppear);
+    }
   }
 
   _finishTurnAnimated() {
@@ -1088,28 +1121,11 @@ export class FlipBookEngine {
   }
 
   _updateLandingSpineBlend() {
-    let blend = 0;
-    if (!this.single) {
-      const candidates = [];
-      for (const f of this.flyingFlips) {
-        if (!f.isHard && f.delayMs <= 0) candidates.push(f.travel || 0);
-      }
-      if (this.interactiveFlip && !this.interactiveFlip.isHard) {
-        candidates.push(this.interactiveFlip.travel || 0);
-      }
-      if (candidates.length > 0) {
-        const minTravel = Math.min(...candidates);
-        if (minTravel > 0.78) {
-          blend = clamp((minTravel - 0.78) / 0.14, 0, 1);
-        }
-      }
-    }
-    if (this.interactiveFlip?.underSpine) {
-      this.interactiveFlip.underSpine.style.opacity = String(1 - blend);
-    }
-    if (blend !== this._lastSpineBlend) {
-      this._lastSpineBlend = blend;
-      this._emit('spineBlend', blend);
+    // Spine seam for turning sheets now travels inside upSide (f.upSpine) on the page's real
+    // inner binding edge, so we never overlay a static spine stripe above .fh-flip-layer.
+    if (this._lastSpineBlend !== 0) {
+      this._lastSpineBlend = 0;
+      this._emit('spineBlend', 0);
     }
   }
 
@@ -1273,7 +1289,9 @@ export class FlipBookEngine {
     }
 
     const seq = ++this.flipSeq;
-    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: false, seq });
+    const fromHasSpine = !this.single && (this.spreads[prevSpread]?.length === 2);
+    const toHasSpine = !this.single && (this.spreads[nextSpread]?.length === 2);
+    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: false, seq, fromHasSpine, toHasSpine });
 
     const baseDuration = isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
     const baseRate = 1 / baseDuration;

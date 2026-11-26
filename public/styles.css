@@ -261,11 +261,6 @@ html.mac-native-window .top-bar {
   );
 }
 
-.book-spine-top {
-  z-index: 7;
-  opacity: 0;
-}
-
 /* Inner-edge spine shading carried by resting/underneath spread halves during interactive hover/hold & flips */
 .fh-inner-spine {
   position: absolute;
@@ -274,6 +269,20 @@ html.mac-native-window .top-bar {
   width: clamp(46px, 11.2%, 170px);
   pointer-events: none;
   mix-blend-mode: multiply;
+}
+
+body.is-flip-dragging {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.is-flip-dragging .side-nav,
+body.is-flip-dragging .corner-nav,
+body.is-flip-dragging .top-bar,
+body.is-flip-dragging .bottom-bar,
+body.is-flip-dragging .fb-page .textLayer {
+  pointer-events: none !important;
 }
 
 .fh-inner-spine-left {
