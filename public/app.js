@@ -2269,6 +2269,11 @@ function openDrawerTab(tabName) {
 }
 
 function toggleFullscreen() {
+  if (document.documentElement.classList.contains('mac-native-window') &&
+      window.webkit?.messageHandlers?.flipbook) {
+    window.webkit.messageHandlers.flipbook.postMessage({ action: 'toggleFullscreen' });
+    return;
+  }
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen?.().catch(() => {});
   } else {

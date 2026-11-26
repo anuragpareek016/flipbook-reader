@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 import Foundation
 
-final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var serverProcess: Process?
@@ -85,6 +85,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessag
         webView.allowsBackForwardNavigationGestures = false
 
         window.contentView = webView
+        window.delegate = self
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -213,9 +214,34 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessag
         webView.load(URLRequest(url: url))
     }
 
+    private func syncWindowChromeState(isFullScreen: Bool? = nil) {
+        guard isWebLoaded else { return }
+        let full = isFullScreen ?? window?.styleMask.contains(.fullScreen) ?? false
+        webView.evaluateJavaScript(
+            "document.documentElement.classList.add('mac-native-window'); document.documentElement.classList.toggle('mac-fullscreen', \(full ? "true" : "false"));",
+            completionHandler: nil
+        )
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isWebLoaded = true
-        webView.evaluateJavaScript("document.documentElement.classList.add('mac-native-window')", completionHandler: nil)
+        syncWindowChromeState()
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        syncWindowChromeState(isFullScreen: true)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        syncWindowChromeState(isFullScreen: true)
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        syncWindowChromeState(isFullScreen: false)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        syncWindowChromeState(isFullScreen: false)
     }
 
     private func openLocalPdfPath(_ path: String) {
@@ -272,6 +298,10 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, WKScriptMessag
         if action == "pickFile" {
             DispatchQueue.main.async { [weak self] in
                 self?.openFileDialog()
+            }
+        } else if action == "toggleFullscreen" {
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.toggleFullScreen(nil)
             }
         }
     }

@@ -55,9 +55,8 @@ html, body {
   pointer-events: none;
 }
 
-html.mac-native-window .top-bar {
-  left: 86px;
-  top: 8px;
+html.mac-native-window:not(.mac-fullscreen):not(:fullscreen) .top-bar {
+  left: 84px;
 }
 
 .top-bar-left, .top-bar-right {
