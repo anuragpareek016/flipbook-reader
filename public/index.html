@@ -200,9 +200,13 @@
       <!-- Focus Reading Line Curtain (Spotlight Ruler Mode) -->
       <div id="focusCurtainOverlay" class="focus-curtain-overlay" hidden>
         <div id="focusCurtainBookBox" class="focus-curtain-book-box" aria-hidden="true">
-          <div id="focusCurtainTop" class="focus-curtain-pane focus-curtain-top"></div>
-          <div id="focusCurtainBand" class="focus-curtain-band has-guides"></div>
-          <div id="focusCurtainBottom" class="focus-curtain-pane focus-curtain-bottom"></div>
+          <div id="focusCurtainVeil" class="focus-curtain-veil"></div>
+          <div id="focusCurtainBand" class="focus-curtain-band has-guides">
+            <div class="curtain-resize-n" data-curtain-resize="n" title="Drag to adjust spotlight top edge / height" aria-hidden="true"></div>
+            <div class="curtain-resize-s" data-curtain-resize="s" title="Drag to adjust spotlight bottom edge / height" aria-hidden="true"></div>
+            <div class="curtain-resize-w" data-curtain-resize="w" title="Drag to adjust spotlight left edge / length" aria-hidden="true"></div>
+            <div class="curtain-resize-e" data-curtain-resize="e" title="Drag to adjust spotlight right edge / length" aria-hidden="true"></div>
+          </div>
         </div>
         <div id="focusCurtainPill" class="mag-controls-pill focus-curtain-pill" role="toolbar" aria-label="Focus reading line curtain controls">
           <div class="mag-seg" role="group" aria-label="Spotlight line height presets">
@@ -212,9 +216,15 @@
             <button type="button" id="btnCurtain4L" class="mag-seg-btn" data-curtain-lines="4" title="Four-line strip (104px)">4L</button>
           </div>
           <span class="mag-pill-sep"></span>
-          <button type="button" id="btnCurtainHeightDec" class="hud-step-btn" title="Narrower spotlight band (−)" aria-label="Decrease spotlight height">−</button>
+          <span class="curtain-ctrl-label" title="Spotlight height">Size</span>
+          <button type="button" id="btnCurtainHeightDec" class="hud-step-btn" title="Smaller spotlight size (−)" aria-label="Decrease spotlight size">−</button>
           <span id="curtainHeightLabel" class="hud-readout curtain-readout">54px</span>
-          <button type="button" id="btnCurtainHeightInc" class="hud-step-btn" title="Wider spotlight band (+)" aria-label="Increase spotlight height">+</button>
+          <button type="button" id="btnCurtainHeightInc" class="hud-step-btn" title="Larger spotlight size (+)" aria-label="Increase spotlight size">+</button>
+          <span class="mag-pill-sep"></span>
+          <span class="curtain-ctrl-label" title="Spotlight horizontal length">Length</span>
+          <button type="button" id="btnCurtainLengthDec" class="hud-step-btn" title="Shorter spotlight length (−)" aria-label="Decrease spotlight length">−</button>
+          <span id="curtainLengthLabel" class="hud-readout curtain-readout">100%</span>
+          <button type="button" id="btnCurtainLengthInc" class="hud-step-btn" title="Longer spotlight length (+)" aria-label="Increase spotlight length">+</button>
           <span class="mag-pill-sep"></span>
           <button type="button" id="btnCurtainDimDec" class="hud-step-btn" title="Lighter curtain dim (−)" aria-label="Decrease curtain dim">−</button>
           <span id="curtainDimLabel" class="hud-readout curtain-readout">30% dim</span>
@@ -222,7 +232,7 @@
           <span class="mag-pill-sep"></span>
           <button type="button" id="btnCurtainTone" class="mag-mode-btn" title="Cycle curtain shade tint (Clean / Warm / Deep)" aria-label="Cycle curtain shade tint">Tint: Clean</button>
           <button type="button" id="btnCurtainGuide" class="mag-mode-btn active" title="Toggle thin reading ruler lines" aria-label="Toggle reading ruler guide lines">Guides</button>
-          <button type="button" id="btnCurtainFollow" class="mag-mode-btn active" title="Move spotlight band with cursor or Arrow Up/Down keys" aria-label="Toggle Follow cursor or Arrow keys">Follow Cursor</button>
+          <button type="button" id="btnCurtainFollow" class="mag-mode-btn active" title="Follow cursor or switch to Place &amp; Resize to drag edges" aria-label="Toggle Follow cursor or Place and Resize">Follow Cursor</button>
           <button type="button" id="btnCurtainClose" class="hud-stop-btn" title="Close Focus Line Curtain (R)" aria-label="Close focus reading line curtain">✕</button>
         </div>
       </div>

@@ -3742,7 +3742,6 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   overflow: hidden;
   pointer-events: none;
   contain: layout style paint;
-  border-radius: 2px;
   box-shadow: none;
 }
 
@@ -3754,44 +3753,23 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   --curtain-veil-rgb: 2, 4, 8;
 }
 
-.focus-curtain-pane {
+.focus-curtain-veil {
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 100%;
+  inset: 0;
   pointer-events: none;
-  will-change: transform;
-}
-
-.focus-curtain-top {
-  bottom: 100%;
-  background: linear-gradient(
-    to bottom,
-    rgba(var(--curtain-veil-rgb), var(--curtain-dim)) 0%,
-    rgba(var(--curtain-veil-rgb), var(--curtain-dim)) calc(100% - 7px),
-    rgba(var(--curtain-veil-rgb), 0) 100%
-  );
-}
-
-.focus-curtain-bottom {
-  top: 0;
-  background: linear-gradient(
-    to bottom,
-    rgba(var(--curtain-veil-rgb), 0) 0%,
-    rgba(var(--curtain-veil-rgb), var(--curtain-dim)) 7px,
-    rgba(var(--curtain-veil-rgb), var(--curtain-dim)) 100%
-  );
+  background: rgba(var(--curtain-veil-rgb), var(--curtain-dim));
+  will-change: clip-path;
 }
 
 .focus-curtain-band {
   position: absolute;
   left: 0;
-  right: 0;
   top: 0;
   pointer-events: none;
-  will-change: transform;
+  will-change: transform, width, height;
   background: transparent;
-  box-shadow: none;
+  box-sizing: border-box;
+  box-shadow: inset 0 0 8px 1px rgba(var(--curtain-veil-rgb), calc(var(--curtain-dim) * 0.35));
 }
 
 .focus-curtain-band.has-guides {
@@ -3799,22 +3777,131 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   border-bottom: 1px solid rgba(15, 23, 42, 0.18);
 }
 
+.focus-curtain-band.has-guides.is-partial {
+  border-left: 1px solid rgba(15, 23, 42, 0.18);
+  border-right: 1px solid rgba(15, 23, 42, 0.18);
+}
+
 .focus-curtain-overlay.tone-warm .focus-curtain-band.has-guides {
-  border-top-color: rgba(112, 68, 22, 0.22);
-  border-bottom-color: rgba(112, 68, 22, 0.22);
+  border-color: rgba(112, 68, 22, 0.24);
 }
 
 body.read-dark .focus-curtain-band.has-guides {
-  border-top-color: rgba(255, 255, 255, 0.24);
-  border-bottom-color: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.focus-curtain-band.is-placed {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.focus-curtain-band.is-placed.is-dragging {
+  cursor: grabbing;
+}
+
+.curtain-resize-n,
+.curtain-resize-s,
+.curtain-resize-w,
+.curtain-resize-e {
+  position: absolute;
+  display: none;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.focus-curtain-band.is-placed .curtain-resize-n,
+.focus-curtain-band.is-placed .curtain-resize-s,
+.focus-curtain-band.is-placed .curtain-resize-w,
+.focus-curtain-band.is-placed .curtain-resize-e {
+  display: block;
+}
+
+.curtain-resize-n {
+  left: 12px;
+  right: 12px;
+  top: -4px;
+  height: 9px;
+  cursor: ns-resize;
+}
+
+.curtain-resize-s {
+  left: 12px;
+  right: 12px;
+  bottom: -4px;
+  height: 9px;
+  cursor: ns-resize;
+}
+
+.curtain-resize-w {
+  top: 8px;
+  bottom: 8px;
+  left: -5px;
+  width: 11px;
+  cursor: ew-resize;
+}
+
+.curtain-resize-e {
+  top: 8px;
+  bottom: 8px;
+  right: -5px;
+  width: 11px;
+  cursor: ew-resize;
+}
+
+.curtain-resize-s::after,
+.curtain-resize-w::after,
+.curtain-resize-e::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(138, 180, 248, 0.56);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.30);
+  transition: background 0.14s ease, transform 0.14s ease;
+}
+
+.curtain-resize-s:hover::after,
+.curtain-resize-w:hover::after,
+.curtain-resize-e:hover::after {
+  background: rgba(138, 180, 248, 0.96);
+}
+
+.curtain-resize-s::after {
+  left: 50%;
+  bottom: 3px;
+  width: 22px;
+  height: 3px;
+  transform: translateX(-50%);
+}
+
+.curtain-resize-w::after,
+.curtain-resize-e::after {
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  transform: translateY(-50%);
+}
+
+.curtain-resize-w::after { left: 4px; }
+.curtain-resize-e::after { right: 4px; }
+
+.curtain-ctrl-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #aeb7c6;
+  letter-spacing: 0.01em;
+  user-select: none;
+  padding-left: 2px;
 }
 
 .focus-curtain-pill {
   top: 12px;
+  width: max-content;
   max-width: calc(100vw - 24px);
   height: auto;
   min-height: 36px;
-  padding: 5px 8px;
+  padding: 5px 9px;
+  gap: 5px;
   flex-wrap: wrap;
   justify-content: center;
   row-gap: 4px;
@@ -3834,7 +3921,7 @@ body.read-dark .focus-curtain-band.has-guides {
 }
 
 .curtain-readout {
-  min-width: 44px;
+  min-width: 42px;
   text-align: center;
 }
 

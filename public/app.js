@@ -26,9 +26,8 @@ const els = {
   btnMagShapeBar: document.getElementById('btnMagShapeBar'),
   focusCurtainOverlay: document.getElementById('focusCurtainOverlay'),
   focusCurtainBookBox: document.getElementById('focusCurtainBookBox'),
-  focusCurtainTop: document.getElementById('focusCurtainTop'),
+  focusCurtainVeil: document.getElementById('focusCurtainVeil'),
   focusCurtainBand: document.getElementById('focusCurtainBand'),
-  focusCurtainBottom: document.getElementById('focusCurtainBottom'),
   focusCurtainPill: document.getElementById('focusCurtainPill'),
   btnCurtain1L: document.getElementById('btnCurtain1L'),
   btnCurtain2L: document.getElementById('btnCurtain2L'),
@@ -37,6 +36,9 @@ const els = {
   btnCurtainHeightDec: document.getElementById('btnCurtainHeightDec'),
   curtainHeightLabel: document.getElementById('curtainHeightLabel'),
   btnCurtainHeightInc: document.getElementById('btnCurtainHeightInc'),
+  btnCurtainLengthDec: document.getElementById('btnCurtainLengthDec'),
+  curtainLengthLabel: document.getElementById('curtainLengthLabel'),
+  btnCurtainLengthInc: document.getElementById('btnCurtainLengthInc'),
   btnCurtainDimDec: document.getElementById('btnCurtainDimDec'),
   curtainDimLabel: document.getElementById('curtainDimLabel'),
   btnCurtainDimInc: document.getElementById('btnCurtainDimInc'),
@@ -327,14 +329,19 @@ const state = {
   magBarHeight: 86,
   magFollow: false, // false = drag & place on book, true = follow cursor
   curtainEnabled: false,
+  curtainX: null,
   curtainY: null,
-  curtainHeight: 54, // 24..150px (1-4+ reading lines)
+  curtainHeight: 54, // 22..360px
+  curtainLengthPct: 100, // 20..100% of book width
   curtainDim: 30, // 15..75% dim curtain
   curtainTone: 'clean', // 'clean' | 'warm' | 'deep'
   curtainGuide: true,
-  curtainFollow: true, // follow cursor Y + arrow keys
+  curtainFollow: true, // follow cursor Y (and X when length < 100%)
+  curtainResizing: null,
+  curtainDragging: false,
   ambientPreset: 'off', // 'off' | 'rain' | 'fireplace' | 'library'
   ambientVolume: 30, // 0..100
+  lastCurtainPointerX: null,
   lastCurtainPointerY: null,
   curtainAnimUntil: 0,
   curtainSyncRaf: 0,
@@ -498,7 +505,10 @@ function applySavedSettings(settings) {
     state.magBarHeight = clamp(Math.round(Number(settings.magBarHeight)), 48, 240);
   }
   if (Number.isFinite(Number(settings.curtainHeight))) {
-    state.curtainHeight = clamp(Math.round(Number(settings.curtainHeight)), 24, 150);
+    state.curtainHeight = clamp(Math.round(Number(settings.curtainHeight)), 22, 360);
+  }
+  if (Number.isFinite(Number(settings.curtainLengthPct))) {
+    state.curtainLengthPct = clamp(Math.round(Number(settings.curtainLengthPct)), 20, 100);
   }
   if (Number.isFinite(Number(settings.curtainDim))) {
     state.curtainDim = clamp(Math.round(Number(settings.curtainDim)), 15, 75);
@@ -547,6 +557,7 @@ function schedulePersistState() {
         magBarWidth: state.magBarWidth,
         magBarHeight: state.magBarHeight,
         curtainHeight: state.curtainHeight,
+        curtainLengthPct: state.curtainLengthPct,
         curtainDim: state.curtainDim,
         curtainTone: state.curtainTone,
         curtainGuide: state.curtainGuide,
@@ -1899,7 +1910,7 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
     setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
   }
   if (state.curtainEnabled) {
-    scheduleCurtainBoundsSync(460);
+    scheduleCurtainBoundsSync(540);
   }
   if (persist) schedulePersistState();
 }
@@ -5121,26 +5132,62 @@ function getFocusCurtainBookRect() {
       right = r.right;
       bottom = r.bottom;
     }
-  } else {
-    const bc = els.bookContainer?.getBoundingClientRect();
-    if (!bc || bc.width <= 0 || bc.height <= 0) return null;
-    left = bc.left;
-    top = bc.top;
-    right = bc.right;
-    bottom = bc.bottom;
+    const cl = Math.max(sr.left, left);
+    const ct = Math.max(sr.top, top);
+    const cr = Math.min(sr.right, right);
+    const cb = Math.min(sr.bottom, bottom);
+    const width = Math.max(0, cr - cl);
+    const height = Math.max(0, cb - ct);
+    if (width < 4 || height < 4) return null;
+    return {
+      left: cl - sr.left,
+      top: ct - sr.top,
+      width,
+      height,
+      clipPolygon: 'none',
+    };
+  }
 
-    const visible = getVisibleIndices();
-    const single = isEffectiveSingleMode() || state.orientation === 'portrait';
-    const hasActiveFlip = Boolean(
-      (state.pageFlip?.interactiveFlip && state.pageFlip.interactiveFlip.mode !== 'hover') ||
-      state.pageFlip?.flyingFlips?.length
-    );
-    if (!single && visible.length === 1 && !hasActiveFlip) {
-      if (visible[0] === 0) {
-        left = bc.left + bc.width / 2;
-      } else if (visible[0] >= state.totalPages - 1) {
-        right = bc.left + bc.width / 2;
-      }
+  const bc = els.bookContainer?.getBoundingClientRect();
+  if (!bc || bc.width <= 0 || bc.height <= 0) return null;
+  let baseLeft = bc.left;
+  let baseRight = bc.right;
+  top = bc.top;
+  bottom = bc.bottom;
+
+  const visible = getVisibleIndices();
+  const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+  const hasActiveFlip = Boolean(
+    (state.pageFlip?.interactiveFlip && state.pageFlip.interactiveFlip.mode !== 'hover') ||
+    state.pageFlip?.flyingFlips?.length
+  );
+  if (!single && visible.length === 1 && !hasActiveFlip) {
+    if (visible[0] === 0) {
+      baseLeft = bc.left + bc.width / 2;
+    } else if (visible[0] >= state.totalPages - 1) {
+      baseRight = bc.left + bc.width / 2;
+    }
+  }
+
+  left = baseLeft;
+  right = baseRight;
+  let taperLeftPx = 0;
+  let taperRightPx = 0;
+
+  if (els.bookStackLeft && !els.bookStackLeft.classList.contains('is-empty')) {
+    const lr = els.bookStackLeft.getBoundingClientRect();
+    if (lr.width > 0.5 && lr.left < left) {
+      left = lr.left;
+      const topInsetL = Math.max(0, lr.top - bc.top);
+      taperLeftPx = topInsetL + (parseFloat(els.bookShell?.style.getPropertyValue('--stack-taper-left')) || 0);
+    }
+  }
+  if (els.bookStackRight && !els.bookStackRight.classList.contains('is-empty')) {
+    const rr = els.bookStackRight.getBoundingClientRect();
+    if (rr.width > 0.5 && rr.right > right) {
+      right = rr.right;
+      const topInsetR = Math.max(0, rr.top - bc.top);
+      taperRightPx = topInsetR + (parseFloat(els.bookShell?.style.getPropertyValue('--stack-taper-right')) || 0);
     }
   }
 
@@ -5151,15 +5198,47 @@ function getFocusCurtainBookRect() {
   const width = Math.max(0, cr - cl);
   const height = Math.max(0, cb - ct);
   if (width < 4 || height < 4) return null;
+
+  const visLeftStackW = Math.max(0, Math.min(width, baseLeft - cl));
+  const visRightStackW = Math.max(0, Math.min(width, cr - baseRight));
+  const tL = visLeftStackW > 0.5 && cl <= left + 0.5 ? Math.max(0, taperLeftPx) : 0;
+  const tR = visRightStackW > 0.5 && cr >= right - 0.5 ? Math.max(0, taperRightPx) : 0;
+  const clipPolygon = (tL > 0 || tR > 0)
+    ? `polygon(0px ${tL.toFixed(1)}px, ${visLeftStackW.toFixed(1)}px 0px, calc(100% - ${visRightStackW.toFixed(1)}px) 0px, 100% ${tR.toFixed(1)}px, 100% calc(100% - ${tR.toFixed(1)}px), calc(100% - ${visRightStackW.toFixed(1)}px) 100%, ${visLeftStackW.toFixed(1)}px 100%, 0px calc(100% - ${tL.toFixed(1)}px))`
+    : 'none';
+
   return {
     left: cl - sr.left,
     top: ct - sr.top,
     width,
     height,
+    clipPolygon,
   };
 }
 
-function positionFocusCurtain(cy = null) {
+function getCurtainSlotGeometry(boxW, boxH, boxLeft, boxTop, cx = null, cy = null) {
+  const h = clamp(Math.round(state.curtainHeight), 22, Math.min(360, Math.max(24, boxH - 4)));
+  const rawY = Number.isFinite(cy) ? cy : (state.curtainY ?? boxTop + boxH * 0.42);
+  const clampedCy = clamp(rawY, boxTop + h / 2, Math.max(boxTop + h / 2, boxTop + boxH - h / 2));
+  const slotTop = clamp(Math.round(clampedCy - boxTop - h / 2), 0, Math.max(0, boxH - h));
+  const slotBottom = slotTop + h;
+
+  const pct = clamp(Math.round(state.curtainLengthPct), 20, 100);
+  let w = boxW;
+  let slotLeft = 0;
+  let clampedCx = boxLeft + boxW * 0.5;
+  if (pct < 100) {
+    const minW = Math.min(boxW, 72);
+    w = clamp(Math.round((pct / 100) * boxW), minW, boxW);
+    const rawX = Number.isFinite(cx) ? cx : (state.curtainX ?? boxLeft + boxW * 0.5);
+    clampedCx = clamp(rawX, boxLeft + w / 2, Math.max(boxLeft + w / 2, boxLeft + boxW - w / 2));
+    slotLeft = clamp(Math.round(clampedCx - boxLeft - w / 2), 0, Math.max(0, boxW - w));
+  }
+  const slotRight = slotLeft + w;
+  return { w, h, slotLeft, slotTop, slotRight, slotBottom, clampedCx, clampedCy };
+}
+
+function positionFocusCurtain(cy = null, cx = null) {
   if (!els.focusCurtainOverlay || !els.focusCurtainBookBox || !els.stage) return;
   const box = getFocusCurtainBookRect();
   if (!box) {
@@ -5177,27 +5256,31 @@ function positionFocusCurtain(cy = null) {
   bs.top = `${boxTop}px`;
   bs.width = `${boxW}px`;
   bs.height = `${boxH}px`;
+  bs.clipPath = box.clipPolygon || 'none';
+  bs.webkitClipPath = box.clipPolygon || 'none';
 
-  const h = clamp(Math.round(state.curtainHeight), 24, Math.min(150, Math.max(28, boxH - 8)));
-  const rawCenter = Number.isFinite(cy) ? cy : (state.curtainY ?? boxTop + boxH * 0.42);
-  const clampedCenter = clamp(rawCenter, boxTop + h / 2, Math.max(boxTop + h / 2, boxTop + boxH - h / 2));
-  state.curtainY = clampedCenter;
+  const g = getCurtainSlotGeometry(boxW, boxH, boxLeft, boxTop, cx, cy);
+  state.curtainY = g.clampedCy;
+  if (state.curtainLengthPct < 100) {
+    state.curtainX = g.clampedCx;
+  } else {
+    state.curtainX = boxLeft + boxW * 0.5;
+  }
 
-  const slotTop = clamp(Math.round(clampedCenter - boxTop - h / 2), 0, Math.max(0, boxH - h));
-  const slotBottom = slotTop + h;
   const toneBoost = state.curtainTone === 'deep' ? 12 : 0;
   const effectiveDim = clamp((state.curtainDim + toneBoost + (state.readDark ? 12 : 0)) / 100, 0.14, 0.85);
-
   els.focusCurtainOverlay.style.setProperty('--curtain-dim', effectiveDim.toFixed(2));
-  if (els.focusCurtainTop) {
-    els.focusCurtainTop.style.transform = `translate3d(0, ${slotTop}px, 0)`;
+
+  if (els.focusCurtainVeil) {
+    const holeClip = `polygon(evenodd, 0px 0px, ${boxW}px 0px, ${boxW}px ${boxH}px, 0px ${boxH}px, 0px 0px, ${g.slotLeft}px ${g.slotTop}px, ${g.slotLeft}px ${g.slotBottom}px, ${g.slotRight}px ${g.slotBottom}px, ${g.slotRight}px ${g.slotTop}px, ${g.slotLeft}px ${g.slotTop}px)`;
+    els.focusCurtainVeil.style.clipPath = holeClip;
+    els.focusCurtainVeil.style.webkitClipPath = holeClip;
   }
   if (els.focusCurtainBand) {
-    els.focusCurtainBand.style.height = `${h}px`;
-    els.focusCurtainBand.style.transform = `translate3d(0, ${slotTop}px, 0)`;
-  }
-  if (els.focusCurtainBottom) {
-    els.focusCurtainBottom.style.transform = `translate3d(0, ${slotBottom}px, 0)`;
+    els.focusCurtainBand.classList.toggle('is-partial', g.w < boxW - 1);
+    els.focusCurtainBand.style.width = `${g.w}px`;
+    els.focusCurtainBand.style.height = `${g.h}px`;
+    els.focusCurtainBand.style.transform = `translate3d(${g.slotLeft}px, ${g.slotTop}px, 0)`;
   }
 }
 
@@ -5231,6 +5314,8 @@ function updateFocusCurtainUi() {
   }
   if (els.focusCurtainBand) {
     els.focusCurtainBand.classList.toggle('has-guides', Boolean(state.curtainGuide));
+    els.focusCurtainBand.classList.toggle('is-placed', !state.curtainFollow);
+    els.focusCurtainBand.classList.toggle('is-partial', state.curtainLengthPct < 100);
   }
 
   let matchedLines = null;
@@ -5251,6 +5336,7 @@ function updateFocusCurtainUi() {
   }
 
   if (els.curtainHeightLabel) els.curtainHeightLabel.textContent = `${state.curtainHeight}px`;
+  if (els.curtainLengthLabel) els.curtainLengthLabel.textContent = `${state.curtainLengthPct}%`;
   if (els.curtainDimLabel) els.curtainDimLabel.textContent = `${state.curtainDim}% dim`;
   if (els.btnCurtainTone) {
     const info = CURTAIN_TONES.find((t) => t.id === state.curtainTone) || CURTAIN_TONES[0];
@@ -5264,7 +5350,7 @@ function updateFocusCurtainUi() {
   if (els.btnCurtainFollow) {
     els.btnCurtainFollow.classList.toggle('active', Boolean(state.curtainFollow));
     els.btnCurtainFollow.setAttribute('aria-pressed', String(Boolean(state.curtainFollow)));
-    els.btnCurtainFollow.textContent = state.curtainFollow ? 'Follow Cursor' : 'Arrow Lock (↑↓)';
+    els.btnCurtainFollow.textContent = state.curtainFollow ? 'Follow Cursor' : 'Place & Resize';
   }
 }
 
@@ -5286,14 +5372,25 @@ function toggleFocusCurtain() {
 }
 
 function setFocusCurtainHeight(px) {
-  state.curtainHeight = clamp(Math.round(px), 24, 150);
+  state.curtainHeight = clamp(Math.round(px), 22, 360);
   updateFocusCurtainUi();
   if (state.curtainEnabled) positionFocusCurtain();
   schedulePersistState();
 }
 
 function stepFocusCurtainHeight(dir) {
-  setFocusCurtainHeight(state.curtainHeight + dir * 6);
+  setFocusCurtainHeight(state.curtainHeight + dir * 10);
+}
+
+function setFocusCurtainLength(pct) {
+  state.curtainLengthPct = clamp(Math.round(pct), 20, 100);
+  updateFocusCurtainUi();
+  if (state.curtainEnabled) positionFocusCurtain();
+  schedulePersistState();
+}
+
+function stepFocusCurtainLength(dir) {
+  setFocusCurtainLength(state.curtainLengthPct + dir * 10);
 }
 
 function stepFocusCurtainDim(dir) {
@@ -6414,6 +6511,8 @@ function wireEvents() {
   });
   els.btnCurtainHeightDec?.addEventListener('click', () => stepFocusCurtainHeight(-1));
   els.btnCurtainHeightInc?.addEventListener('click', () => stepFocusCurtainHeight(1));
+  els.btnCurtainLengthDec?.addEventListener('click', () => stepFocusCurtainLength(-1));
+  els.btnCurtainLengthInc?.addEventListener('click', () => stepFocusCurtainLength(1));
   els.btnCurtainDimDec?.addEventListener('click', () => stepFocusCurtainDim(-1));
   els.btnCurtainDimInc?.addEventListener('click', () => stepFocusCurtainDim(1));
   els.btnCurtainTone?.addEventListener('click', () => cycleFocusCurtainTone());
@@ -6430,6 +6529,105 @@ function wireEvents() {
     els.btnCurtainFollow.blur();
   });
   els.btnCurtainClose?.addEventListener('click', () => setFocusCurtainEnabled(false, { persist: true }));
+
+  // Direct edge-resize (N/S size, W/E length) and drag repositioning in Place & Resize mode
+  let curtainDragState = null;
+  let curtainResizeState = null;
+  els.focusCurtainBand?.addEventListener('pointerdown', (e) => {
+    if (!state.curtainEnabled || state.curtainFollow) return;
+    if (e.button !== 0) return;
+    const resizeKind = e.target?.closest?.('[data-curtain-resize]')?.dataset?.curtainResize;
+    const sr = els.stage?.getBoundingClientRect();
+    const box = getFocusCurtainBookRect();
+    if (!sr || !box) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const boxLeft = Math.round(box.left);
+    const boxTop = Math.round(box.top);
+    const boxW = Math.round(box.width);
+    const boxH = Math.round(box.height);
+    const g = getCurtainSlotGeometry(boxW, boxH, boxLeft, boxTop);
+    els.focusCurtainBand.setPointerCapture?.(e.pointerId);
+
+    if (resizeKind) {
+      state.curtainResizing = resizeKind;
+      curtainResizeState = {
+        kind: resizeKind,
+        left: g.slotLeft,
+        top: g.slotTop,
+        right: g.slotRight,
+        bottom: g.slotBottom,
+        boxLeft,
+        boxTop,
+        boxW,
+        boxH,
+        srLeft: sr.left,
+        srTop: sr.top,
+      };
+      return;
+    }
+
+    state.curtainDragging = true;
+    els.focusCurtainBand.classList.add('is-dragging');
+    curtainDragState = {
+      dx: g.clampedCx - (e.clientX - sr.left),
+      dy: g.clampedCy - (e.clientY - sr.top),
+    };
+  });
+  els.focusCurtainBand?.addEventListener('pointermove', (e) => {
+    if (state.curtainResizing && curtainResizeState) {
+      const r = curtainResizeState;
+      const localX = clamp((e.clientX - r.srLeft) - r.boxLeft, 0, r.boxW);
+      const localY = clamp((e.clientY - r.srTop) - r.boxTop, 0, r.boxH);
+      const minW = Math.min(r.boxW, Math.max(72, Math.round(r.boxW * 0.2)));
+      const maxH = Math.min(360, Math.max(24, r.boxH - 4));
+      let nextCx = state.curtainX;
+      let nextCy = state.curtainY;
+
+      if (r.kind === 'e') {
+        const newRight = clamp(localX, r.left + minW, r.boxW);
+        state.curtainLengthPct = clamp(Math.round(((newRight - r.left) / r.boxW) * 100), 20, 100);
+        nextCx = r.boxLeft + (r.left + newRight) / 2;
+      } else if (r.kind === 'w') {
+        const newLeft = clamp(localX, 0, r.right - minW);
+        state.curtainLengthPct = clamp(Math.round(((r.right - newLeft) / r.boxW) * 100), 20, 100);
+        nextCx = r.boxLeft + (newLeft + r.right) / 2;
+      } else if (r.kind === 's') {
+        const newBottom = clamp(localY, r.top + 22, Math.min(r.boxH, r.top + maxH));
+        state.curtainHeight = clamp(Math.round(newBottom - r.top), 22, maxH);
+        nextCy = r.boxTop + (r.top + newBottom) / 2;
+      } else if (r.kind === 'n') {
+        const newTop = clamp(localY, Math.max(0, r.bottom - maxH), r.bottom - 22);
+        state.curtainHeight = clamp(Math.round(r.bottom - newTop), 22, maxH);
+        nextCy = r.boxTop + (newTop + r.bottom) / 2;
+      }
+      updateFocusCurtainUi();
+      positionFocusCurtain(nextCy, nextCx);
+      return;
+    }
+    if (state.curtainDragging && curtainDragState) {
+      const sr = els.stage?.getBoundingClientRect();
+      if (!sr) return;
+      positionFocusCurtain(
+        (e.clientY - sr.top) + curtainDragState.dy,
+        (e.clientX - sr.left) + curtainDragState.dx
+      );
+    }
+  });
+  const endCurtainPointer = (e) => {
+    if (state.curtainResizing || state.curtainDragging) {
+      state.curtainResizing = null;
+      state.curtainDragging = false;
+      curtainResizeState = null;
+      curtainDragState = null;
+      els.focusCurtainBand?.classList.remove('is-dragging');
+      schedulePersistState();
+      try { els.focusCurtainBand?.releasePointerCapture?.(e.pointerId); } catch {}
+    }
+  };
+  els.focusCurtainBand?.addEventListener('pointerup', endCurtainPointer);
+  els.focusCurtainBand?.addEventListener('pointercancel', endCurtainPointer);
 
   els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
   els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
@@ -7160,10 +7358,14 @@ function wireEvents() {
     const onFloatingPill = Boolean(e.target?.closest?.('#magControlsPill, #focusCurtainPill'));
     if (state.curtainEnabled && state.curtainFollow && !onFloatingPill) {
       const prevY = state.lastCurtainPointerY;
-      if (prevY === null || Math.abs(e.clientY - prevY) >= 1) {
+      const prevX = state.lastCurtainPointerX;
+      const movedY = prevY === null || Math.abs(e.clientY - prevY) >= 1;
+      const movedX = state.curtainLengthPct < 100 && (prevX === null || Math.abs(e.clientX - prevX) >= 1);
+      if (movedY || movedX) {
         state.lastCurtainPointerY = e.clientY;
+        state.lastCurtainPointerX = e.clientX;
         const sr = els.stage.getBoundingClientRect();
-        positionFocusCurtain(e.clientY - sr.top);
+        positionFocusCurtain(e.clientY - sr.top, state.curtainLengthPct < 100 ? e.clientX - sr.left : null);
       }
     }
     if (state.magEnabled && state.magFollow && !state.magDragging && !onFloatingPill) {
@@ -7173,6 +7375,7 @@ function wireEvents() {
   });
   els.stage.addEventListener('mouseleave', () => {
     state.lastStagePointer = null;
+    state.lastCurtainPointerX = null;
     state.lastCurtainPointerY = null;
   });
 
