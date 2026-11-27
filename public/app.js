@@ -537,6 +537,7 @@ function initPageFlip(startIndex = 0) {
     showCover: state.showCover,
     showPageCorners: true,
     disableFlipByClick: !single && state.clickMode === 'smart',
+    hasCollectedStack: () => canShowSingleCollectedStack(0),
   });
 
   pf.setInteractionDisabled(state.zoom > 1.01);
@@ -1138,7 +1139,9 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
 }
 
 function updateSingleDragPickup(data) {
-  if (!data || !data.active || !canShowSingleCollectedStack(data.fromIdx)) {
+  const isPrev = data?.side === 'left';
+  const checkIdx = isPrev ? data?.toIdx : data?.fromIdx;
+  if (!data || !data.active || !canShowSingleCollectedStack(checkIdx)) {
     const hadDrag = !!singleStackMeta.dragCard;
     clearSingleDragCard();
     if (hadDrag) updateSingleCollectedStack();
@@ -1146,14 +1149,16 @@ function updateSingleDragPickup(data) {
   }
   if (!els.singleFlightLayer || !els.singleCollectedStack || !els.stage || !els.bookContainer) return;
 
+  const pageToDraw = isPrev ? data.toIdx : data.fromIdx;
+  const underStackIdx = pageToDraw - 1;
   const { w, h } = getSingleStackMetrics();
   els.singleCollectedStack.style.width = `${w}px`;
   els.singleCollectedStack.style.height = `${h}px`;
-  if (data.fromIdx === 0) {
+  if (underStackIdx < 0) {
     els.singleCollectedStack.classList.add('is-waiting');
   } else {
     els.singleCollectedStack.classList.remove('is-waiting');
-    paintSingleStackTopCard(data.fromIdx - 1);
+    paintSingleStackTopCard(underStackIdx);
   }
   els.singleCollectedStack.hidden = false;
 
@@ -1163,22 +1168,22 @@ function updateSingleDragPickup(data) {
   if (!stageRect.width || !bookRect.width || !destRect.width) return;
 
   let card = singleStackMeta.dragCard;
-  if (!card || Number(card.dataset.pageIdx) !== data.fromIdx) {
+  if (!card || Number(card.dataset.pageIdx) !== pageToDraw) {
     clearSingleDragCard();
     card = document.createElement('div');
     card.id = 'singleDragCard';
     card.className = 'scs-flying-card';
-    card.dataset.pageIdx = String(data.fromIdx);
+    card.dataset.pageIdx = String(pageToDraw);
     card.style.width = `${bookRect.width}px`;
     card.style.height = `${bookRect.height}px`;
     const snap = createFlightSnapshotCanvas(
-      data.fromIdx,
+      pageToDraw,
       Math.min(bookRect.width * 1.5, 640),
       Math.min(bookRect.height * 1.5, 900),
       'scs-flying-canvas'
     );
     if (snap) card.appendChild(snap);
-    else card.innerHTML = `<div class="fb-page-num-placeholder">${data.fromIdx + 1}</div>`;
+    else card.innerHTML = `<div class="fb-page-num-placeholder">${pageToDraw + 1}</div>`;
     const shade = document.createElement('div');
     shade.className = 'scs-flying-shade';
     card.appendChild(shade);
@@ -1192,22 +1197,44 @@ function updateSingleDragPickup(data) {
   const dstX = destRect.left - stageRect.left;
   const dstY = destRect.top - stageRect.top;
   const minScale = destRect.width / bookRect.width;
-  const scale = 0.88 - r * (0.88 - Math.max(minScale * 1.12, 0.36));
 
-  const ptrX = (data.clientX ? data.clientX - stageRect.left : srcX) - (bookRect.width * scale) / 2;
-  const ptrY = (data.clientY ? data.clientY - stageRect.top : srcY) - (bookRect.height * scale) / 2;
-  const follow = clamp(r * 1.2, 0, 1);
-  const x = (srcX - 24) + (ptrX - (srcX - 24)) * follow * 0.72 + (dstX - (srcX - 24)) * Math.max(0, r - 0.35) * 0.45;
-  const y = (srcY - 8) + (ptrY - (srcY - 8)) * follow * 0.72 + (dstY - (srcY - 8)) * Math.max(0, r - 0.35) * 0.45;
-  const rotY = -18 - r * 8;
-  const rotZ = -3 - r * 2.5;
-  const op = clamp(r * 4.5, 0, 0.98);
+  let x;
+  let y;
+  let scale;
+  let rotY;
+  let rotZ;
+  let op;
+
+  if (isPrev) {
+    // Lifting from top-left stack (r=0) -> expanding smoothly down onto center book (r=1)
+    scale = minScale + r * (0.94 - minScale);
+    const ptrX = (data.clientX ? data.clientX - stageRect.left : (dstX + (srcX - dstX) * r)) - (bookRect.width * scale) / 2;
+    const ptrY = (data.clientY ? data.clientY - stageRect.top : (dstY + (srcY - dstY) * r)) - (bookRect.height * scale) / 2;
+    const targetX = dstX + (srcX - dstX) * r;
+    const targetY = dstY + (srcY - dstY) * r;
+    x = targetX + (ptrX - targetX) * Math.sin(r * Math.PI) * 0.55;
+    y = targetY + (ptrY - targetY) * Math.sin(r * Math.PI) * 0.55;
+    rotY = Math.sin(r * Math.PI) * 24 + (1 - r) * 8;
+    rotZ = -1.5 + Math.sin(r * Math.PI) * 4.5;
+    op = 1;
+    els.singleCollectedStack.classList.remove('is-drop-ready');
+  } else {
+    scale = 0.88 - r * (0.88 - Math.max(minScale * 1.12, 0.36));
+    const ptrX = (data.clientX ? data.clientX - stageRect.left : srcX) - (bookRect.width * scale) / 2;
+    const ptrY = (data.clientY ? data.clientY - stageRect.top : srcY) - (bookRect.height * scale) / 2;
+    const follow = clamp(r * 1.2, 0, 1);
+    x = (srcX - 24) + (ptrX - (srcX - 24)) * follow * 0.72 + (dstX - (srcX - 24)) * Math.max(0, r - 0.35) * 0.45;
+    y = (srcY - 8) + (ptrY - (srcY - 8)) * follow * 0.72 + (dstY - (srcY - 8)) * Math.max(0, r - 0.35) * 0.45;
+    rotY = -18 - r * 8;
+    rotZ = -3 - r * 2.5;
+    op = clamp(r * 4.5, 0, 0.98);
+    els.singleCollectedStack.classList.toggle('is-drop-ready', r > 0.25);
+  }
+
   const transformStr = `translate3d(${x}px, ${y}px, 0) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${scale})`;
-
   card.style.opacity = String(op);
   card.style.transform = transformStr;
   singleStackMeta.dragPose = { transform: transformStr, opacity: op, x, y, scale, rotY, rotZ };
-  els.singleCollectedStack.classList.toggle('is-drop-ready', r > 0.25);
 }
 
 function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
@@ -1301,6 +1328,16 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
       { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
     ];
     duration = 280;
+  } else if (!goingNext && dragPose) {
+    const mx = (dragPose.x + srcX) * 0.5 - 6;
+    const my = Math.min(dragPose.y, srcY) - 8;
+    const ms = (dragPose.scale + 1) * 0.5;
+    keyframes = [
+      { transform: dragPose.transform, opacity: 1, offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(14deg) rotateX(2deg) rotateZ(1deg) scale(${ms})`, opacity: 1, offset: 0.52 },
+      { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
+    ];
+    duration = 285;
   } else {
     keyframes = goingNext
       ? [
@@ -1311,12 +1348,11 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
         ]
       : [
           { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
-          { transform: `translate3d(${(dstX + srcX) * 0.36}px, ${midY}px, 0) rotateY(22deg) rotateZ(2deg) scale(${midScale})`, opacity: 0.96, offset: 0.36 },
-          { transform: `translate3d(${srcX - 18}px, ${srcY + 6}px, 0) rotateY(10deg) rotateZ(0.5deg) scale(0.82)`, opacity: 0.22, offset: 0.65 },
-          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 0.80 },
-          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 1 },
+          { transform: `translate3d(${(dstX + srcX) * 0.40}px, ${midY}px, 0) rotateY(24deg) rotateX(6deg) rotateZ(4deg) scale(${midScale})`, opacity: 1, offset: 0.34 },
+          { transform: `translate3d(${srcX - 10}px, ${srcY - 4}px, 0) rotateY(15deg) rotateX(2deg) rotateZ(1deg) scale(0.95)`, opacity: 1, offset: 0.72 },
+          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
         ];
-    duration = goingNext ? 440 : 380;
+    duration = goingNext ? 440 : 430;
   }
 
   const anim = card.animate(keyframes, {
@@ -2707,7 +2743,47 @@ function toggleFullscreen() {
 function wireEvents() {
   els.btnPrevArrow.addEventListener('click', goPrev);
   els.btnNextArrow.addEventListener('click', goNext);
-  els.singleCollectedStack?.addEventListener('click', goPrev);
+  if (els.singleCollectedStack) {
+    let scsDrag = null;
+    els.singleCollectedStack.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || state.currentIndex <= 0 || state.isFlipping) return;
+      e.preventDefault();
+      scsDrag = { startX: e.clientX, startY: e.clientY, moved: false, liftRatio: 0 };
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!scsDrag) return;
+      const dx = e.clientX - scsDrag.startX;
+      const dy = e.clientY - scsDrag.startY;
+      if (Math.hypot(dx, dy) > 6) scsDrag.moved = true;
+      if (!scsDrag.moved) return;
+      scsDrag.liftRatio = clamp((Math.max(0, dx) * 0.78 + Math.max(0, dy) * 0.45) / 260, 0.04, 1);
+      updateSingleDragPickup({
+        active: true,
+        side: 'left',
+        fromIdx: state.currentIndex,
+        toIdx: state.currentIndex - 1,
+        liftRatio: scsDrag.liftRatio,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (!scsDrag) return;
+      const d = scsDrag;
+      scsDrag = null;
+      if (!d.moved) {
+        goPrev();
+        return;
+      }
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if ((dx > 45 || dy > 45 || d.liftRatio > 0.25) && state.pageFlip?.flipPrevFromStackDrag) {
+        state.pageFlip.flipPrevFromStackDrag(275);
+      } else {
+        updateSingleDragPickup({ active: false });
+      }
+    });
+  }
   els.btnFirstPage.addEventListener('click', () => jumpToPage(1, false));
   els.btnLastPage.addEventListener('click', () => jumpToPage(state.totalPages, false));
 

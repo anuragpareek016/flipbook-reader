@@ -167,6 +167,7 @@ export class FlipBookEngine {
       showCover: true,
       showPageCorners: true,
       disableFlipByClick: true,
+      hasCollectedStack: null,
       ...settings,
     };
 
@@ -584,6 +585,10 @@ export class FlipBookEngine {
       this.interactiveFlip.grabStartPos = { ...bp };
       this.interactiveFlip.lastClientX = e.clientX;
       this.interactiveFlip.lastClientY = e.clientY;
+      this.interactiveFlip.stackBackedPrev = !!(
+        this.interactiveFlip.singlePrev &&
+        this.settings.hasCollectedStack?.()
+      );
       if (!this.interactiveFlip.singlePrev) {
         this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
       }
@@ -1045,6 +1050,7 @@ export class FlipBookEngine {
     else this.leftSlot.style.visibility = 'hidden';
 
     const grabStartPos = mode === 'drag' ? { x: bookPos.x, y: bookPos.y } : null;
+    const stackBackedPrev = !!(singlePrev && this.settings.hasCollectedStack?.() && mode !== 'hover');
     this.interactiveFlip = {
       ...dom,
       side,
@@ -1052,6 +1058,7 @@ export class FlipBookEngine {
       prevSpread,
       nextSpread,
       mode,
+      stackBackedPrev,
       grabStartPos,
       lastClientX: clientPos?.x ?? 0,
       lastClientY: clientPos?.y ?? 0,
@@ -1069,6 +1076,35 @@ export class FlipBookEngine {
   _applySinglePrevFrame(f, coord) {
     const cx = clamp(coord.x, 0, this.pageW);
     const t = clamp(cx / Math.max(1, this.pageW), 0, 1);
+
+    if (f.stackBackedPrev && f.mode !== 'hover') {
+      f.downMask.style.opacity = '0';
+      f.castBounds.style.opacity = '0';
+      if (f.mode === 'drag' || f.mode === 'fallback') {
+        const liftRatio = clamp(t * 1.15, 0, 1);
+        f.singleDragLifting = liftRatio > 0.02;
+        if (f.underShadow) {
+          f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.16, 0, 0.14));
+        }
+        this._emit('dragLift', {
+          active: f.singleDragLifting,
+          side: 'left',
+          fromIdx: f.fromIdx,
+          toIdx: f.toIdx,
+          liftRatio,
+          clientX: f.lastClientX || 0,
+          clientY: f.lastClientY || 0,
+        });
+      } else {
+        if (f.underShadow) {
+          f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.18, 0, 0.16));
+        }
+      }
+      return;
+    }
+
+    f.downMask.style.opacity = '1';
+    f.castBounds.style.opacity = '1';
 
     let deg = 0;
     const cornerSign = f.from.y < this.pageH / 2 ? 1 : -1;
@@ -1232,7 +1268,9 @@ export class FlipBookEngine {
     const targetX = f.side === 'right' ? -this.pageW : this.pageW;
     const denomW = f.singlePrev ? this.pageW : 2 * this.pageW;
     const remainingRatio = clamp(Math.abs(targetX - f.coord.x) / Math.max(1, denomW), 0.2, 1);
-    const dur = Math.max(170, this.settings.flippingTime * remainingRatio);
+    const dur = f.stackBackedPrev
+      ? (fromDragLift ? 270 : 415)
+      : Math.max(170, this.settings.flippingTime * remainingRatio);
 
     f.mode = 'animate';
     f.animStartX = f.coord.x;
@@ -1538,6 +1576,7 @@ export class FlipBookEngine {
     this.currentPageIndex = (this.spreads[nextSpread] || [0])[0];
 
     const singlePrev = this.single && dir === -1;
+    const stackBackedPrev = !!(singlePrev && this.settings.hasCollectedStack?.());
     const cornerY = corner === 'top' ? 0 : this.pageH;
     const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
     const targetX = side === 'right' ? -this.pageW : this.pageW;
@@ -1584,7 +1623,9 @@ export class FlipBookEngine {
       singlePrev,
     });
 
-    const baseDuration = isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
+    const baseDuration = stackBackedPrev
+      ? (isCascading ? 320 : 415)
+      : (isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime);
     const baseRate = 1 / baseDuration;
 
     const flipObj = {
@@ -1593,6 +1634,7 @@ export class FlipBookEngine {
       dir,
       prevSpread,
       nextSpread,
+      stackBackedPrev,
       mode: 'animate',
       from: fromPoint,
       coord: delayMs > 0 ? { ...fromPoint } : { ...initCoord },
@@ -1622,6 +1664,65 @@ export class FlipBookEngine {
 
   flipPrev(corner = 'bottom') {
     this._startSerialFlip(-1, corner);
+  }
+
+  flipPrevFromStackDrag(dur = 275) {
+    if (!this.single) {
+      this.flipPrev('bottom');
+      return;
+    }
+    this._cancelInteractiveFlipImmediate();
+    if (this.flyingFlips.length) this._settleAllFlyingFlips();
+    const prevSpread = this.currentSpreadIndex;
+    const nextSpread = prevSpread - 1;
+    if (nextSpread < 0) return;
+
+    const fromPage = this.currentPageIndex;
+    this.currentSpreadIndex = nextSpread;
+    this.currentPageIndex = (this.spreads[nextSpread] || [0])[0];
+    const prevSlots = this._getSpreadSlots(prevSpread);
+    this._setSlotPage(this.rightSlot, prevSlots.right);
+
+    const dom = this._createFlipDom({
+      side: 'left',
+      isHard: false,
+      fromIdx: prevSlots.right,
+      toIdx: this.currentPageIndex,
+      underIdx: prevSlots.right,
+      withUnder: false,
+      seq: ++this.flipSeq,
+      fromHasSpine: false,
+      toHasSpine: true,
+      singlePrev: true,
+    });
+    const safeDur = Math.max(120, dur);
+    const flipObj = {
+      ...dom,
+      side: 'left',
+      dir: -1,
+      prevSpread,
+      nextSpread,
+      stackBackedPrev: true,
+      mode: 'animate',
+      from: { x: 0, y: this.pageH },
+      coord: { x: 0, y: this.pageH },
+      animStartX: 0,
+      animStartY: this.pageH,
+      animToX: this.pageW,
+      animToY: this.pageH,
+      progress: 0,
+      delayMs: 0,
+      elapsedMs: 0,
+      rate: 1 / safeDur,
+      baseRate: 1 / safeDur,
+      arcMode: false,
+      reversed: false,
+    };
+    this.flyingFlips.push(flipObj);
+    this._applyFlipFrame(flipObj, flipObj.coord);
+    this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: 'left', fromDragLift: true });
+    this._setState('flipping');
+    this._ensureRaf();
   }
 
   flip(pageIdx, corner = 'bottom') {
