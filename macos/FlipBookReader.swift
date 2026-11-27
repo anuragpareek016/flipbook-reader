@@ -711,55 +711,12 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     @objc private func showAboutPanel() {
-        let credits = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         paragraph.lineSpacing = 3.0
 
-        if let logoUrl = Bundle.main.url(forResource: "openfrontier-logo", withExtension: "png"),
-           let rawLogo = NSImage(contentsOf: logoUrl),
-           rawLogo.size.width > 0,
-           rawLogo.size.height > 0 {
-            let plaqueSize = NSSize(width: 116, height: 74)
-            let composed = NSImage(size: plaqueSize, flipped: false) { bounds in
-                let rect = bounds.insetBy(dx: 1.0, dy: 1.0)
-                let path = NSBezierPath(roundedRect: rect, xRadius: 11, yRadius: 11)
-                NSColor(calibratedRed: 0.055, green: 0.063, blue: 0.088, alpha: 0.96).setFill()
-                path.fill()
-                NSColor(calibratedWhite: 1.0, alpha: 0.14).setStroke()
-                path.lineWidth = 1.0
-                path.stroke()
-
-                let inner = rect.insetBy(dx: 11, dy: 8)
-                let aspect = rawLogo.size.width / rawLogo.size.height
-                var drawW = inner.width
-                var drawH = drawW / aspect
-                if drawH > inner.height {
-                    drawH = inner.height
-                    drawW = drawH * aspect
-                }
-                let drawRect = NSRect(
-                    x: inner.midX - drawW / 2.0,
-                    y: inner.midY - drawH / 2.0,
-                    width: drawW,
-                    height: drawH
-                )
-                rawLogo.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
-                return true
-            }
-            let attachment = NSTextAttachment()
-            attachment.image = composed
-            let attachStr = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
-            let imgPara = NSMutableParagraphStyle()
-            imgPara.alignment = .center
-            imgPara.paragraphSpacing = 8.0
-            attachStr.addAttribute(.paragraphStyle, value: imgPara, range: NSRange(location: 0, length: attachStr.length))
-            credits.append(attachStr)
-            credits.append(NSAttributedString(string: "\n", attributes: [.paragraphStyle: imgPara]))
-        }
-
-        let creditsText = "OpenFrontier Labs · Developed by Anurag Pareek\n\nTactile PDF book reading with realistic corner-curl physics, focus tools, and study annotations."
-        let bodyAttr = NSMutableAttributedString(
+        let creditsText = "Crafted by OpenFrontier Labs.\nDeveloped by Anurag Pareek.\n\nTactile PDF book reading with realistic\ncorner-curl physics, focus tools, and\nstudy annotations."
+        let credits = NSMutableAttributedString(
             string: creditsText,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11.5),
@@ -774,10 +731,9 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         for token in ["OpenFrontier Labs", "Anurag Pareek"] {
             let range = (creditsText as NSString).range(of: token)
             if range.location != NSNotFound {
-                bodyAttr.addAttributes(highlightAttrs, range: range)
+                credits.addAttributes(highlightAttrs, range: range)
             }
         }
-        credits.append(bodyAttr)
 
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "FlipBook Reader",
