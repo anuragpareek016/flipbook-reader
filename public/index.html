@@ -53,8 +53,45 @@
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
           </svg>
         </button>
+        <button id="btnStickyTab" class="icon-chip" title="Edge Sticky Tab on Page (Shift+B)" aria-label="Add or edit sticky tab">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6a2 2 0 0 1 2-2h10l4 8-4 8H6a2 2 0 0 1-2-2V6z"/>
+            <line x1="9" y1="9" x2="13" y2="9"/>
+          </svg>
+        </button>
       </div>
     </header>
+
+    <!-- Sticky Tab Creator / Editor Popover -->
+    <div id="stickyTabPopover" class="popover-panel sticky-tab-popover" hidden role="dialog" aria-label="Sticky tab editor">
+      <div class="sticky-pop-head">
+        <span>Edge Sticky Tab</span>
+        <span id="stickyTabPageTag" class="sticky-pop-page">Page 1</span>
+      </div>
+      <div id="stickyTabSpreadPick" class="sticky-pop-spread" hidden>
+        <button type="button" id="btnStickySideLeft" class="sticky-side-btn active">Left p. 1</button>
+        <button type="button" id="btnStickySideRight" class="sticky-side-btn">Right p. 2</button>
+      </div>
+      <input id="stickyTabLabelInput" class="sticky-label-input" type="text" maxlength="16" placeholder="Ch 4, Imp, Doubt…" autocomplete="off" />
+      <div class="sticky-quick-chips" id="stickyQuickChips">
+        <button type="button" class="sticky-chip" data-label="Ch">Ch</button>
+        <button type="button" class="sticky-chip" data-label="Imp">Imp</button>
+        <button type="button" class="sticky-chip" data-label="Doubt">Doubt</button>
+        <button type="button" class="sticky-chip" data-label="Formula">Formula</button>
+        <button type="button" class="sticky-chip" data-label="Revise">Revise</button>
+      </div>
+      <div class="sticky-color-row" id="stickyColorSwatches" role="radiogroup" aria-label="Sticky tab color">
+        <button type="button" class="sticky-color-dot color-coral active" data-color="coral" title="Coral Pink"></button>
+        <button type="button" class="sticky-color-dot color-amber" data-color="amber" title="Warm Amber"></button>
+        <button type="button" class="sticky-color-dot color-mint" data-color="mint" title="Fresh Mint"></button>
+        <button type="button" class="sticky-color-dot color-sky" data-color="sky" title="Sky Blue"></button>
+        <button type="button" class="sticky-color-dot color-violet" data-color="violet" title="Soft Violet"></button>
+      </div>
+      <div class="sticky-pop-actions">
+        <button type="button" id="btnStickyTabRemove" class="btn-small btn-danger-subtle" hidden>Remove</button>
+        <button type="button" id="btnStickyTabSave" class="btn-small sticky-save-btn">Save Tab</button>
+      </div>
+    </div>
 
     <!-- Main FlipBook Stage -->
     <main class="stage" id="stage">
@@ -96,6 +133,8 @@
         <div class="book-center-shift" id="bookCenterShift">
           <div class="book-shell" id="bookShell" hidden>
             <div class="book-drop-shadow" id="bookDropShadow"></div>
+            <div class="book-edge-tabs book-edge-tabs-left" id="bookEdgeTabsLeft" aria-label="Left edge sticky tabs"></div>
+            <div class="book-edge-tabs book-edge-tabs-right" id="bookEdgeTabsRight" aria-label="Right edge sticky tabs"></div>
             <div class="book-stack book-stack-left" id="bookStackLeft"></div>
             <div class="book-stack book-stack-right" id="bookStackRight"></div>
             <div class="book-container" id="bookContainer"></div>
@@ -103,6 +142,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Continuous Scroll Sticky Tabs Quick-Jump Rail -->
+      <div class="scroll-tabs-rail" id="scrollTabsRail" hidden aria-label="Sticky tabs quick jump"></div>
 
       <!-- Continuous Scroll Container -->
       <div class="scroll-viewport" id="scrollViewport" hidden>
@@ -204,6 +246,18 @@
           <div class="mag-resize-e" data-mag-resize="e" title="Drag to widen bar" aria-hidden="true"></div>
           <div class="mag-resize-s" data-mag-resize="s" title="Drag to resize bar height" aria-hidden="true"></div>
         </div>
+      </div>
+
+      <!-- Floating Navigation Jump-Back Pill -->
+      <div id="navBackPill" class="nav-back-pill" hidden role="region" aria-label="Navigation jump back">
+        <button id="btnNavBack" class="nav-back-btn" type="button" title="Jump back to previous page (Alt+←)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+          <span id="navBackLabel">Back to p. 1</span>
+          <span id="navBackCount" class="nav-back-count" hidden>2</span>
+        </button>
+        <button id="btnNavBackDismiss" class="nav-back-dismiss" type="button" title="Clear back history" aria-label="Clear back history">✕</button>
       </div>
 
       <!-- Floating Auto-Flip / Smooth Auto-Scroll Control Pill -->
@@ -332,6 +386,28 @@
         </div>
       </div>
       <div class="menu-divider"></div>
+      <div class="menu-sound-block menu-paper-block">
+        <div class="menu-sound-head">
+          <span>Paper Warmth</span>
+          <span class="menu-val" id="valPaperWarmth">Crisp</span>
+        </div>
+        <div class="auto-control-row menu-paper-row">
+          <button type="button" class="auto-step-btn" id="btnPaperWarmDec" title="Cooler paper (−)" aria-label="Decrease paper warmth">−</button>
+          <input id="paperWarmthRange" class="auto-range paper-warmth-range" type="range" min="0" max="100" step="1" value="0" aria-label="Paper warmth sepia slider" />
+          <button type="button" class="auto-step-btn" id="btnPaperWarmInc" title="Warmer paper (+)" aria-label="Increase paper warmth">+</button>
+        </div>
+        <div class="auto-pills paper-presets" id="paperWarmthPresets" role="group" aria-label="Paper tint presets">
+          <button type="button" class="auto-pill active" data-warm="0">Crisp</button>
+          <button type="button" class="auto-pill" data-warm="28">Ivory</button>
+          <button type="button" class="auto-pill" data-warm="58">Cream</button>
+          <button type="button" class="auto-pill" data-warm="92">Sepia</button>
+        </div>
+        <button type="button" class="menu-item menu-paper-grain-btn" id="menuPaperGrain" aria-pressed="false">
+          <span>Paper Fiber Texture</span>
+          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </button>
+      </div>
+      <div class="menu-divider"></div>
       <div class="menu-theme-row">
         <span>Backdrop</span>
         <div class="theme-dots">
@@ -386,8 +462,9 @@
       </div>
 
       <div id="paneBookmarks" class="drawer-pane">
-        <div class="bookmarks-actions">
-          <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark Current Page</button>
+        <div class="bookmarks-actions sticky-drawer-actions">
+          <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark Page</button>
+          <button id="btnAddStickyTabDrawer" class="btn-small sticky-drawer-add-btn">+ Sticky Tab</button>
         </div>
         <div id="bookmarksList" class="bookmarks-list"></div>
       </div>

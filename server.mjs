@@ -93,6 +93,7 @@ function registerLocalPdf(filePath, initialPage = null) {
       size: stat.size,
       lastPage: Number.isFinite(initialPage) && initialPage >= 1 ? Math.floor(initialPage) : 1,
       bookmarks: [],
+      stickyTabs: [],
       highlights: [],
       lastOpened: now,
     });
@@ -320,6 +321,18 @@ const server = http.createServer(async (req, res) => {
           }
           if (Array.isArray(body.bookmarks)) {
             entry.bookmarks = body.bookmarks.filter((n) => Number.isInteger(n) && n >= 1);
+          }
+          if (Array.isArray(body.stickyTabs)) {
+            const validTabColors = new Set(['coral', 'amber', 'mint', 'sky', 'violet']);
+            entry.stickyTabs = body.stickyTabs
+              .filter((t) => t && typeof t === 'object' && Number.isInteger(t.page) && t.page >= 1)
+              .slice(0, 200)
+              .map((t) => ({
+                id: String(t.id || `tab-${t.page}`).slice(0, 64),
+                page: Math.floor(t.page),
+                label: String(t.label || `p.${t.page}`).trim().slice(0, 18) || `p.${t.page}`,
+                color: validTabColors.has(t.color) ? t.color : 'amber',
+              }));
           }
           if (Array.isArray(body.highlights)) {
             const validColors = new Set(['yellow', 'green', 'blue', 'pink', 'orange']);

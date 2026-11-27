@@ -6,6 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs
 
 const MAX_CACHED_CANVASES = 18;
 const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
+const STICKY_TAB_COLORS = ['coral', 'amber', 'mint', 'sky', 'violet'];
 
 const els = {
   app: document.getElementById('app'),
@@ -33,6 +34,17 @@ const els = {
   magCanvas: document.getElementById('magCanvas'),
   btnHighlightsTop: document.getElementById('btnHighlightsTop'),
   btnBookmarkPage: document.getElementById('btnBookmarkPage'),
+  btnStickyTab: document.getElementById('btnStickyTab'),
+  stickyTabPopover: document.getElementById('stickyTabPopover'),
+  stickyTabPageTag: document.getElementById('stickyTabPageTag'),
+  stickyTabSpreadPick: document.getElementById('stickyTabSpreadPick'),
+  btnStickySideLeft: document.getElementById('btnStickySideLeft'),
+  btnStickySideRight: document.getElementById('btnStickySideRight'),
+  stickyTabLabelInput: document.getElementById('stickyTabLabelInput'),
+  stickyQuickChips: document.getElementById('stickyQuickChips'),
+  stickyColorSwatches: document.getElementById('stickyColorSwatches'),
+  btnStickyTabRemove: document.getElementById('btnStickyTabRemove'),
+  btnStickyTabSave: document.getElementById('btnStickyTabSave'),
   zoomPill: document.getElementById('zoomPill'),
   zoomLabel: document.getElementById('zoomLabel'),
   btnZoomOut: document.getElementById('btnZoomOut'),
@@ -55,6 +67,9 @@ const els = {
   bookCenterShift: document.getElementById('bookCenterShift'),
   bookShell: document.getElementById('bookShell'),
   bookDropShadow: document.getElementById('bookDropShadow'),
+  bookEdgeTabsLeft: document.getElementById('bookEdgeTabsLeft'),
+  bookEdgeTabsRight: document.getElementById('bookEdgeTabsRight'),
+  scrollTabsRail: document.getElementById('scrollTabsRail'),
   bookStackLeft: document.getElementById('bookStackLeft'),
   bookStackRight: document.getElementById('bookStackRight'),
   bookContainer: document.getElementById('bookContainer'),
@@ -63,6 +78,11 @@ const els = {
   scsTopCard: document.getElementById('scsTopCard'),
   scsBadge: document.getElementById('scsBadge'),
   singleFlightLayer: document.getElementById('singleFlightLayer'),
+  navBackPill: document.getElementById('navBackPill'),
+  btnNavBack: document.getElementById('btnNavBack'),
+  navBackLabel: document.getElementById('navBackLabel'),
+  navBackCount: document.getElementById('navBackCount'),
+  btnNavBackDismiss: document.getElementById('btnNavBackDismiss'),
 
   btnPrevArrow: document.getElementById('btnPrevArrow'),
   btnNextArrow: document.getElementById('btnNextArrow'),
@@ -125,7 +145,14 @@ const els = {
   searchStatus: document.getElementById('searchStatus'),
   searchResults: document.getElementById('searchResults'),
   btnToggleCurrentBookmark: document.getElementById('btnToggleCurrentBookmark'),
+  btnAddStickyTabDrawer: document.getElementById('btnAddStickyTabDrawer'),
   bookmarksList: document.getElementById('bookmarksList'),
+  valPaperWarmth: document.getElementById('valPaperWarmth'),
+  btnPaperWarmDec: document.getElementById('btnPaperWarmDec'),
+  paperWarmthRange: document.getElementById('paperWarmthRange'),
+  btnPaperWarmInc: document.getElementById('btnPaperWarmInc'),
+  paperWarmthPresets: document.getElementById('paperWarmthPresets'),
+  menuPaperGrain: document.getElementById('menuPaperGrain'),
   highlightsSummary: document.getElementById('highlightsSummary'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
   btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
@@ -177,6 +204,8 @@ const state = {
   showCover: true,
   clickMode: 'smart', // 'smart' | 'anywhere'
   readDark: false,
+  paperWarmth: 0, // 0..100 sepia/warmth eye-comfort slider
+  paperGrain: false, // subtle cellulose fiber paper texture
   autoHideBars: true,
   soundEnabled: true,
   soundPreset: DEFAULT_SOUND_PRESET,
@@ -212,6 +241,10 @@ const state = {
   renderedMap: new Map(), // pageIdx -> { scale, renderTask, textPromise }
   textCache: new Map(), // 1-based pageNum -> string
   bookmarks: [],
+  stickyTabs: [], // [{ id, page, label, color }]
+  stickyEditPage: null,
+  stickyEditColor: 'coral',
+  navHistory: [], // [{ page, reason }]
   highlights: [],
   hlFilterMode: 'all', // 'all' | 'current' | 'page'
   hlFilterPage: null,
@@ -336,6 +369,12 @@ async function fetchLibrary() {
 function applySavedSettings(settings) {
   if (settings.theme) setTheme(settings.theme, false);
   if (typeof settings.readDark === 'boolean') setReadDark(settings.readDark, false);
+  if (Number.isFinite(Number(settings.paperWarmth))) {
+    setPaperWarmth(Number(settings.paperWarmth), false);
+  }
+  if (typeof settings.paperGrain === 'boolean') {
+    setPaperGrain(settings.paperGrain, false);
+  }
   if (typeof settings.autoHideBars === 'boolean') state.autoHideBars = settings.autoHideBars;
   if (typeof settings.twoFingerPan === 'boolean') state.twoFingerPan = settings.twoFingerPan;
   if (settings.soundPreset) {
@@ -383,6 +422,8 @@ function schedulePersistState() {
       settings: {
         theme: state.theme,
         readDark: state.readDark,
+        paperWarmth: state.paperWarmth,
+        paperGrain: state.paperGrain,
         autoHideBars: state.autoHideBars,
         twoFingerPan: state.twoFingerPan,
         scrollMode: state.scrollMode,
@@ -405,6 +446,7 @@ function schedulePersistState() {
       payload.lastPage = state.currentIndex + 1;
       payload.totalPages = state.totalPages;
       payload.bookmarks = state.bookmarks;
+      payload.stickyTabs = state.stickyTabs;
       payload.highlights = state.highlights;
     }
     fetch('/api/book-state', {
@@ -418,6 +460,7 @@ function schedulePersistState() {
         localStorage.setItem(`flipbook:${state.bookId}`, JSON.stringify({
           lastPage: state.currentIndex + 1,
           bookmarks: state.bookmarks,
+          stickyTabs: state.stickyTabs,
           highlights: state.highlights,
         }));
       } catch {
@@ -480,6 +523,14 @@ function disposeBook() {
     state.pageFlip = null;
   }
   els.bookContainer.innerHTML = '';
+  if (els.bookEdgeTabsLeft) els.bookEdgeTabsLeft.innerHTML = '';
+  if (els.bookEdgeTabsRight) els.bookEdgeTabsRight.innerHTML = '';
+  if (els.scrollTabsRail) {
+    els.scrollTabsRail.innerHTML = '';
+    els.scrollTabsRail.hidden = true;
+  }
+  if (els.stickyTabPopover) els.stickyTabPopover.hidden = true;
+  clearNavHistory();
   els.scrollPages.innerHTML = '';
   els.scrollViewport.hidden = true;
   document.body.classList.remove('mode-scroll');
@@ -1173,6 +1224,8 @@ function updateBookDepthChrome() {
     els.bookDropShadow.style.left = '0px';
     els.bookDropShadow.style.right = `${-rightThick}px`;
     els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
+    els.bookShell.style.setProperty('--tabs-offset-left', '0px');
+    els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
     return;
   }
 
@@ -1190,6 +1243,8 @@ function updateBookDepthChrome() {
       els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
       els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
+      els.bookShell.style.setProperty('--tabs-offset-left', `${sw}px`);
+      els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
     } else {
       // Back cover sits on left half of 2*pageW
       setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
@@ -1198,6 +1253,8 @@ function updateBookDepthChrome() {
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
       els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(-leftThick * 0.25)}px`);
+      els.bookShell.style.setProperty('--tabs-offset-left', `${-leftThick}px`);
+      els.bookShell.style.setProperty('--tabs-offset-right', `${sw}px`);
     }
   } else {
     state.allowSpine = true;
@@ -1209,6 +1266,8 @@ function updateBookDepthChrome() {
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
     els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round((rightThick - leftThick) * 0.25)}px`);
+    els.bookShell.style.setProperty('--tabs-offset-left', `${-leftThick}px`);
+    els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
   }
 }
 
@@ -1635,10 +1694,50 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   if (persist) schedulePersistState();
 }
 
+/* ---------- Navigation History (Browser-Style Jump Back Stack) ---------- */
+function updateNavBackUi() {
+  if (!els.navBackPill) return;
+  const count = state.navHistory.length;
+  const visible = Boolean(state.pdfDoc && count > 0);
+  els.navBackPill.hidden = !visible;
+  if (!visible) return;
+  const top = state.navHistory[count - 1];
+  if (els.navBackLabel) {
+    els.navBackLabel.textContent = `Back to p. ${top.page}`;
+  }
+  if (els.navBackCount) {
+    els.navBackCount.hidden = count <= 1;
+    els.navBackCount.textContent = String(count);
+  }
+}
+
+function pushNavHistory(fromPage, reason = 'jump') {
+  const p = clamp(Math.floor(fromPage) || 1, 1, Math.max(1, state.totalPages));
+  const top = state.navHistory[state.navHistory.length - 1];
+  if (top && top.page === p) return;
+  state.navHistory.push({ page: p, reason });
+  if (state.navHistory.length > 25) state.navHistory.shift();
+  updateNavBackUi();
+}
+
+function jumpBackHistory() {
+  if (!state.navHistory.length || !state.pdfDoc) return;
+  const prev = state.navHistory.pop();
+  updateNavBackUi();
+  if (prev?.page) {
+    jumpToPage(prev.page, false, { recordHistory: false, reason: 'back' });
+  }
+}
+
+function clearNavHistory() {
+  state.navHistory = [];
+  updateNavBackUi();
+}
+
 /* ---------- Navigation Actions ---------- */
 function goPrev() {
   if (state.scrollMode === 'scroll') {
-    if (state.totalPages > 0) jumpToPage(Math.max(1, state.currentIndex), true);
+    if (state.totalPages > 0) jumpToPage(Math.max(1, state.currentIndex), true, { recordHistory: false });
     return;
   }
   if (!state.pageFlip) return;
@@ -1647,16 +1746,21 @@ function goPrev() {
 
 function goNext() {
   if (state.scrollMode === 'scroll') {
-    if (state.totalPages > 0) jumpToPage(Math.min(state.totalPages, state.currentIndex + 2), true);
+    if (state.totalPages > 0) jumpToPage(Math.min(state.totalPages, state.currentIndex + 2), true, { recordHistory: false });
     return;
   }
   if (!state.pageFlip) return;
   state.pageFlip.flipNext('bottom');
 }
 
-function jumpToPage(oneBasedPage, animate = false) {
+function jumpToPage(oneBasedPage, animate = false, { recordHistory = true, reason = 'jump' } = {}) {
   if (!state.totalPages) return;
   const targetIdx = clamp(Math.floor(oneBasedPage) - 1, 0, state.totalPages - 1);
+  const currentVisible = getVisibleIndices();
+  const fromPage = (currentVisible[0] ?? state.currentIndex ?? 0) + 1;
+  if (recordHistory && !currentVisible.includes(targetIdx)) {
+    pushNavHistory(fromPage, reason);
+  }
   if (state.scrollMode === 'scroll') {
     const wrap = els.scrollPages.children[targetIdx];
     if (wrap) {
@@ -2104,22 +2208,268 @@ async function refreshTextPane() {
   els.pageTextPreview.textContent = parts.join('\n\n');
 }
 
+/* ---------- Bookmarks & Physical Edge Sticky Tabs ---------- */
+function normalizeStickyTabs(list) {
+  if (!Array.isArray(list)) return [];
+  const byPage = new Map();
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const p = Math.floor(Number(item.page));
+    if (!Number.isInteger(p) || p < 1) continue;
+    const label = String(item.label || `p.${p}`).trim().slice(0, 18) || `p.${p}`;
+    const color = STICKY_TAB_COLORS.includes(item.color) ? item.color : 'amber';
+    byPage.set(p, {
+      id: String(item.id || `tab-${p}`).slice(0, 64),
+      page: p,
+      label,
+      color,
+    });
+  }
+  return [...byPage.values()].sort((a, b) => a.page - b.page).slice(0, 200);
+}
+
+function computeEdgeTabPositions(tabs) {
+  if (!tabs.length) return [];
+  const minY = 11;
+  const maxY = 87;
+  const span = maxY - minY;
+  const gap = Math.min(8.4, span / Math.max(1, tabs.length));
+  const totalPagesDenom = Math.max(1, state.totalPages - 1);
+
+  const ys = tabs.map((t, i) => {
+    const ratio = state.totalPages > 1 ? (t.page - 1) / totalPagesDenom : (tabs.length > 1 ? i / (tabs.length - 1) : 0.5);
+    return clamp(minY + ratio * span, minY, maxY);
+  });
+
+  // Forward pass prevents overlapping downward
+  for (let i = 1; i < ys.length; i++) {
+    if (ys[i] - ys[i - 1] < gap) ys[i] = ys[i - 1] + gap;
+  }
+  // Overflow above maxY? Push upward uniformly
+  if (ys[ys.length - 1] > maxY) {
+    ys[ys.length - 1] = maxY;
+    for (let i = ys.length - 2; i >= 0; i--) {
+      if (ys[i + 1] - ys[i] < gap) ys[i] = ys[i + 1] - gap;
+    }
+  }
+  return tabs.map((tab, i) => ({ tab, topPct: clamp(ys[i], minY, maxY) }));
+}
+
+function createStickyEdgeTabElement(tab, topPct, isCurrent) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `sticky-edge-tab tab-${tab.color}${isCurrent ? ' is-current' : ''}`;
+  btn.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
+  btn.dataset.page = String(tab.page);
+  btn.title = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
+  btn.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    jumpToPage(tab.page, false, { reason: 'sticky-tab' });
+  });
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openStickyTabPopover(tab.page);
+  });
+  return btn;
+}
+
+function renderBookEdgeTabs() {
+  if (!els.bookEdgeTabsLeft || !els.bookEdgeTabsRight) return;
+  els.bookEdgeTabsLeft.innerHTML = '';
+  els.bookEdgeTabsRight.innerHTML = '';
+
+  const tabs = [...state.stickyTabs].sort((a, b) => a.page - b.page);
+  const visible1Based = new Set(getVisibleIndices().map((i) => i + 1));
+
+  if (state.scrollMode === 'scroll') {
+    if (els.scrollTabsRail) {
+      els.scrollTabsRail.innerHTML = '';
+      els.scrollTabsRail.hidden = tabs.length === 0 || !state.pdfDoc;
+      for (const tab of tabs) {
+        els.scrollTabsRail.appendChild(createStickyEdgeTabElement(tab, 50, visible1Based.has(tab.page)));
+      }
+    }
+    return;
+  }
+
+  if (els.scrollTabsRail) {
+    els.scrollTabsRail.innerHTML = '';
+    els.scrollTabsRail.hidden = true;
+  }
+  if (!state.pdfDoc || !tabs.length) return;
+
+  const visible = getVisibleIndices();
+  const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+  const curFirst = (visible[0] ?? 0) + 1;
+
+  // Match real open book split: pages on left half or already turned belong on left stack edge
+  let leftTabs = [];
+  let rightTabs = [];
+  if (single) {
+    leftTabs = tabs.filter((t) => t.page < curFirst);
+    rightTabs = tabs.filter((t) => t.page >= curFirst);
+  } else {
+    const leftCutoff = visible.length === 2
+      ? curFirst
+      : (visible[0] === state.totalPages - 1 && state.totalPages > 1 ? state.totalPages : 0);
+    leftTabs = tabs.filter((t) => t.page <= leftCutoff);
+    rightTabs = tabs.filter((t) => t.page > leftCutoff);
+  }
+
+  for (const { tab, topPct } of computeEdgeTabPositions(leftTabs)) {
+    els.bookEdgeTabsLeft.appendChild(createStickyEdgeTabElement(tab, topPct, visible1Based.has(tab.page)));
+  }
+  for (const { tab, topPct } of computeEdgeTabPositions(rightTabs)) {
+    els.bookEdgeTabsRight.appendChild(createStickyEdgeTabElement(tab, topPct, visible1Based.has(tab.page)));
+  }
+}
+
+function updateStickyTabButtonUi() {
+  if (!els.btnStickyTab) return;
+  const visible = getVisibleIndices().map((i) => i + 1);
+  const activeTab = visible
+    .map((p) => state.stickyTabs.find((t) => t.page === p))
+    .find(Boolean);
+  const popoverOpen = Boolean(els.stickyTabPopover && !els.stickyTabPopover.hidden);
+  els.btnStickyTab.classList.toggle('active', Boolean(activeTab || popoverOpen));
+  els.btnStickyTab.setAttribute('aria-pressed', String(Boolean(activeTab || popoverOpen)));
+  if (activeTab) {
+    els.btnStickyTab.dataset.tabColor = activeTab.color;
+    els.btnStickyTab.title = `Sticky Tab: "${activeTab.label}" (p. ${activeTab.page}) — Click to edit`;
+  } else {
+    els.btnStickyTab.removeAttribute('data-tab-color');
+    els.btnStickyTab.title = 'Add Edge Sticky Tab (Shift+B)';
+  }
+}
+
+function syncStickyPopoverPageFields(targetPage) {
+  state.stickyEditPage = clamp(targetPage, 1, Math.max(1, state.totalPages));
+  if (els.stickyTabPageTag) els.stickyTabPageTag.textContent = `Page ${state.stickyEditPage}`;
+
+  const existing = state.stickyTabs.find((t) => t.page === state.stickyEditPage);
+  state.stickyEditColor = existing ? existing.color : (state.stickyEditColor || 'coral');
+
+  if (els.stickyTabLabelInput) {
+    els.stickyTabLabelInput.value = existing ? existing.label : '';
+  }
+  if (els.btnStickyTabRemove) {
+    els.btnStickyTabRemove.hidden = !existing;
+  }
+  if (els.btnStickyTabSave) {
+    els.btnStickyTabSave.textContent = existing ? 'Update Tab' : 'Add Tab';
+  }
+  els.stickyColorSwatches?.querySelectorAll('.sticky-color-dot').forEach((dot) => {
+    dot.classList.toggle('active', dot.dataset.color === state.stickyEditColor);
+  });
+
+  const visible = getVisibleIndices().map((i) => i + 1);
+  if (els.stickyTabSpreadPick && els.btnStickySideLeft && els.btnStickySideRight) {
+    const hasSpread = visible.length === 2;
+    els.stickyTabSpreadPick.hidden = !hasSpread;
+    if (hasSpread) {
+      els.btnStickySideLeft.textContent = `Left p. ${visible[0]}`;
+      els.btnStickySideRight.textContent = `Right p. ${visible[1]}`;
+      els.btnStickySideLeft.classList.toggle('active', state.stickyEditPage === visible[0]);
+      els.btnStickySideRight.classList.toggle('active', state.stickyEditPage === visible[1]);
+    }
+  }
+}
+
+function openStickyTabPopover(explicitPage = null) {
+  if (!state.pdfDoc || !els.stickyTabPopover) return;
+  const visible = getVisibleIndices().map((i) => i + 1);
+  const existingOnSpread = visible.find((p) => state.stickyTabs.some((t) => t.page === p));
+  const initialPage = explicitPage ?? existingOnSpread ?? visible[0] ?? 1;
+  syncStickyPopoverPageFields(initialPage);
+  els.stickyTabPopover.hidden = false;
+  updateStickyTabButtonUi();
+  showBar('header', false);
+  setTimeout(() => {
+    els.stickyTabLabelInput?.focus();
+    els.stickyTabLabelInput?.select();
+  }, 20);
+}
+
+function closeStickyTabPopover() {
+  if (!els.stickyTabPopover || els.stickyTabPopover.hidden) return;
+  els.stickyTabPopover.hidden = true;
+  updateStickyTabButtonUi();
+}
+
+function saveStickyTabFromPopover() {
+  if (!state.pdfDoc || !state.stickyEditPage) return;
+  const page = clamp(state.stickyEditPage, 1, state.totalPages);
+  const rawLabel = (els.stickyTabLabelInput?.value || '').trim();
+  const label = rawLabel.slice(0, 18) || `p.${page}`;
+  const color = STICKY_TAB_COLORS.includes(state.stickyEditColor) ? state.stickyEditColor : 'amber';
+
+  state.stickyTabs = normalizeStickyTabs([
+    ...state.stickyTabs.filter((t) => t.page !== page),
+    { id: `tab-${page}-${Date.now().toString(36)}`, page, label, color },
+  ]);
+  closeStickyTabPopover();
+  updateBookmarkUi();
+  schedulePersistState();
+}
+
+function removeStickyTabForPage(page) {
+  state.stickyTabs = state.stickyTabs.filter((t) => t.page !== page);
+  closeStickyTabPopover();
+  updateBookmarkUi();
+  schedulePersistState();
+}
+
 function updateBookmarkUi() {
   const visible = getVisibleIndices().map((i) => i + 1);
   const isBookmarked = visible.some((p) => state.bookmarks.includes(p));
   els.btnBookmarkPage.classList.toggle('active', isBookmarked);
-  els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark Current Page';
+  els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark Page';
+  updateStickyTabButtonUi();
+  renderBookEdgeTabs();
 
   els.bookmarksList.innerHTML = '';
-  if (!state.bookmarks.length) {
-    els.bookmarksList.innerHTML = '<div class="search-status">No bookmarks saved for this book yet.</div>';
+  const hasTabs = state.stickyTabs.length > 0;
+  const hasBookmarks = state.bookmarks.length > 0;
+  if (!hasTabs && !hasBookmarks) {
+    els.bookmarksList.innerHTML = '<div class="search-status">No sticky tabs or bookmarks saved yet.</div>';
     return;
   }
+
+  for (const tab of [...state.stickyTabs].sort((a, b) => a.page - b.page)) {
+    const row = document.createElement('div');
+    row.className = 'toc-item';
+    row.innerHTML = `
+      <span class="drawer-tab-pill">
+        <span class="drawer-tab-swatch color-${tab.color}"></span>
+        <span>${escapeHtml(tab.label)} — p. ${tab.page}</span>
+      </span>
+      <span class="drawer-item-actions">
+        <button class="drawer-edit-btn" data-action="edit" title="Edit sticky tab">✎</button>
+        <button class="drawer-close" data-action="remove" title="Remove">✕</button>
+      </span>
+    `;
+    row.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (btn?.dataset.action === 'remove') {
+        removeStickyTabForPage(tab.page);
+        return;
+      }
+      if (btn?.dataset.action === 'edit') {
+        openStickyTabPopover(tab.page);
+        return;
+      }
+      jumpToPage(tab.page, false, { reason: 'sticky-tab' });
+    });
+    els.bookmarksList.appendChild(row);
+  }
+
   const sorted = [...state.bookmarks].sort((a, b) => a - b);
   for (const p of sorted) {
     const row = document.createElement('div');
     row.className = 'toc-item';
-    row.innerHTML = `<span>Bookmark — Page ${p}</span><button class="drawer-close" title="Remove">✕</button>`;
+    row.innerHTML = `<span>★ Bookmark — Page ${p}</span><button class="drawer-close" title="Remove">✕</button>`;
     row.addEventListener('click', (e) => {
       if (e.target.closest('button')) {
         state.bookmarks = state.bookmarks.filter((x) => x !== p);
@@ -2127,7 +2477,7 @@ function updateBookmarkUi() {
         schedulePersistState();
         return;
       }
-      jumpToPage(p, false);
+      jumpToPage(p, false, { reason: 'bookmark' });
     });
     els.bookmarksList.appendChild(row);
   }
@@ -2686,7 +3036,7 @@ function findHighlightAtClientPoint(pageNode, clientX, clientY) {
 }
 
 /* ---------- Opening Books ---------- */
-async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], highlights = [] } = {}) {
+async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], stickyTabs = [], highlights = [] } = {}) {
   els.loadingText.textContent = `Opening ${title}…`;
   els.loadingOverlay.hidden = false;
   els.libraryModal.hidden = true;
@@ -2711,7 +3061,9 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     state.bookTitle = title;
     state.bookId = bookId;
     state.bookmarks = Array.isArray(bookmarks) ? [...bookmarks] : [];
+    state.stickyTabs = normalizeStickyTabs(stickyTabs);
     state.highlights = normalizeHighlightsList(highlights);
+    clearNavHistory();
 
     // Recover saved local progress if missing from server entry
     let targetPage = startPage;
@@ -2720,6 +3072,9 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
         const local = JSON.parse(localStorage.getItem(`flipbook:${bookId}`) || 'null');
         if (!targetPage && local?.lastPage) targetPage = local.lastPage;
         if (Array.isArray(local?.bookmarks) && !state.bookmarks.length) state.bookmarks = local.bookmarks;
+        if (Array.isArray(local?.stickyTabs) && !state.stickyTabs.length) {
+          state.stickyTabs = normalizeStickyTabs(local.stickyTabs);
+        }
         if (Array.isArray(local?.highlights) && !state.highlights.length) {
           state.highlights = normalizeHighlightsList(local.highlights);
         }
@@ -2761,6 +3116,7 @@ async function openBookById(bookId, overridePage = null) {
     bookId: book.id,
     startPage: targetPage,
     bookmarks: book.bookmarks || [],
+    stickyTabs: book.stickyTabs || [],
     highlights: book.highlights || [],
   });
 }
@@ -2792,6 +3148,7 @@ async function pickFileViaHost() {
         bookId: data.id,
         startPage: data.lastPage || 1,
         bookmarks: data.bookmarks || [],
+        stickyTabs: data.stickyTabs || [],
         highlights: data.highlights || [],
       });
     }
@@ -2838,6 +3195,7 @@ function shouldKeepBarVisible(zone) {
   if (!els.libraryModal.hidden) return false;
   const p = state.lastBarPointer;
   if (zone === 'header') {
+    if (els.stickyTabPopover && !els.stickyTabPopover.hidden) return true;
     if (isBarInputFocused(els.topBar)) return true;
     if (els.topBar?.matches(':hover')) return true;
     return Boolean(p && p.clientY <= HEADER_WAKE_PX);
@@ -3220,7 +3578,7 @@ function drawMagPageContent(
   ctx.clip();
 
   if (reverseBack) {
-    ctx.fillStyle = dark ? '#191a1f' : '#f8f7f3';
+    ctx.fillStyle = dark ? '#191a1f' : getPaperSurfaceColor(true);
     ctx.fillRect(x, y, w, h);
     if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
       ctx.save();
@@ -3230,16 +3588,18 @@ function drawMagPageContent(
       drawMagFilteredCanvas(ctx, srcCanvas, 0, 0, w, h);
       ctx.restore();
     }
+    drawMagPaperGrain(ctx, x, y, w, h);
     ctx.restore();
     return;
   }
 
-  ctx.fillStyle = dark ? '#17181c' : '#ffffff';
+  ctx.fillStyle = dark ? '#17181c' : getPaperSurfaceColor(false);
   ctx.fillRect(x, y, w, h);
 
   if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
     drawMagFilteredCanvas(ctx, srcCanvas, x, y, w, h);
   }
+  drawMagPaperGrain(ctx, x, y, w, h);
 
   if (drawHighlights && hasPage) {
     const pageNum = idx + 1;
@@ -3284,6 +3644,9 @@ function drawMagFilteredCanvas(ctx, srcCanvas, x, y, w, h) {
       ctx.drawImage(getMagDarkFallbackCanvas(srcCanvas), x, y, w, h);
     }
   } else {
+    if (state.paperWarmth > 0 || state.paperGrain) {
+      ctx.globalCompositeOperation = 'multiply';
+    }
     ctx.drawImage(srcCanvas, x, y, w, h);
   }
   ctx.restore();
@@ -3360,7 +3723,7 @@ function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
     ctx.closePath();
     ctx.clip();
 
-    ctx.fillStyle = dark ? '#17181c' : '#ffffff';
+    ctx.fillStyle = dark ? '#17181c' : getPaperSurfaceColor(false);
     ctx.fillRect(leftX - 0.5, topY - 1, stripW + 1, stripH + 2);
 
     if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
@@ -3379,10 +3742,14 @@ function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
           ctx.drawImage(getMagDarkFallbackCanvas(srcCanvas), sx, 0, sw, srcCanvas.height, leftX - 0.35, topY, stripW + 0.7, stripH);
         }
       } else {
+        if (state.paperWarmth > 0 || state.paperGrain) {
+          ctx.globalCompositeOperation = 'multiply';
+        }
         ctx.drawImage(srcCanvas, sx, 0, sw, srcCanvas.height, leftX - 0.35, topY, stripW + 0.7, stripH);
       }
       ctx.restore();
     }
+    drawMagPaperGrain(ctx, leftX - 0.5, topY - 1, stripW + 1, stripH + 2);
     ctx.restore();
   }
 
@@ -3866,6 +4233,163 @@ function setMagnifierPower(power) {
   schedulePersistState();
 }
 
+/* ---------- Paper Warmth Tint & Subtle Cellulose Fiber Texture ---------- */
+const PAPER_WARM_STOPS = [
+  [0, 255, 255, 255],
+  [35, 251, 245, 232],
+  [70, 245, 233, 206],
+  [100, 234, 213, 174],
+];
+
+const PAPER_REVERSE_STOPS = [
+  [0, 248, 247, 243],
+  [50, 236, 223, 196],
+  [100, 214, 193, 154],
+];
+
+let paperGrainCanvas = null;
+let paperGrainPattern = null;
+
+function interpolatePaperRgb(stops, val) {
+  const v = clamp(Number(val) || 0, 0, 100);
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [a, ar, ag, ab] = stops[i];
+    const [b, br, bg, bb] = stops[i + 1];
+    if (v <= b) {
+      const t = b > a ? (v - a) / (b - a) : 0;
+      const r = Math.round(ar + (br - ar) * t);
+      const g = Math.round(ag + (bg - ag) * t);
+      const bl = Math.round(ab + (bb - ab) * t);
+      return `rgb(${r}, ${g}, ${bl})`;
+    }
+  }
+  const [, lr, lg, lb] = stops[stops.length - 1];
+  return `rgb(${lr}, ${lg}, ${lb})`;
+}
+
+function getPaperSurfaceColor(reverseBack = false) {
+  return interpolatePaperRgb(reverseBack ? PAPER_REVERSE_STOPS : PAPER_WARM_STOPS, state.paperWarmth);
+}
+
+function initPaperGrainTexture() {
+  if (paperGrainCanvas) return paperGrainCanvas;
+  const size = 160;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const gctx = c.getContext('2d');
+  gctx.fillStyle = '#ffffff';
+  gctx.fillRect(0, 0, size, size);
+
+  // Deterministic PRNG for organic matte cellulose specks & short cross-fibers
+  let seed = 0x517cc1b7;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  const img = gctx.getImageData(0, 0, size, size);
+  const data = img.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const tone = 244 + Math.floor(rand() * 12); // 244..255 very fine tooth
+    data[i] = tone;
+    data[i + 1] = tone - Math.floor(rand() * 2);
+    data[i + 2] = tone - Math.floor(rand() * 4);
+    data[i + 3] = 255;
+  }
+  gctx.putImageData(img, 0, 0);
+
+  gctx.lineWidth = 0.65;
+  for (let i = 0; i < 165; i++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const len = 3 + rand() * 8;
+    const ang = rand() * Math.PI * 2;
+    const shade = 212 + Math.floor(rand() * 26);
+    gctx.strokeStyle = `rgba(${shade}, ${shade - 4}, ${shade - 10}, 0.22)`;
+    gctx.beginPath();
+    gctx.moveTo(x, y);
+    gctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    gctx.stroke();
+  }
+
+  paperGrainCanvas = c;
+  try {
+    document.documentElement.style.setProperty('--paper-grain-url', `url("${c.toDataURL('image/png')}")`);
+  } catch {
+    // ignore
+  }
+  return c;
+}
+
+function drawMagPaperGrain(ctx, x, y, w, h) {
+  if (state.readDark || !state.paperGrain || w <= 0 || h <= 0) return;
+  const tile = initPaperGrainTexture();
+  if (!paperGrainPattern) {
+    try {
+      paperGrainPattern = ctx.createPattern(tile, 'repeat');
+    } catch {
+      paperGrainPattern = null;
+    }
+  }
+  if (!paperGrainPattern) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.globalAlpha *= 0.42;
+  ctx.fillStyle = paperGrainPattern;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+function formatPaperWarmthLabel(val) {
+  const v = Math.round(clamp(val, 0, 100));
+  if (v <= 2) return 'Crisp';
+  if (v < 40) return `Ivory · ${v}%`;
+  if (v < 75) return `Cream · ${v}%`;
+  return `Sepia · ${v}%`;
+}
+
+function updatePaperComfortUi() {
+  const v = clamp(Math.round(state.paperWarmth), 0, 100);
+  const bg = interpolatePaperRgb(PAPER_WARM_STOPS, v);
+  const revBg = interpolatePaperRgb(PAPER_REVERSE_STOPS, v);
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty('--paper-bg', bg);
+  rootStyle.setProperty('--paper-reverse-bg', revBg);
+  rootStyle.setProperty('--paper-warmth', (v / 100).toFixed(2));
+
+  if (state.paperGrain) initPaperGrainTexture();
+  document.body.classList.toggle('has-warm-paper', v > 0);
+  document.body.classList.toggle('has-paper-grain', !!state.paperGrain);
+
+  if (els.valPaperWarmth) els.valPaperWarmth.textContent = formatPaperWarmthLabel(v);
+  if (els.paperWarmthRange) els.paperWarmthRange.value = String(v);
+  if (els.paperWarmthPresets) {
+    els.paperWarmthPresets.querySelectorAll('.auto-pill').forEach((btn) => {
+      btn.classList.toggle('active', Math.abs(Number(btn.dataset.warm) - v) <= 5);
+    });
+  }
+  if (els.menuPaperGrain) {
+    els.menuPaperGrain.classList.toggle('is-on', !!state.paperGrain);
+    els.menuPaperGrain.setAttribute('aria-pressed', String(!!state.paperGrain));
+  }
+}
+
+function setPaperWarmth(val, persist = true) {
+  const num = Number(val);
+  state.paperWarmth = Number.isFinite(num) ? clamp(Math.round(num), 0, 100) : 0;
+  updatePaperComfortUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (persist) schedulePersistState();
+}
+
+function setPaperGrain(enabled, persist = true) {
+  state.paperGrain = !!enabled;
+  updatePaperComfortUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (persist) schedulePersistState();
+}
+
 /* ---------- UI Modes & Theme ---------- */
 function setTheme(theme, persist = true) {
   state.theme = theme;
@@ -4050,6 +4574,7 @@ function updateMenuValues() {
       ? 'Two-Finger Zoom Pan (Active)'
       : 'Two-Finger Zoom Pan';
   }
+  updatePaperComfortUi();
   updatePlaybackUi();
 }
 
@@ -4580,6 +5105,61 @@ function wireEvents() {
 
   els.btnBookmarkPage.addEventListener('click', toggleBookmarkCurrent);
   els.btnToggleCurrentBookmark.addEventListener('click', toggleBookmarkCurrent);
+  els.btnStickyTab?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.stickyTabPopover && !els.stickyTabPopover.hidden) {
+      closeStickyTabPopover();
+    } else {
+      openStickyTabPopover();
+    }
+  });
+  els.btnAddStickyTabDrawer?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openStickyTabPopover();
+  });
+  els.btnStickySideLeft?.addEventListener('click', () => {
+    const visible = getVisibleIndices().map((i) => i + 1);
+    if (visible[0]) syncStickyPopoverPageFields(visible[0]);
+  });
+  els.btnStickySideRight?.addEventListener('click', () => {
+    const visible = getVisibleIndices().map((i) => i + 1);
+    if (visible[1]) syncStickyPopoverPageFields(visible[1]);
+  });
+  els.stickyQuickChips?.querySelectorAll('.sticky-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      if (els.stickyTabLabelInput) {
+        els.stickyTabLabelInput.value = chip.dataset.label || '';
+        els.stickyTabLabelInput.focus();
+      }
+    });
+  });
+  els.stickyColorSwatches?.querySelectorAll('.sticky-color-dot').forEach((dot) => {
+    dot.addEventListener('click', () => {
+      state.stickyEditColor = dot.dataset.color || 'coral';
+      els.stickyColorSwatches?.querySelectorAll('.sticky-color-dot').forEach((d) => {
+        d.classList.toggle('active', d.dataset.color === state.stickyEditColor);
+      });
+    });
+  });
+  els.stickyTabLabelInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveStickyTabFromPopover();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeStickyTabPopover();
+    }
+  });
+  els.btnStickyTabSave?.addEventListener('click', saveStickyTabFromPopover);
+  els.btnStickyTabRemove?.addEventListener('click', () => {
+    if (state.stickyEditPage) removeStickyTabForPage(state.stickyEditPage);
+  });
+
+  els.btnNavBack?.addEventListener('click', () => {
+    jumpBackHistory();
+    els.btnNavBack.blur();
+  });
+  els.btnNavBackDismiss?.addEventListener('click', clearNavHistory);
   els.btnCopySpreadText.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(els.pageTextPreview.textContent || '');
@@ -4757,6 +5337,16 @@ function wireEvents() {
     dot.addEventListener('click', () => setTheme(dot.dataset.theme));
   });
 
+  els.btnPaperWarmDec?.addEventListener('click', () => setPaperWarmth(state.paperWarmth - 12));
+  els.btnPaperWarmInc?.addEventListener('click', () => setPaperWarmth(state.paperWarmth + 12));
+  els.paperWarmthRange?.addEventListener('input', () => setPaperWarmth(els.paperWarmthRange.value));
+  els.paperWarmthRange?.addEventListener('change', () => els.paperWarmthRange.blur());
+  els.paperWarmthRange?.addEventListener('pointerup', () => els.paperWarmthRange.blur());
+  els.paperWarmthPresets?.querySelectorAll('.auto-pill').forEach((btn) => {
+    btn.addEventListener('click', () => setPaperWarmth(Number(btn.dataset.warm)));
+  });
+  els.menuPaperGrain?.addEventListener('click', () => setPaperGrain(!state.paperGrain));
+
   // File Pickers & Drag-Drop
   els.btnWelcomePick.addEventListener('click', pickFileViaHost);
   els.btnModalPickPdf.addEventListener('click', pickFileViaHost);
@@ -4787,6 +5377,15 @@ function wireEvents() {
     if (!els.moreMenu.hidden && !e.target.closest('#moreMenu') && !e.target.closest('#btnMore')) {
       els.moreMenu.hidden = true;
       els.btnMore.classList.remove('active');
+    }
+    if (
+      els.stickyTabPopover &&
+      !els.stickyTabPopover.hidden &&
+      !e.target.closest('#stickyTabPopover') &&
+      !e.target.closest('#btnStickyTab') &&
+      !e.target.closest('#btnAddStickyTabDrawer')
+    ) {
+      closeStickyTabPopover();
     }
 
     const sel = window.getSelection();
@@ -5006,7 +5605,7 @@ function wireEvents() {
     if (shouldKeepBarVisible('footer')) showBar('footer', false);
     else scheduleHideBar('footer', 420);
   });
-  [els.moreMenu, els.thumbnailsStrip, els.libraryModal]
+  [els.moreMenu, els.thumbnailsStrip, els.libraryModal, els.stickyTabPopover]
     .filter(Boolean)
     .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
 
@@ -5192,6 +5791,12 @@ function wireEvents() {
 
     switch (e.key) {
       case 'ArrowLeft':
+        if (e.altKey) {
+          e.preventDefault();
+          jumpBackHistory();
+          break;
+        }
+      // falls through
       case 'PageUp': {
         e.preventDefault();
         const now = performance.now();
@@ -5248,6 +5853,10 @@ function wireEvents() {
         break;
       case 'b':
       case 'B':
+        if (e.shiftKey) {
+          if (state.pdfDoc) openStickyTabPopover();
+          break;
+        }
         toggleBookmarkCurrent();
         showBar('header', true, 1400);
         break;
@@ -5274,7 +5883,8 @@ function wireEvents() {
         showBar('header', true, 1400);
         break;
       case 'Escape':
-        if (!els.hlPopover.hidden) hideHighlightPopover();
+        if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
+        else if (!els.hlPopover.hidden) hideHighlightPopover();
         else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
         else if (!els.sideDrawer.hidden) {
