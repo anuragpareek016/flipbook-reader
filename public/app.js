@@ -155,7 +155,6 @@ const els = {
   btnLastPage: document.getElementById('btnLastPage'),
 
   moreMenu: document.getElementById('moreMenu'),
-  menuOpenPdf: document.getElementById('menuOpenPdf'),
   menuLibrary: document.getElementById('menuLibrary'),
   menuScrollMode: document.getElementById('menuScrollMode'),
   valScrollMode: document.getElementById('valScrollMode'),
@@ -9244,10 +9243,6 @@ function wireEvents() {
   });
 
   // '+' More Menu items
-  els.menuOpenPdf.addEventListener('click', () => {
-    els.moreMenu.hidden = true;
-    pickFileViaHost();
-  });
   els.menuLibrary.addEventListener('click', openLibraryModal);
   els.menuScrollMode?.addEventListener('click', () => {
     if (state.scrollMode === 'scroll') {
