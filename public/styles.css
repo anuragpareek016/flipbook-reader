@@ -2900,6 +2900,11 @@ body.is-scrolling .scroll-page-edge-tabs {
   -webkit-user-select: none;
 }
 
+.scroll-viewport.is-pinch-locked {
+  overflow: hidden !important;
+  touch-action: none;
+}
+
 .scroll-pages {
   width: max-content;
   min-width: 100%;
@@ -2990,12 +2995,12 @@ body.has-paper-grain:not(.read-dark) .fh-snap-canvas {
 }
 
 .scroll-page-edge-tabs .sticky-tab-face {
-  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
-  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
+  padding: 0 calc(9.5px * var(--tab-zoom, 1)) 0 calc(7px * var(--tab-zoom, 1));
+  border-radius: 0 calc(4px * var(--tab-zoom, 1)) calc(4px * var(--tab-zoom, 1)) 0;
   transform: translate3d(var(--tab-nudge, 0px), 0, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
     2px 3px 8px var(--tab-shadow),
     0 1px 2px rgba(0, 0, 0, 0.18);
@@ -3265,40 +3270,40 @@ body.header-hidden .single-collected-stack {
   position: absolute;
   left: 100%;
   top: var(--scs-tab-top, 30%);
-  transform: translate3d(0, -50%, 0);
-  height: 11px;
-  min-width: 15px;
-  max-width: 44px;
-  padding: 0 5px 0 3.5px;
-  border-radius: 0 2.5px 2.5px 0;
+  transform: translate3d(var(--scs-depth-x, 0px), -50%, 0);
+  height: 15px;
+  min-width: 24px;
+  max-width: 64px;
+  padding: 0 7px 0 5px;
+  border-radius: 0 3px 3px 0;
   display: inline-flex;
   align-items: center;
-  gap: 2.5px;
-  font-size: 7.5px;
+  gap: 3.5px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
   color: var(--tab-ink);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) 5px, var(--tab-bg) 100%);
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) 7px, var(--tab-bg) 100%);
   box-shadow:
-    1.5px 2px 5px rgba(0, 0, 0, 0.36),
-    0 1px 2px rgba(0, 0, 0, 0.16);
+    1.5px 2px 6px rgba(0, 0, 0, 0.38),
+    0 1px 2px rgba(0, 0, 0, 0.18);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: auto;
   cursor: pointer;
-  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
 }
 
 .scs-mini-tab:hover {
-  transform: translate3d(2px, -50%, 0);
+  transform: translate3d(calc(var(--scs-depth-x, 0px) + 3px), -50%, 0);
 }
 
 .scs-mini-tab .sticky-tab-dot {
-  width: 3.5px;
-  height: 3.5px;
+  width: 4px;
+  height: 4px;
   flex-shrink: 0;
 }
 
@@ -3691,6 +3696,7 @@ body.read-dark .scs-flying-shade {
   display: inline-flex;
   align-items: center;
   color: var(--tab-ink);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -3698,17 +3704,17 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-face {
   position: relative;
   pointer-events: none;
-  height: calc(21px * var(--tab-zoom, 1));
-  min-width: calc(34px * var(--tab-zoom, 1));
-  max-width: calc(74px * var(--tab-zoom, 1));
-  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(96px * var(--tab-zoom, 1));
+  padding: 0 calc(9.5px * var(--tab-zoom, 1)) 0 calc(7px * var(--tab-zoom, 1));
   color: var(--tab-ink);
-  font-size: calc(9.5px * var(--tab-zoom, 1));
+  font-size: calc(11.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   display: inline-flex;
   align-items: center;
-  gap: calc(3px * var(--tab-zoom, 1));
+  gap: calc(4px * var(--tab-zoom, 1));
   white-space: nowrap;
   transform: translate3d(0, 0, 0);
   transition:
@@ -3748,15 +3754,16 @@ body.read-dark .scs-flying-shade {
 }
 
 .book-edge-tabs-right .sticky-tab-face {
-  padding: 0 calc(9px * var(--tab-zoom, 1)) 0 calc(6.5px * var(--tab-zoom, 1));
-  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
+  padding: 0 calc(11px * var(--tab-zoom, 1)) 0 calc(8px * var(--tab-zoom, 1));
+  border-radius: 0 calc(4px * var(--tab-zoom, 1)) calc(4px * var(--tab-zoom, 1)) 0;
   transform: translate3d(var(--tab-nudge, 0px), 0, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(12px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
-    2px 3px 8px var(--tab-shadow),
-    0 1px 2px rgba(0, 0, 0, 0.18);
+    inset 3px 0 5px -2px rgba(0, 0, 0, 0.26),
+    2px 3px 9px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.20);
 }
 
 .book-edge-tabs-right .sticky-tab-hit {
@@ -3776,23 +3783,23 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-right {
   left: 100%;
   right: auto;
-  height: calc(21px * var(--tab-zoom, 1));
-  min-width: calc(34px * var(--tab-zoom, 1));
-  max-width: calc(74px * var(--tab-zoom, 1));
-  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
-  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
-  gap: calc(3px * var(--tab-zoom, 1));
-  font-size: calc(9.5px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(96px * var(--tab-zoom, 1));
+  padding: 0 calc(10px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
+  border-radius: 0 calc(4px * var(--tab-zoom, 1)) calc(4px * var(--tab-zoom, 1)) 0;
+  gap: calc(4px * var(--tab-zoom, 1));
+  font-size: calc(11.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
   transform: translate3d(0, -50%, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
     inset 3px 0 5px -2px rgba(0, 0, 0, 0.24),
-    2px 3px 8px var(--tab-shadow),
+    2px 3px 9px var(--tab-shadow),
     0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
@@ -3802,16 +3809,17 @@ body.read-dark .scs-flying-shade {
 }
 
 .book-edge-tabs-left .sticky-tab-face {
-  padding: 0 calc(6.5px * var(--tab-zoom, 1)) 0 calc(9px * var(--tab-zoom, 1));
-  border-radius: calc(3px * var(--tab-zoom, 1)) 0 0 calc(3px * var(--tab-zoom, 1));
+  padding: 0 calc(8px * var(--tab-zoom, 1)) 0 calc(11px * var(--tab-zoom, 1));
+  border-radius: calc(4px * var(--tab-zoom, 1)) 0 0 calc(4px * var(--tab-zoom, 1));
   transform: translate3d(calc(-1 * var(--tab-nudge, 0px)), 0, 0);
   flex-direction: row-reverse;
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(12px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
-    -2px 3px 8px var(--tab-shadow),
-    0 1px 2px rgba(0, 0, 0, 0.18);
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.26),
+    -2px 3px 9px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.20);
 }
 
 .book-edge-tabs-left .sticky-tab-hit {
@@ -3831,13 +3839,13 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-left {
   right: 100%;
   left: auto;
-  height: calc(21px * var(--tab-zoom, 1));
-  min-width: calc(34px * var(--tab-zoom, 1));
-  max-width: calc(74px * var(--tab-zoom, 1));
-  padding: 0 calc(5.5px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
-  border-radius: calc(3px * var(--tab-zoom, 1)) 0 0 calc(3px * var(--tab-zoom, 1));
-  gap: calc(3px * var(--tab-zoom, 1));
-  font-size: calc(9.5px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(96px * var(--tab-zoom, 1));
+  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(10px * var(--tab-zoom, 1));
+  border-radius: calc(4px * var(--tab-zoom, 1)) 0 0 calc(4px * var(--tab-zoom, 1));
+  gap: calc(4px * var(--tab-zoom, 1));
+  font-size: calc(11.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -3845,10 +3853,10 @@ body.read-dark .scs-flying-shade {
   transform: translate3d(0, -50%, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.24),
-    -2px 3px 8px var(--tab-shadow),
+    -2px 3px 9px var(--tab-shadow),
     0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
@@ -3886,12 +3894,12 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: calc(50px * var(--tab-zoom, 1));
+  max-width: calc(70px * var(--tab-zoom, 1));
 }
 
 .sticky-tab-dot {
-  width: calc(3.5px * var(--tab-zoom, 1));
-  height: calc(3.5px * var(--tab-zoom, 1));
+  width: calc(4.5px * var(--tab-zoom, 1));
+  height: calc(4.5px * var(--tab-zoom, 1));
   border-radius: 50%;
   background: currentColor;
   opacity: 0.44;
@@ -3932,7 +3940,7 @@ body.read-dark .scs-flying-shade {
   right: 0;
   top: 76px;
   bottom: calc(var(--bar-height) + 28px);
-  width: 136px;
+  width: 158px;
   padding: 6px 14px 10px 18px;
   max-height: none;
   z-index: 38;
@@ -3941,7 +3949,7 @@ body.read-dark .scs-flying-shade {
   flex-direction: column;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 7px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -3960,28 +3968,28 @@ body.read-dark .scs-flying-shade {
 }
 
 .scroll-tabs-rail .sticky-tab-face {
-  height: 24px;
-  min-width: 44px;
-  max-width: 96px;
-  border-radius: 4px 0 0 4px;
-  padding: 0 9px 0 7px;
-  font-size: 10.5px;
-  gap: 4.5px;
+  height: 29px;
+  min-width: 56px;
+  max-width: 118px;
+  border-radius: 5px 0 0 5px;
+  padding: 0 11px 0 9px;
+  font-size: 12px;
+  gap: 5px;
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.22),
     -2px 3px 10px rgba(0, 0, 0, 0.36);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 9px, var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 11px, var(--tab-bg) 100%);
 }
 
 .scroll-tabs-rail .sticky-tab-dot {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
 }
 
 .scroll-tabs-rail .sticky-tab-text {
-  max-width: 72px;
+  max-width: 88px;
 }
 
 .scroll-tabs-rail .sticky-tab-hit {

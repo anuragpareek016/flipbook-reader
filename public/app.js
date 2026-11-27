@@ -334,6 +334,7 @@ const state = {
   scrollUserSelecting: false,
   isScrollingActive: false,
   pinchLockScrollUntil: 0,
+  nativePinchActive: false,
   scrollPinchPreview: null,
 
   zoom: 1,
@@ -465,6 +466,15 @@ function isEffectiveSingleMode() {
   return els.stage.clientWidth < 760;
 }
 
+function getScrollWrapOffset(wrapEl) {
+  if (!wrapEl) return { left: 0, top: 0 };
+  const sp = els.scrollPages;
+  if (sp && wrapEl.offsetParent === sp) {
+    return { left: sp.offsetLeft + wrapEl.offsetLeft, top: sp.offsetTop + wrapEl.offsetTop };
+  }
+  return { left: wrapEl.offsetLeft, top: wrapEl.offsetTop };
+}
+
 function getVisibleScrollIndices() {
   if (!state.totalPages || state.scrollMode !== 'scroll' || !els.scrollViewport || !els.scrollPages) {
     return [];
@@ -474,7 +484,8 @@ function getVisibleScrollIndices() {
   const sv = els.scrollViewport;
   const pageH = Math.max(160, Math.round(state.pageH * (state.committedZoom || state.zoom || 1)));
   const stride = pageH + 18;
-  const baseTop = els.scrollPages.children[0]?.offsetTop ?? 54;
+  const firstWrap = els.scrollPages.children[0];
+  const baseTop = firstWrap ? getScrollWrapOffset(firstWrap).top : 54;
   const viewTop = sv.scrollTop - 120;
   const viewBottom = sv.scrollTop + sv.clientHeight + 120;
   const firstIdx = clamp(Math.floor((viewTop - baseTop) / stride), 0, n - 1);
@@ -719,7 +730,11 @@ function computeBookGeometry(forceSingle = false) {
   const stageH = Math.max(260, els.stage.clientHeight);
   const single = forceSingle || isEffectiveSingleMode();
 
-  const horizReserve = forceSingle ? 96 : single ? 140 : 190;
+  const horizReserve = forceSingle
+    ? 96
+    : single
+      ? (stageW >= 960 ? 196 : 140)
+      : (stageW >= 1120 ? 256 : stageW >= 900 ? 220 : 190);
   const vertReserve = forceSingle ? 116 : 132;
   const maxBookW = Math.max(240, stageW - horizReserve);
   const maxBookH = Math.max(200, stageH - vertReserve);
@@ -747,8 +762,10 @@ function disposeBook() {
   clearTimeout(state.scrollSyncTimer);
   state.scrollSyncTimer = null;
   state.isScrollingActive = false;
+  state.nativePinchActive = false;
   state.scrollPinchPreview = null;
   if (els.scrollPages) els.scrollPages.style.transform = '';
+  if (els.scrollViewport) els.scrollViewport.classList.remove('is-pinch-locked');
   document.body.classList.remove('is-scrolling');
   clearTimeout(state.nearbyRenderTimer);
   state.nearbyRenderTimer = null;
@@ -983,7 +1000,7 @@ function initScrollView(startIndex = 0) {
   const targetWrap = els.scrollPages.children[safeStart];
   if (targetWrap) {
     state.programmaticScrollUntil = performance.now() + 120;
-    els.scrollViewport.scrollTop = Math.max(0, targetWrap.offsetTop - 54);
+    els.scrollViewport.scrollTop = Math.max(0, getScrollWrapOffset(targetWrap).top - 54);
   }
   state.autoScrollPosY = els.scrollViewport.scrollTop;
   onSpreadChanged(false, 4);
@@ -2410,7 +2427,7 @@ function jumpToPage(oneBasedPage, animate = false, { recordHistory = true, reaso
   if (state.scrollMode === 'scroll') {
     const wrap = els.scrollPages.children[targetIdx];
     if (wrap) {
-      const destTop = Math.max(0, wrap.offsetTop - 54);
+      const destTop = Math.max(0, getScrollWrapOffset(wrap).top - 54);
       const dist = Math.abs(destTop - els.scrollViewport.scrollTop);
       const pauseMs = animate ? clamp(Math.round(460 + dist * 0.28), 460, 1200) : 120;
       state.programmaticScrollUntil = performance.now() + pauseMs;
@@ -2549,11 +2566,13 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         const vpX = targetX - svRect.left;
         const vpY = targetY - svRect.top;
 
-        let anchorWrap = els.scrollPages.children[state.currentIndex] || els.scrollPages.children[0];
+        const visEst = getVisibleScrollIndices();
+        const estIdx = visEst.length ? visEst[Math.floor(visEst.length / 2)] : state.currentIndex;
+        const approxIdx = clamp(estIdx, 0, els.scrollPages.children.length - 1);
+        let anchorWrap = els.scrollPages.children[approxIdx] || els.scrollPages.children[0];
         let bestDist = Infinity;
-        const approxIdx = clamp(state.currentIndex, 0, els.scrollPages.children.length - 1);
-        const lo = Math.max(0, approxIdx - 4);
-        const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 4);
+        const lo = Math.max(0, approxIdx - 6);
+        const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 6);
         for (let i = lo; i <= hi; i++) {
           const w = els.scrollPages.children[i];
           const r = w.getBoundingClientRect();
@@ -2581,6 +2600,7 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         const snapInfo = info || state.scrollPinchPreview || measureScrollAnchor();
         state.scrollPinchPreview = null;
         els.scrollPages.style.transform = '';
+        sv.classList.remove('is-pinch-locked');
 
         const sw = Math.max(120, Math.round(state.pageW * state.zoom));
         const sh = Math.max(160, Math.round(state.pageH * state.zoom));
@@ -2589,8 +2609,9 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         syncStickyTabScale(sw);
 
         state.programmaticScrollUntil = performance.now() + 220;
-        sv.scrollLeft = Math.max(0, snapInfo.anchorWrap.offsetLeft + snapInfo.relX * sw - snapInfo.vpX);
-        sv.scrollTop = Math.max(0, snapInfo.anchorWrap.offsetTop + snapInfo.relY * sh - snapInfo.vpY);
+        const wrapOff = getScrollWrapOffset(snapInfo.anchorWrap);
+        sv.scrollLeft = Math.max(0, wrapOff.left + snapInfo.relX * sw - snapInfo.vpX);
+        sv.scrollTop = Math.max(0, wrapOff.top + snapInfo.relY * sh - snapInfo.vpY);
         state.autoScrollPosY = sv.scrollTop;
         state.committedZoom = state.zoom;
 
@@ -2608,29 +2629,37 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
           els.scrollPages.style.transform = '';
           state.scrollPinchPreview = null;
         }
+        sv.classList.remove('is-pinch-locked');
         commitScroll(measureScrollAnchor());
       } else {
-        state.pinchLockScrollUntil = performance.now() + 240;
+        state.pinchLockScrollUntil = performance.now() + 280;
         if (!state.scrollPinchPreview) {
           els.scrollPages.style.transform = '';
           state.scrollPinchPreview = measureScrollAnchor();
+          if (sv.offsetWidth === sv.clientWidth && sv.offsetHeight === sv.clientHeight) {
+            sv.classList.add('is-pinch-locked');
+          }
         }
         const p = state.scrollPinchPreview;
         const baseZoom = state.committedZoom || 1;
         const s = state.zoom / baseZoom;
         if (sv.scrollTop !== p.scrollLockTop || sv.scrollLeft !== p.scrollLockLeft) {
-          state.programmaticScrollUntil = performance.now() + 200;
+          state.programmaticScrollUntil = performance.now() + 220;
           sv.scrollLeft = p.scrollLockLeft;
           sv.scrollTop = p.scrollLockTop;
         }
         if (Math.abs(s - 1) < 0.002) {
           els.scrollPages.style.transform = '';
         } else {
-          const tx = p.docX * (1 - s);
-          const ty = p.docY * (1 - s);
-          els.scrollPages.style.transform = `translate3d(${tx.toFixed(2)}px, ${ty.toFixed(2)}px, 0) scale(${s.toFixed(4)})`;
+          // Use identical exact scale factor for both tx/ty and CSS scale() so large scrollTop values (~1e6 px) never vibrate from toFixed(4) mismatch
+          const sExact = Number(s.toFixed(6));
+          const tx = p.docX * (1 - sExact);
+          const ty = p.docY * (1 - sExact);
+          els.scrollPages.style.transform = `translate3d(${tx.toFixed(3)}px, ${ty.toFixed(3)}px, 0) scale(${sExact})`;
         }
-        state.zoomRerenderTimer = setTimeout(() => commitScroll(), 150);
+        if (!state.nativePinchActive) {
+          state.zoomRerenderTimer = setTimeout(() => commitScroll(), 260);
+        }
       }
     }
     return;
@@ -3090,17 +3119,30 @@ function getTurningTabPages() {
 }
 
 function syncStickyTabScale(pageWidthPx) {
-  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.65, 1.08);
+  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.78, 1.15);
   const val = scale.toFixed(4);
   els.bookShell?.style.setProperty('--tab-zoom', val);
   els.singleFlightLayer?.style.setProperty('--tab-zoom', val);
   els.scrollPages?.style.setProperty('--tab-zoom', val);
 }
 
+function measureContainerTabReach(containerEl, fallbackReach) {
+  if (!containerEl || !containerEl.children.length) return fallbackReach;
+  let maxReach = 0;
+  for (const btn of containerEl.children) {
+    if (!btn.classList?.contains('sticky-edge-tab') || btn.hidden) continue;
+    const stackX = Math.max(0, parseFloat(btn.style.getPropertyValue('--tab-x') || '0') || 0);
+    const faceEl = btn.querySelector('.sticky-tab-face') || btn;
+    const faceW = faceEl.offsetWidth || 72;
+    maxReach = Math.max(maxReach, stackX + faceW);
+  }
+  return maxReach > 0 ? Math.ceil(maxReach) : fallbackReach;
+}
+
 function syncEdgeTabsViewportBounds() {
   if (!state.pdfDoc) return;
   const tabZoom = parseFloat(els.bookShell?.style.getPropertyValue('--tab-zoom') || els.scrollPages?.style.getPropertyValue('--tab-zoom') || '1') || 1;
-  const tabMaxOut = Math.round(78 * tabZoom);
+  const tabMaxOut = Math.round(98 * tabZoom);
   const margin = 8;
 
   if (state.scrollMode === 'scroll') {
@@ -3122,20 +3164,22 @@ function syncEdgeTabsViewportBounds() {
   if (!sr.width) return;
 
   if (els.bookEdgeTabsLeft) {
-    const leftEdgeX = sr.left + (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-left') || '0') || 0) - (state.leftStackThick || 0);
+    const leftBaseX = sr.left + (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-left') || '0') || 0);
+    const leftReach = measureContainerTabReach(els.bookEdgeTabsLeft, (state.leftStackThick || 0) + tabMaxOut);
     let clampLeftX = 0;
-    if (leftEdgeX >= -tabMaxOut && leftEdgeX - tabMaxOut < margin) {
-      clampLeftX = Math.round((margin + tabMaxOut) - leftEdgeX);
+    if (leftBaseX >= -leftReach && leftBaseX - leftReach < margin) {
+      clampLeftX = Math.round((margin + leftReach) - leftBaseX);
     }
     els.bookEdgeTabsLeft.style.setProperty('--edge-clamp-x', `${clampLeftX}px`);
     els.bookEdgeTabsLeft.classList.toggle('is-edge-clamped', clampLeftX > 2);
   }
 
   if (els.bookEdgeTabsRight) {
-    const rightEdgeX = sr.right - (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-right') || '0') || 0) + (state.rightStackThick || 0);
+    const rightBaseX = sr.right - (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-right') || '0') || 0);
+    const rightReach = measureContainerTabReach(els.bookEdgeTabsRight, (state.rightStackThick || 0) + tabMaxOut);
     let clampRightX = 0;
-    if (rightEdgeX <= window.innerWidth + tabMaxOut && rightEdgeX + tabMaxOut > window.innerWidth - margin) {
-      clampRightX = Math.round((window.innerWidth - margin) - (rightEdgeX + tabMaxOut));
+    if (rightBaseX <= window.innerWidth + rightReach && rightBaseX + rightReach > window.innerWidth - margin) {
+      clampRightX = Math.round((window.innerWidth - margin) - (rightBaseX + rightReach));
     }
     els.bookEdgeTabsRight.style.setProperty('--edge-clamp-x', `${clampRightX}px`);
     els.bookEdgeTabsRight.classList.toggle('is-edge-clamped', clampRightX < -2);
@@ -3267,13 +3311,13 @@ function reconcileEdgeTabContainer(containerEl, entries, posMap, visible1Based, 
     const depthPx = isCur
       ? 0
       : clamp(rawDepth, stackThick >= 2 ? 1 : 0, stackThick);
-    const stackSpan = Math.max(0, stackThick - depthPx);
-    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
+    const seamTail = stackThick > 0 ? clamp(isCur ? 3 : 4, 2, 5) : 0;
+    const zIndex = isCur ? 260 : 200 - Math.min(180, rank);
     const opts = {
-      stackOutPx: stackThick,
-      stackSpan,
+      stackOutPx: depthPx,
+      stackSpan: seamTail,
       zIndex,
-      withTail: true,
+      withTail: seamTail > 0,
     };
 
     let btn = existing.get(key);
@@ -3301,7 +3345,7 @@ function renderSingleCollectedStackTabs(entries, posMap) {
   if (!entries.length) return;
 
   const { h } = getSingleStackMetrics();
-  const minGapPct = clamp((13.5 / Math.max(70, h)) * 100, 12, 22);
+  const minGapPct = clamp((18 / Math.max(70, h)) * 100, 14, 26);
   const byAsc = [...entries].sort((a, b) => a.page - b.page);
   const pcts = byAsc.map((t) => clamp(posMap.get(t.page) ?? 24, 12, 82));
   for (let i = 1; i < pcts.length; i++) {
@@ -3323,12 +3367,15 @@ function renderSingleCollectedStackTabs(entries, posMap) {
 
   for (let i = 0; i < entries.length; i++) {
     const tab = entries[i];
+    const ratio = tab.curFirst > 1 ? clamp((tab.curFirst - tab.page) / Math.max(1, tab.curFirst - 1), 0, 1) : 0;
+    const scsDepthPx = Math.round(ratio * 7);
     const chip = document.createElement('span');
     chip.className = `scs-mini-tab tab-${tab.color}`;
     chip.setAttribute('role', 'button');
     chip.dataset.page = String(tab.page);
     const pct = pctByPage.get(tab.page) ?? 24;
     chip.style.setProperty('--scs-tab-top', `${pct.toFixed(1)}%`);
+    chip.style.setProperty('--scs-depth-x', `${-scsDepthPx}px`);
     chip.style.zIndex = String(50 - Math.min(40, i));
     chip.title = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
     chip.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
@@ -6687,8 +6734,8 @@ function drawMagTurningTabsForLeaf(ctx, containerEl, x0, y0, pageW, pageH, tabZo
     const yCenter = y0 + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * pageH;
     const sideDir = el.dataset.sideDir || (el.classList.contains('tab-side-left') ? 'left' : 'right');
     const isRightSide = sideDir !== 'left';
-    const tabH = el.offsetHeight || 23 * tabZoom;
-    const tabW = el.offsetWidth || 46 * tabZoom;
+    const tabH = el.offsetHeight || 27 * tabZoom;
+    const tabW = el.offsetWidth || 58 * tabZoom;
     const tuck = 3 * tabZoom;
     const tabX = isRightSide ? x0 + pageW - tuck : x0 + tuck - tabW;
     const tabY = yCenter - tabH / 2;
@@ -6813,8 +6860,8 @@ function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
       for (const el of faceTabs) {
         const topPct = Number(el.dataset.topPct);
         const tabY = edgeTopY + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * (pageH * sy);
-        const tabW = el.offsetWidth || 46 * tabZoom;
-        const tabH = el.offsetHeight || 23 * tabZoom;
+        const tabW = el.offsetWidth || 58 * tabZoom;
+        const tabH = el.offsetHeight || 27 * tabZoom;
         const tuck = 3 * tabZoom;
         ctx.save();
         ctx.translate(pEdge.x, tabY);
@@ -9852,7 +9899,7 @@ function wireEvents() {
     if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
     const sv = els.scrollViewport;
     const now = performance.now();
-    if (state.scrollPinchPreview && now < (state.pinchLockScrollUntil || 0)) {
+    if (state.scrollPinchPreview && (state.nativePinchActive || now < (state.pinchLockScrollUntil || 0))) {
       if (sv.scrollTop !== state.scrollPinchPreview.scrollLockTop || sv.scrollLeft !== state.scrollPinchPreview.scrollLockLeft) {
         state.programmaticScrollUntil = now + 200;
         sv.scrollLeft = state.scrollPinchPreview.scrollLockLeft;
@@ -9902,7 +9949,7 @@ function wireEvents() {
   }, { passive: true });
   els.scrollViewport.addEventListener('wheel', (e) => {
     if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
-    if (performance.now() < (state.pinchLockScrollUntil || 0)) return;
+    if (state.nativePinchActive || performance.now() < (state.pinchLockScrollUntil || 0)) return;
     state.programmaticScrollUntil = 0;
     state.autoScrollPauseUntil = performance.now() + (e.deltaY < 0 ? 750 : 320);
   }, { passive: true });
@@ -10268,6 +10315,55 @@ function wireEvents() {
   let pendingPinchDeltaY = 0;
   let pendingPinchAnchor = null;
   let pinchRafId = null;
+  let nativePinchAnchor = null;
+  let nativePinchWatchdog = null;
+
+  const commitNativePinch = () => {
+    clearTimeout(nativePinchWatchdog);
+    nativePinchWatchdog = null;
+    if (!state.nativePinchActive && !state.scrollPinchPreview) return;
+    state.nativePinchActive = false;
+    state.pinchLockScrollUntil = performance.now() + 260;
+    if (!state.pdfDoc) return;
+    const anchor = nativePinchAnchor || getStageZoomAnchor();
+    nativePinchAnchor = null;
+    setZoom(state.zoom, true, anchor);
+  };
+
+  window.__flipbookHandleNativePinch = (phase, magnification, clientX, clientY) => {
+    if (!state.pdfDoc) return;
+    const anchor = (Number.isFinite(clientX) && Number.isFinite(clientY))
+      ? { clientX, clientY }
+      : (nativePinchAnchor || getStageZoomAnchor());
+
+    if (phase === 'ended' || phase === 'cancelled') {
+      nativePinchAnchor = anchor;
+      commitNativePinch();
+      return;
+    }
+
+    const wasActive = state.nativePinchActive;
+    state.nativePinchActive = true;
+    state.pinchLockScrollUntil = performance.now() + 500;
+    if (!wasActive || !nativePinchAnchor) {
+      nativePinchAnchor = anchor;
+    } else if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+      nativePinchAnchor = anchor;
+    }
+    state.lastStagePointer = nativePinchAnchor;
+
+    clearTimeout(nativePinchWatchdog);
+    nativePinchWatchdog = setTimeout(commitNativePinch, 850);
+
+    const mag = Number.isFinite(magnification) ? clamp(magnification, -0.35, 0.35) : 0;
+    const nextZoom = clamp(state.zoom * Math.exp(mag), 1, MAX_PAGE_ZOOM);
+    setZoom(nextZoom, false, nativePinchAnchor);
+    if (state.nativePinchActive) {
+      clearTimeout(state.zoomRerenderTimer);
+      state.zoomRerenderTimer = null;
+    }
+  };
+
   const flushPinchZoom = () => {
     pinchRafId = null;
     if (!pendingPinchDeltaY || !state.pdfDoc) {
@@ -10281,13 +10377,17 @@ function wireEvents() {
     setZoom(nextZoom, false, anchor);
   };
 
+  window.addEventListener('blur', () => {
+    commitNativePinch();
+  });
+
   els.stage.addEventListener('wheel', (e) => {
     if (!state.pdfDoc) return;
     if (e.ctrlKey || e.metaKey) {
       if (e.target.closest('#snipResultCard, #focusCurtainPill, #magControlsPill, #snipHintPill, #hlPopover')) return;
       e.preventDefault();
-      state.pinchLockScrollUntil = performance.now() + 240;
-      if (!e.deltaY) return;
+      state.pinchLockScrollUntil = performance.now() + 280;
+      if (state.nativePinchActive || !e.deltaY) return;
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
       pendingPinchDeltaY += e.deltaY;
       pendingPinchAnchor = { clientX: e.clientX, clientY: e.clientY };
@@ -10296,7 +10396,7 @@ function wireEvents() {
       }
       return;
     }
-    if (state.scrollMode === 'scroll' && performance.now() < (state.pinchLockScrollUntil || 0)) {
+    if (state.scrollMode === 'scroll' && (state.nativePinchActive || performance.now() < (state.pinchLockScrollUntil || 0))) {
       e.preventDefault();
       return;
     }

@@ -375,6 +375,7 @@ final class NativeAmbientSoundEngine {
 final class FlipBookWebView: WKWebView {
     var onDropPdfURLs: (([URL]) -> Void)?
     private var magnifyLockUntil: TimeInterval = 0
+    private var isNativeMagnifying = false
 
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
@@ -387,13 +388,43 @@ final class FlipBookWebView: WKWebView {
     }
 
     override func magnify(with event: NSEvent) {
-        let lockSec: TimeInterval = (event.phase == .ended || event.phase == .cancelled) ? 0.16 : 0.35
-        magnifyLockUntil = max(magnifyLockUntil, ProcessInfo.processInfo.systemUptime + lockSec)
-        super.magnify(with: event)
+        let now = ProcessInfo.processInfo.systemUptime
+        let phaseStr: String
+        switch event.phase {
+        case .began, .mayBegin:
+            phaseStr = "began"
+            isNativeMagnifying = true
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.55)
+        case .changed:
+            phaseStr = "changed"
+            isNativeMagnifying = true
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.45)
+        case .ended:
+            phaseStr = "ended"
+            isNativeMagnifying = false
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+        case .cancelled:
+            phaseStr = "cancelled"
+            isNativeMagnifying = false
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+        default:
+            phaseStr = "changed"
+            isNativeMagnifying = false
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+        }
+
+        let loc = convert(event.locationInWindow, from: nil)
+        let y = isFlipped ? loc.y : (bounds.height - loc.y)
+        let js = "window.__flipbookHandleNativePinch && window.__flipbookHandleNativePinch('\(phaseStr)', \(Double(event.magnification)), \(Double(loc.x)), \(Double(y)));"
+        evaluateJavaScript(js, completionHandler: nil)
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if ProcessInfo.processInfo.systemUptime < magnifyLockUntil &&
+        let now = ProcessInfo.processInfo.systemUptime
+        if isNativeMagnifying && now >= magnifyLockUntil {
+            isNativeMagnifying = false
+        }
+        if (isNativeMagnifying || now < magnifyLockUntil) &&
            !event.modifierFlags.contains(.control) {
             return
         }
