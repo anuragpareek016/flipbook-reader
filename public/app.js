@@ -132,7 +132,6 @@ const els = {
   libraryList: document.getElementById('libraryList'),
 
   btnMore: document.getElementById('btnMore'),
-  btnSearch: document.getElementById('btnSearch'),
   btnThumbs: document.getElementById('btnThumbs'),
   pageInput: document.getElementById('pageInput'),
   pageScrubber: document.getElementById('pageScrubber'),
@@ -3205,15 +3204,6 @@ function wireEvents() {
   els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom - 0.25, true));
   els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + 0.25, true));
   els.btnZoomReset.addEventListener('click', () => setZoom(1, true));
-
-  els.btnSearch.addEventListener('click', () => {
-    if (!els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="search"]').classList.contains('active')) {
-      els.sideDrawer.hidden = true;
-      els.btnHighlightsTop?.classList.remove('active');
-    } else {
-      openDrawerTab('search');
-    }
-  });
 
   els.btnThumbs.addEventListener('click', () => {
     els.thumbnailsStrip.hidden = !els.thumbnailsStrip.hidden;
