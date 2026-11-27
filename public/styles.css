@@ -130,22 +130,6 @@ body.header-hidden .top-bar-right {
   color: #ffffff;
 }
 
-#btnBookmarkPage.active {
-  color: #1c1404;
-  background: #f59e0b;
-  border-color: #fcd34d;
-  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.44);
-}
-
-#btnBookmarkPage.active:hover {
-  background: #fbbf24;
-  border-color: #fde68a;
-}
-
-#btnBookmarkPage.active svg {
-  fill: #1c1404;
-  stroke: #1c1404;
-}
 
 #btnDarkRead {
   background: rgba(24, 26, 32, 0.84);
@@ -190,44 +174,6 @@ body.header-hidden .top-bar-right {
   background: rgba(34, 34, 34, 0.88);
 }
 
-#btnStickyTab.active {
-  background: #f59e0b;
-  border-color: #fcd34d;
-  color: #1c1404;
-  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.42);
-}
-
-#btnStickyTab.active[data-tab-color="coral"] {
-  background: #f47164;
-  border-color: #fda49c;
-  color: #260d0a;
-  box-shadow: 0 2px 12px rgba(244, 113, 100, 0.44);
-}
-
-#btnStickyTab.active[data-tab-color="mint"] {
-  background: #4eca92;
-  border-color: #86e6ba;
-  color: #082417;
-  box-shadow: 0 2px 12px rgba(78, 202, 146, 0.42);
-}
-
-#btnStickyTab.active[data-tab-color="sky"] {
-  background: #62aff7;
-  border-color: #9ed0ff;
-  color: #091d33;
-  box-shadow: 0 2px 12px rgba(98, 175, 247, 0.44);
-}
-
-#btnStickyTab.active[data-tab-color="violet"] {
-  background: #a88ef7;
-  border-color: #cbb8fc;
-  color: #190e35;
-  box-shadow: 0 2px 12px rgba(168, 142, 247, 0.44);
-}
-
-#btnStickyTab.active svg {
-  fill: currentColor;
-}
 
 .book-title-text {
   max-width: 340px;

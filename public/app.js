@@ -35,8 +35,6 @@ const els = {
   magGlassFrame: document.getElementById('magGlassFrame'),
   magCanvas: document.getElementById('magCanvas'),
   btnHighlightsTop: document.getElementById('btnHighlightsTop'),
-  btnBookmarkPage: document.getElementById('btnBookmarkPage'),
-  btnStickyTab: document.getElementById('btnStickyTab'),
   stickyTabPopover: document.getElementById('stickyTabPopover'),
   stickyTabPageTag: document.getElementById('stickyTabPageTag'),
   stickyTabSpreadPick: document.getElementById('stickyTabSpreadPick'),
@@ -2473,24 +2471,6 @@ function renderBookEdgeTabs() {
   });
 }
 
-function updateStickyTabButtonUi() {
-  if (!els.btnStickyTab) return;
-  const visible = getVisibleIndices().map((i) => i + 1);
-  const activeTab = visible
-    .map((p) => state.stickyTabs.find((t) => t.page === p))
-    .find(Boolean);
-  const popoverOpen = Boolean(els.stickyTabPopover && !els.stickyTabPopover.hidden);
-  els.btnStickyTab.classList.toggle('active', Boolean(activeTab || popoverOpen));
-  els.btnStickyTab.setAttribute('aria-pressed', String(Boolean(activeTab || popoverOpen)));
-  if (activeTab) {
-    els.btnStickyTab.dataset.tabColor = activeTab.color;
-    els.btnStickyTab.title = `Sticky Tab: "${activeTab.label}" (p. ${activeTab.page}) — Click to edit`;
-  } else {
-    els.btnStickyTab.removeAttribute('data-tab-color');
-    els.btnStickyTab.title = 'Add Edge Sticky Tab (Shift+B)';
-  }
-}
-
 function syncStickyPopoverPageFields(targetPage) {
   state.stickyEditPage = clamp(targetPage, 1, Math.max(1, state.totalPages));
   if (els.stickyTabPageTag) els.stickyTabPageTag.textContent = `Page ${state.stickyEditPage}`;
@@ -2548,7 +2528,6 @@ function openStickyTabPopover(explicitPage = null, anchorPos = null) {
     els.stickyTabPopover.style.right = '';
   }
   els.stickyTabPopover.hidden = false;
-  updateStickyTabButtonUi();
   showBar('header', false);
   setTimeout(() => {
     els.stickyTabLabelInput?.focus();
@@ -2559,7 +2538,6 @@ function openStickyTabPopover(explicitPage = null, anchorPos = null) {
 function closeStickyTabPopover() {
   if (!els.stickyTabPopover || els.stickyTabPopover.hidden) return;
   els.stickyTabPopover.hidden = true;
-  updateStickyTabButtonUi();
 }
 
 function openPageContextMenu(clientX, clientY, pageNum) {
@@ -2620,16 +2598,14 @@ function removeStickyTabForPage(page) {
 function updateBookmarkUi() {
   const visible = getVisibleIndices().map((i) => i + 1);
   const isBookmarked = visible.some((p) => state.bookmarks.includes(p));
-  els.btnBookmarkPage.classList.toggle('active', isBookmarked);
   els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark Page';
-  updateStickyTabButtonUi();
   renderBookEdgeTabs();
 
   els.bookmarksList.innerHTML = '';
   const hasTabs = state.stickyTabs.length > 0;
   const hasBookmarks = state.bookmarks.length > 0;
   if (!hasTabs && !hasBookmarks) {
-    els.bookmarksList.innerHTML = '<div class="search-status">No sticky tabs or bookmarks saved yet.</div>';
+    els.bookmarksList.innerHTML = '<div class="search-status">No saves yet — right-click a page to bookmark or add a sticky tab.</div>';
     return;
   }
 
@@ -5437,16 +5413,7 @@ function wireEvents() {
     }
   });
 
-  els.btnBookmarkPage.addEventListener('click', toggleBookmarkCurrent);
   els.btnToggleCurrentBookmark.addEventListener('click', toggleBookmarkCurrent);
-  els.btnStickyTab?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (els.stickyTabPopover && !els.stickyTabPopover.hidden) {
-      closeStickyTabPopover();
-    } else {
-      openStickyTabPopover();
-    }
-  });
   els.btnAddStickyTabDrawer?.addEventListener('click', (e) => {
     e.stopPropagation();
     openStickyTabPopover();
@@ -5801,7 +5768,6 @@ function wireEvents() {
       els.stickyTabPopover &&
       !els.stickyTabPopover.hidden &&
       !e.target.closest('#stickyTabPopover') &&
-      !e.target.closest('#btnStickyTab') &&
       !e.target.closest('#btnAddStickyTabDrawer')
     ) {
       closeStickyTabPopover();
