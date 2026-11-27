@@ -15,6 +15,21 @@ const els = {
   btnOpenTop: document.getElementById('btnOpenTop'),
   bookTitleLabel: document.getElementById('bookTitleLabel'),
   btnDarkRead: document.getElementById('btnDarkRead'),
+  btnMagnifier: document.getElementById('btnMagnifier'),
+  menuMagnifier: document.getElementById('menuMagnifier'),
+  valMagnifier: document.getElementById('valMagnifier'),
+  magnifierOverlay: document.getElementById('magnifierOverlay'),
+  magControlsPill: document.getElementById('magControlsPill'),
+  btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
+  btnMagShapeBar: document.getElementById('btnMagShapeBar'),
+  btnMagPowerDec: document.getElementById('btnMagPowerDec'),
+  magPowerLabel: document.getElementById('magPowerLabel'),
+  btnMagPowerInc: document.getElementById('btnMagPowerInc'),
+  btnMagFollow: document.getElementById('btnMagFollow'),
+  btnMagClose: document.getElementById('btnMagClose'),
+  magLens: document.getElementById('magLens'),
+  magGlassFrame: document.getElementById('magGlassFrame'),
+  magCanvas: document.getElementById('magCanvas'),
   btnHighlightsTop: document.getElementById('btnHighlightsTop'),
   btnBookmarkPage: document.getElementById('btnBookmarkPage'),
   zoomPill: document.getElementById('zoomPill'),
@@ -212,6 +227,16 @@ const state = {
   persistTimer: null,
   resizeTimer: null,
   isFlipping: false,
+
+  magEnabled: false,
+  magStyle: 'circle', // 'circle' | 'bar'
+  magPower: 2.4,
+  magFollow: false, // false = drag & place on book, true = follow cursor
+  magX: null,
+  magY: null,
+  magDragging: false,
+  magRedrawRaf: 0,
+  magHiResCache: new Map(), // idx -> { targetW, canvas, renderTask }
 };
 
 /* ---------- Utility ---------- */
@@ -301,7 +326,14 @@ function applySavedSettings(settings) {
   if (Number.isFinite(Number(settings.autoScrollSpeed))) {
     state.autoScrollSpeed = clamp(Math.round(Number(settings.autoScrollSpeed) * 10) / 10, 0.2, 5);
   }
+  if (settings.magStyle === 'circle' || settings.magStyle === 'bar') {
+    state.magStyle = settings.magStyle;
+  }
+  if (Number.isFinite(Number(settings.magPower))) {
+    state.magPower = clamp(Math.round(Number(settings.magPower) * 10) / 10, 1.4, 4.5);
+  }
   updateMenuValues();
+  updateMagnifierUi();
 }
 
 function schedulePersistState() {
@@ -320,6 +352,8 @@ function schedulePersistState() {
         clickMode: state.clickMode,
         autoFlipSeconds: state.autoFlipSeconds,
         autoScrollSpeed: state.autoScrollSpeed,
+        magStyle: state.magStyle,
+        magPower: state.magPower,
       },
     };
     if (state.bookId) {
@@ -378,6 +412,10 @@ function computeBookGeometry(forceSingle = false) {
 function disposeBook() {
   stopAutoFlip();
   stopAutoScroll({ resetPlaying: true });
+  setMagnifierEnabled(false, { persist: false });
+  clearMagnifierCache();
+  state.magX = null;
+  state.magY = null;
   state.searchAbortId++;
   for (const entry of state.renderedMap.values()) {
     try { entry.renderTask?.cancel(); } catch {}
@@ -927,6 +965,7 @@ async function renderPageNode(idx) {
     inner.appendChild(hlLayer);
     inner.appendChild(textLayerDiv);
     paintUserHighlightsOnPage(idx);
+    if (state.magEnabled) scheduleMagnifierRedraw();
 
     const textLayer = new pdfjsLib.TextLayer({
       textContentSource: pdfPage.streamTextContent(),
@@ -1502,6 +1541,10 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
     const p = (visible[0] ?? 0) + 1;
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}#p=${p}`);
   }
+  if (state.magEnabled) {
+    scheduleMagnifierRedraw();
+    setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
+  }
   if (persist) schedulePersistState();
 }
 
@@ -1594,6 +1637,7 @@ function applyZoomTransform(rerender = true, immediate = false) {
   els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   state.pageFlip?.setInteractionDisabled?.(zoomed);
   hideHighlightPopover();
+  if (state.magEnabled) scheduleMagnifierRedraw();
 
   if (rerender && state.pdfDoc) {
     clearTimeout(state.zoomRerenderTimer);
@@ -2722,6 +2766,291 @@ function showBars(scheduleAutoHide = true, delayMs = 1800) {
   showBar('footer', scheduleAutoHide, delayMs);
 }
 
+const MAG_HL_FILLS = {
+  yellow: 'rgba(255, 224, 51, 0.34)',
+  green: 'rgba(105, 220, 118, 0.30)',
+  blue: 'rgba(110, 185, 255, 0.34)',
+  pink: 'rgba(255, 130, 185, 0.32)',
+  orange: 'rgba(255, 175, 85, 0.34)',
+};
+
+function clearMagnifierCache() {
+  for (const entry of state.magHiResCache.values()) {
+    try { entry.renderTask?.cancel(); } catch {}
+    if (entry.canvas) {
+      entry.canvas.width = 0;
+      entry.canvas.height = 0;
+    }
+  }
+  state.magHiResCache.clear();
+}
+
+function getDefaultMagnifierCenter() {
+  const sr = els.stage.getBoundingClientRect();
+  let targetRect = null;
+  if (state.scrollMode === 'scroll') {
+    const wrap = els.scrollPages.children[state.currentIndex];
+    if (wrap) targetRect = wrap.getBoundingClientRect();
+  } else if (!els.bookShell.hidden) {
+    targetRect = els.bookShell.getBoundingClientRect();
+  }
+  if (targetRect && targetRect.width > 20 && targetRect.height > 20) {
+    return {
+      x: targetRect.left + targetRect.width * 0.5 - sr.left,
+      y: targetRect.top + targetRect.height * 0.48 - sr.top,
+    };
+  }
+  return { x: sr.width * 0.5, y: sr.height * 0.48 };
+}
+
+function positionMagnifier(cx, cy) {
+  if (!els.magLens || !els.stage) return;
+  const sr = els.stage.getBoundingClientRect();
+  if (!sr.width || !sr.height) return;
+  state.magX = clamp(cx, 32, Math.max(32, sr.width - 32));
+  state.magY = clamp(cy, 48, Math.max(48, sr.height - 32));
+  const lw = els.magLens.offsetWidth || (state.magStyle === 'bar' ? 420 : 192);
+  const lh = els.magLens.offsetHeight || (state.magStyle === 'bar' ? 86 : 192);
+  els.magLens.style.transform = `translate3d(${Math.round(state.magX - lw / 2)}px, ${Math.round(state.magY - lh / 2)}px, 0)`;
+  scheduleMagnifierRedraw();
+}
+
+function getMagnifierVisibleIndices(frameRect) {
+  if (!state.pdfDoc) return [];
+  if (state.scrollMode !== 'scroll') {
+    return getVisibleIndices().filter((idx) => {
+      const n = state.pageNodes[idx];
+      if (!n) return false;
+      const r = n.getBoundingClientRect();
+      return r.width > 10 && r.height > 10;
+    });
+  }
+  const margin = Math.max(120, Math.round(Math.max(frameRect.width, frameRect.height) / Math.max(1, state.magPower)));
+  const hits = [];
+  for (let i = 0; i < els.scrollPages.children.length; i++) {
+    const wrap = els.scrollPages.children[i];
+    const r = wrap.getBoundingClientRect();
+    if (r.width > 10 && r.height > 10 && r.bottom >= frameRect.top - margin && r.top <= frameRect.bottom + margin) {
+      hits.push(i);
+    }
+  }
+  return hits;
+}
+
+function ensureMagHiResPage(idx, desiredW) {
+  if (!state.pdfDoc || idx < 0 || idx >= state.totalPages) return null;
+  const clampedW = clamp(Math.round(desiredW), 800, 2600);
+  const existing = state.magHiResCache.get(idx);
+  if (existing && existing.targetW >= clampedW * 0.85) {
+    // Refresh LRU order cleanly
+    state.magHiResCache.delete(idx);
+    state.magHiResCache.set(idx, existing);
+    return existing.canvas;
+  }
+  if (existing && existing.rendering && existing.pendingW >= clampedW * 0.85) {
+    return existing.canvas || null;
+  }
+  if (existing?.renderTask) {
+    try { existing.renderTask.cancel(); } catch {}
+  }
+
+  const record = {
+    targetW: existing?.canvas ? existing.targetW : 0,
+    pendingW: clampedW,
+    rendering: true,
+    canvas: existing?.canvas || null,
+    renderTask: null,
+  };
+  state.magHiResCache.delete(idx);
+  state.magHiResCache.set(idx, record);
+  while (state.magHiResCache.size > 4) {
+    const oldestKey = state.magHiResCache.keys().next().value;
+    const oldRec = state.magHiResCache.get(oldestKey);
+    if (oldestKey === idx) break;
+    try { oldRec?.renderTask?.cancel(); } catch {}
+    if (oldRec?.canvas) {
+      oldRec.canvas.width = 0;
+      oldRec.canvas.height = 0;
+    }
+    state.magHiResCache.delete(oldestKey);
+  }
+
+  (async () => {
+    try {
+      const pdfPage = await state.pdfDoc.getPage(idx + 1);
+      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) return;
+      const vp1 = pdfPage.getViewport({ scale: 1 });
+      const vp = pdfPage.getViewport({ scale: clampedW / Math.max(1, vp1.width) });
+      const hiCanvas = document.createElement('canvas');
+      hiCanvas.width = Math.max(1, Math.floor(vp.width));
+      hiCanvas.height = Math.max(1, Math.floor(vp.height));
+      const hctx = hiCanvas.getContext('2d', { alpha: false });
+      hctx.fillStyle = '#ffffff';
+      hctx.fillRect(0, 0, hiCanvas.width, hiCanvas.height);
+
+      const task = pdfPage.render({ canvasContext: hctx, viewport: vp });
+      record.renderTask = task;
+      await task.promise;
+      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) return;
+      record.canvas = hiCanvas;
+      record.targetW = clampedW;
+      record.rendering = false;
+      scheduleMagnifierRedraw();
+    } catch {
+      record.rendering = false;
+    }
+  })();
+
+  return record.canvas || null;
+}
+
+function drawMagnifierFrame() {
+  state.magRedrawRaf = 0;
+  if (!state.magEnabled || !state.pdfDoc || !els.magGlassFrame || !els.magCanvas) return;
+
+  const frameRect = els.magGlassFrame.getBoundingClientRect();
+  if (!frameRect.width || !frameRect.height) return;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const fw = frameRect.width;
+  const fh = frameRect.height;
+  const targetPxW = Math.max(1, Math.round(fw * dpr));
+  const targetPxH = Math.max(1, Math.round(fh * dpr));
+  if (els.magCanvas.width !== targetPxW || els.magCanvas.height !== targetPxH) {
+    els.magCanvas.width = targetPxW;
+    els.magCanvas.height = targetPxH;
+  }
+
+  const ctx = els.magCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, fw, fh);
+
+  const lensCx = frameRect.left + fw / 2;
+  const lensCy = frameRect.top + fh / 2;
+  const power = state.magPower;
+  const visIndices = getMagnifierVisibleIndices(frameRect);
+
+  for (const idx of visIndices) {
+    const pageNode = state.pageNodes[idx];
+    if (!pageNode) continue;
+    const pr = pageNode.getBoundingClientRect();
+    if (!pr.width || !pr.height) continue;
+
+    const dx = fw / 2 + (pr.left - lensCx) * power;
+    const dy = fh / 2 + (pr.top - lensCy) * power;
+    const dw = pr.width * power;
+    const dh = pr.height * power;
+
+    if (dx + dw <= 0 || dx >= fw || dy + dh <= 0 || dy >= fh) continue;
+
+    const desiredHiResW = pr.width * power * dpr;
+    const hiCanvas = ensureMagHiResPage(idx, desiredHiResW);
+    const srcCanvas = hiCanvas || pageNode.querySelector('canvas.fb-canvas');
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(dx, dy, dw, dh);
+    if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(srcCanvas, dx, dy, dw, dh);
+    }
+
+    const pageNum = idx + 1;
+    for (const hl of state.highlights) {
+      if (hl.page !== pageNum || !Array.isArray(hl.rects)) continue;
+      ctx.fillStyle = MAG_HL_FILLS[hl.color] || MAG_HL_FILLS.yellow;
+      for (const rect of hl.rects) {
+        ctx.fillRect(
+          dx + (rect.l / 100) * dw,
+          dy + (rect.t / 100) * dh,
+          (rect.w / 100) * dw,
+          (rect.h / 100) * dh
+        );
+      }
+    }
+    ctx.restore();
+  }
+}
+
+function scheduleMagnifierRedraw() {
+  if (!state.magEnabled || state.magRedrawRaf) return;
+  state.magRedrawRaf = requestAnimationFrame(drawMagnifierFrame);
+}
+
+function updateMagnifierUi() {
+  const active = Boolean(state.pdfDoc && state.magEnabled);
+  const powerStr = `${state.magPower.toFixed(1)}×`;
+
+  if (els.btnMagnifier) {
+    els.btnMagnifier.classList.toggle('active', active);
+  }
+  if (els.valMagnifier) {
+    els.valMagnifier.textContent = active
+      ? `${state.magStyle === 'bar' ? 'Bar' : 'Circle'} • ${powerStr}`
+      : 'Off';
+  }
+  if (els.magnifierOverlay) {
+    els.magnifierOverlay.hidden = !active;
+  }
+  if (els.magLens) {
+    els.magLens.classList.toggle('mag-shape-circle', state.magStyle === 'circle');
+    els.magLens.classList.toggle('mag-shape-bar', state.magStyle === 'bar');
+    els.magLens.classList.toggle('is-follow', state.magFollow);
+  }
+  if (els.btnMagShapeCircle) els.btnMagShapeCircle.classList.toggle('active', state.magStyle === 'circle');
+  if (els.btnMagShapeBar) els.btnMagShapeBar.classList.toggle('active', state.magStyle === 'bar');
+  if (els.magPowerLabel) els.magPowerLabel.textContent = powerStr;
+  if (els.btnMagFollow) {
+    els.btnMagFollow.classList.toggle('active', state.magFollow);
+    els.btnMagFollow.textContent = state.magFollow ? 'Following' : 'Drag & Place';
+  }
+}
+
+function setMagnifierEnabled(enabled, { persist = false } = {}) {
+  const next = Boolean(enabled && state.pdfDoc);
+  state.magEnabled = next;
+  if (!next) {
+    if (state.magRedrawRaf) {
+      cancelAnimationFrame(state.magRedrawRaf);
+      state.magRedrawRaf = 0;
+    }
+    updateMagnifierUi();
+    if (persist) schedulePersistState();
+    return;
+  }
+  updateMagnifierUi();
+  if (state.magX === null || state.magY === null) {
+    const def = getDefaultMagnifierCenter();
+    positionMagnifier(def.x, def.y);
+  } else {
+    positionMagnifier(state.magX, state.magY);
+  }
+  if (persist) schedulePersistState();
+}
+
+function setMagnifierStyle(style) {
+  state.magStyle = style === 'bar' ? 'bar' : 'circle';
+  updateMagnifierUi();
+  if (state.magEnabled) {
+    const sr = els.stage.getBoundingClientRect();
+    positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
+  }
+  schedulePersistState();
+}
+
+function setMagnifierPower(power) {
+  const num = Number(power);
+  if (!Number.isFinite(num)) return;
+  state.magPower = clamp(Math.round(num * 10) / 10, 1.4, 4.5);
+  updateMagnifierUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  schedulePersistState();
+}
+
 /* ---------- UI Modes & Theme ---------- */
 function setTheme(theme, persist = true) {
   state.theme = theme;
@@ -3274,7 +3603,61 @@ function wireEvents() {
 
   els.btnDarkRead?.addEventListener('click', () => {
     setReadDark(!state.readDark, true);
+    if (state.magEnabled) scheduleMagnifierRedraw();
   });
+  els.btnMagnifier?.addEventListener('click', () => {
+    setMagnifierEnabled(!state.magEnabled);
+    els.btnMagnifier.blur();
+  });
+  els.menuMagnifier?.addEventListener('click', () => {
+    setMagnifierEnabled(!state.magEnabled);
+  });
+  els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
+  els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
+  els.btnMagPowerDec?.addEventListener('click', () => setMagnifierPower(state.magPower - 0.2));
+  els.btnMagPowerInc?.addEventListener('click', () => setMagnifierPower(state.magPower + 0.2));
+  els.btnMagFollow?.addEventListener('click', () => {
+    state.magFollow = !state.magFollow;
+    updateMagnifierUi();
+    els.btnMagFollow.blur();
+  });
+  els.btnMagClose?.addEventListener('click', () => setMagnifierEnabled(false));
+
+  // Drag-and-Place on book + wheel magnification adjustment on lens/bar
+  let magDragOffset = null;
+  els.magLens?.addEventListener('pointerdown', (e) => {
+    if (!state.magEnabled || state.magFollow) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sr = els.stage.getBoundingClientRect();
+    state.magDragging = true;
+    els.magLens.classList.add('is-dragging');
+    els.magLens.setPointerCapture?.(e.pointerId);
+    const curX = state.magX ?? sr.width * 0.5;
+    const curY = state.magY ?? sr.height * 0.48;
+    magDragOffset = { dx: curX - (e.clientX - sr.left), dy: curY - (e.clientY - sr.top) };
+  });
+  els.magLens?.addEventListener('pointermove', (e) => {
+    if (!state.magDragging || !magDragOffset) return;
+    const sr = els.stage.getBoundingClientRect();
+    positionMagnifier((e.clientX - sr.left) + magDragOffset.dx, (e.clientY - sr.top) + magDragOffset.dy);
+  });
+  const endMagDrag = (e) => {
+    if (!state.magDragging) return;
+    state.magDragging = false;
+    magDragOffset = null;
+    els.magLens?.classList.remove('is-dragging');
+    try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+  };
+  els.magLens?.addEventListener('pointerup', endMagDrag);
+  els.magLens?.addEventListener('pointercancel', endMagDrag);
+  els.magLens?.addEventListener('wheel', (e) => {
+    if (!state.magEnabled || state.magFollow) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMagnifierPower(state.magPower + (e.deltaY < 0 ? 0.2 : -0.2));
+  }, { passive: false });
   els.btnHighlightsTop?.addEventListener('click', () => {
     if (!els.sideDrawer.hidden) {
       els.sideDrawer.hidden = true;
@@ -3602,6 +3985,7 @@ function wireEvents() {
     state.scrollSyncTimer = setTimeout(() => {
       queueNearbyRenders(state.currentIndex, 4);
     }, 90);
+    if (state.magEnabled) scheduleMagnifierRedraw();
   }, { passive: true });
   els.scrollViewport.addEventListener('wheel', (e) => {
     if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
@@ -3702,6 +4086,10 @@ function wireEvents() {
   // Track pointer position inside stage so keyboard +/- zoom anchors at cursor
   els.stage.addEventListener('mousemove', (e) => {
     state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
+    if (state.magEnabled && state.magFollow && !state.magDragging && !e.target?.closest?.('#magControlsPill')) {
+      const sr = els.stage.getBoundingClientRect();
+      positionMagnifier(e.clientX - sr.left, e.clientY - sr.top);
+    }
   });
   els.stage.addEventListener('mouseleave', () => {
     state.lastStagePointer = null;
@@ -3887,6 +4275,10 @@ function wireEvents() {
         toggleBookmarkCurrent();
         showBar('header', true, 1400);
         break;
+      case 'm':
+      case 'M':
+        setMagnifierEnabled(!state.magEnabled);
+        break;
       case 'l':
       case 'L':
         fetchLibrary();
@@ -3914,6 +4306,7 @@ function wireEvents() {
           els.btnHighlightsTop?.classList.remove('active');
         }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
+        else if (state.magEnabled) setMagnifierEnabled(false);
         else if (state.zoom > 1) setZoom(1, true);
         break;
     }
