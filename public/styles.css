@@ -2369,6 +2369,117 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .auto-playback-hud 
   color: #aeb6cd;
 }
 
+.shortcuts-modal-card {
+  width: min(680px, 92vw);
+  max-height: min(82vh, 680px);
+  overflow-y: auto;
+  gap: 16px;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 620px) {
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shortcuts-group {
+  background: #141720;
+  border: none;
+  border-radius: 16px;
+  padding: 13px 15px;
+  box-shadow: var(--neu-inset);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shortcuts-group-title {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ba8d6;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: #cdd3e4;
+  font-size: 11px;
+}
+
+.lookup-modal-card {
+  width: min(440px, 92vw);
+  gap: 12px;
+}
+
+.lookup-phonetic {
+  font-size: 12.5px;
+  color: #aeb6cd;
+  font-style: italic;
+}
+
+.lookup-body {
+  background: #141720;
+  border: none;
+  border-radius: 14px;
+  padding: 13px 15px;
+  box-shadow: var(--neu-inset);
+  font-size: 13px;
+  line-height: 1.55;
+  color: #d6dce9;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.lookup-pos {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ba8d6;
+  margin-top: 8px;
+}
+
+.lookup-pos:first-child {
+  margin-top: 0;
+}
+
+.lookup-def {
+  margin: 4px 0 0;
+}
+
+.lookup-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.lookup-ext-link {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .spinner {
   width: 34px;
   height: 34px;
@@ -2793,7 +2904,7 @@ body.mode-scroll .side-nav {
   contain: layout style size;
   background: var(--paper-bg, #ffffff);
   border-radius: 2px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48);
   user-select: none;
   -webkit-user-select: none;
@@ -2838,6 +2949,51 @@ body.has-paper-grain:not(.read-dark) .fh-snap-canvas {
 .scroll-page-wrap .fb-page {
   width: 100% !important;
   height: 100% !important;
+  overflow: hidden;
+  border-radius: 2px;
+}
+
+.book-edge-tabs.scroll-page-edge-tabs {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: auto;
+  width: 0;
+  z-index: 8;
+  transform: translate3d(var(--scroll-edge-clamp-x, 0px), 0, 0);
+  pointer-events: none;
+  overflow: visible;
+}
+
+.scroll-page-edge-tabs .sticky-edge-tab {
+  left: 0;
+  transform: translate3d(0, -50%, 0);
+}
+
+.scroll-page-edge-tabs .sticky-tab-face {
+  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
+  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
+  transform: translate3d(var(--tab-nudge, 0px), 0, 0);
+  background:
+    linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+  box-shadow:
+    2px 3px 8px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.scroll-page-edge-tabs .sticky-tab-hit {
+  left: 0;
+  right: 0;
+}
+
+.scroll-page-edge-tabs .sticky-edge-tab:hover .sticky-tab-face {
+  --tab-nudge: calc(5px * var(--tab-zoom, 1));
+}
+
+.scroll-page-edge-tabs .sticky-edge-tab.is-current {
+  z-index: 250;
 }
 
 /* Dark Mode Reading (Inverts PDF paper while preserving hues & legible highlights) */
@@ -3457,9 +3613,17 @@ body.read-dark .scs-flying-shade {
   bottom: 0;
   width: 0;
   z-index: 2;
-  transform: translate3d(0, 0, 0);
+  transform: translate3d(var(--edge-clamp-x, 0px), 0, 0);
   pointer-events: none;
   overflow: visible;
+}
+
+.book-edge-tabs.is-edge-clamped {
+  z-index: 8;
+}
+
+.book-edge-tabs.is-edge-clamped .sticky-tab-tail {
+  display: none;
 }
 
 .book-edge-tabs-left {
@@ -3516,17 +3680,17 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-face {
   position: relative;
   pointer-events: none;
-  height: calc(27px * var(--tab-zoom, 1));
-  min-width: calc(46px * var(--tab-zoom, 1));
-  max-width: calc(112px * var(--tab-zoom, 1));
-  padding: 0 calc(10px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
+  height: calc(21px * var(--tab-zoom, 1));
+  min-width: calc(34px * var(--tab-zoom, 1));
+  max-width: calc(74px * var(--tab-zoom, 1));
+  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
   color: var(--tab-ink);
-  font-size: calc(11px * var(--tab-zoom, 1));
+  font-size: calc(9.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   display: inline-flex;
   align-items: center;
-  gap: calc(4px * var(--tab-zoom, 1));
+  gap: calc(3px * var(--tab-zoom, 1));
   white-space: nowrap;
   transform: translate3d(0, 0, 0);
   transition:
@@ -3594,20 +3758,20 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-right {
   left: 100%;
   right: auto;
-  height: calc(27px * var(--tab-zoom, 1));
-  min-width: calc(46px * var(--tab-zoom, 1));
-  max-width: calc(112px * var(--tab-zoom, 1));
-  padding: 0 calc(10px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
-  border-radius: 0 calc(3.5px * var(--tab-zoom, 1)) calc(3.5px * var(--tab-zoom, 1)) 0;
-  gap: calc(4px * var(--tab-zoom, 1));
-  font-size: calc(11px * var(--tab-zoom, 1));
+  height: calc(21px * var(--tab-zoom, 1));
+  min-width: calc(34px * var(--tab-zoom, 1));
+  max-width: calc(74px * var(--tab-zoom, 1));
+  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(5.5px * var(--tab-zoom, 1));
+  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
+  gap: calc(3px * var(--tab-zoom, 1));
+  font-size: calc(9.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
   transform: translate3d(0, -50%, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
     inset 3px 0 5px -2px rgba(0, 0, 0, 0.24),
     2px 3px 8px var(--tab-shadow),
@@ -3649,13 +3813,13 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-left {
   right: 100%;
   left: auto;
-  height: calc(27px * var(--tab-zoom, 1));
-  min-width: calc(46px * var(--tab-zoom, 1));
-  max-width: calc(112px * var(--tab-zoom, 1));
-  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(10px * var(--tab-zoom, 1));
-  border-radius: calc(3.5px * var(--tab-zoom, 1)) 0 0 calc(3.5px * var(--tab-zoom, 1));
-  gap: calc(4px * var(--tab-zoom, 1));
-  font-size: calc(11px * var(--tab-zoom, 1));
+  height: calc(21px * var(--tab-zoom, 1));
+  min-width: calc(34px * var(--tab-zoom, 1));
+  max-width: calc(74px * var(--tab-zoom, 1));
+  padding: 0 calc(5.5px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
+  border-radius: calc(3px * var(--tab-zoom, 1)) 0 0 calc(3px * var(--tab-zoom, 1));
+  gap: calc(3px * var(--tab-zoom, 1));
+  font-size: calc(9.5px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -3663,7 +3827,7 @@ body.read-dark .scs-flying-shade {
   transform: translate3d(0, -50%, 0);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(8px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.24),
     -2px 3px 8px var(--tab-shadow),
@@ -3704,12 +3868,12 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: calc(78px * var(--tab-zoom, 1));
+  max-width: calc(50px * var(--tab-zoom, 1));
 }
 
 .sticky-tab-dot {
-  width: calc(4.5px * var(--tab-zoom, 1));
-  height: calc(4.5px * var(--tab-zoom, 1));
+  width: calc(3.5px * var(--tab-zoom, 1));
+  height: calc(3.5px * var(--tab-zoom, 1));
   border-radius: 50%;
   background: currentColor;
   opacity: 0.44;
@@ -3750,8 +3914,8 @@ body.read-dark .scs-flying-shade {
   right: 0;
   top: 76px;
   bottom: calc(var(--bar-height) + 28px);
-  width: 214px;
-  padding: 6px 14px 10px 30px;
+  width: 136px;
+  padding: 6px 14px 10px 18px;
   max-height: none;
   z-index: 38;
   pointer-events: none;
@@ -3759,7 +3923,7 @@ body.read-dark .scs-flying-shade {
   flex-direction: column;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -3778,52 +3942,52 @@ body.read-dark .scs-flying-shade {
 }
 
 .scroll-tabs-rail .sticky-tab-face {
-  height: 32px;
-  min-width: 68px;
-  max-width: 162px;
-  border-radius: 5px 0 0 5px;
-  padding: 0 13px 0 11px;
-  font-size: 12px;
-  gap: 6px;
+  height: 24px;
+  min-width: 44px;
+  max-width: 96px;
+  border-radius: 4px 0 0 4px;
+  padding: 0 9px 0 7px;
+  font-size: 10.5px;
+  gap: 4.5px;
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.22),
     -2px 3px 10px rgba(0, 0, 0, 0.36);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 12px, var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 9px, var(--tab-bg) 100%);
 }
 
 .scroll-tabs-rail .sticky-tab-dot {
-  width: 5.5px;
-  height: 5.5px;
+  width: 4px;
+  height: 4px;
 }
 
 .scroll-tabs-rail .sticky-tab-text {
-  max-width: 128px;
+  max-width: 72px;
 }
 
 .scroll-tabs-rail .sticky-tab-hit {
   left: 0;
-  right: 5px;
+  right: 4px;
 }
 
 .scroll-tabs-rail .sticky-edge-tab:hover .sticky-tab-face {
-  transform: translate3d(-6px, 0, 0);
+  transform: translate3d(-5px, 0, 0);
 }
 
 .scroll-tabs-rail .sticky-edge-tab:hover .sticky-tab-hit {
-  left: -6px;
+  left: -5px;
 }
 
 .scroll-tabs-rail .sticky-edge-tab.is-current .sticky-tab-face {
-  transform: translate3d(-6px, 0, 0);
+  transform: translate3d(-5px, 0, 0);
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.16),
     -4px 5px 14px rgba(0, 0, 0, 0.46);
 }
 
 .scroll-tabs-rail .sticky-edge-tab.is-current .sticky-tab-hit {
-  left: -6px;
+  left: -5px;
 }
 
 /* Sticky Tab Popover Editor */

@@ -81,6 +81,10 @@ const els = {
   ctxBookmark: document.getElementById('ctxBookmark'),
   ctxBookmarkLabel: document.getElementById('ctxBookmarkLabel'),
   ctxSelDivider: document.getElementById('ctxSelDivider'),
+  ctxLookUp: document.getElementById('ctxLookUp'),
+  ctxLookUpLabel: document.getElementById('ctxLookUpLabel'),
+  ctxTranslate: document.getElementById('ctxTranslate'),
+  ctxTranslateLabel: document.getElementById('ctxTranslateLabel'),
   ctxCopyText: document.getElementById('ctxCopyText'),
   marginNoteHoverCard: document.getElementById('marginNoteHoverCard'),
   marginHoverColorDot: document.getElementById('marginHoverColorDot'),
@@ -252,6 +256,16 @@ const els = {
   libraryList: document.getElementById('libraryList'),
   btnAboutApp: document.getElementById('btnAboutApp'),
   menuAboutCard: document.getElementById('menuAboutCard'),
+  btnShortcutsApp: document.getElementById('btnShortcutsApp'),
+  shortcutsModal: document.getElementById('shortcutsModal'),
+  btnCloseShortcuts: document.getElementById('btnCloseShortcuts'),
+  lookupModal: document.getElementById('lookupModal'),
+  btnCloseLookup: document.getElementById('btnCloseLookup'),
+  lookupWordTitle: document.getElementById('lookupWordTitle'),
+  lookupPhonetic: document.getElementById('lookupPhonetic'),
+  lookupBody: document.getElementById('lookupBody'),
+  lookupWebDictLink: document.getElementById('lookupWebDictLink'),
+  lookupTranslateLink: document.getElementById('lookupTranslateLink'),
   aboutModal: document.getElementById('aboutModal'),
   btnCloseAbout: document.getElementById('btnCloseAbout'),
   appToast: document.getElementById('appToast'),
@@ -342,6 +356,8 @@ const state = {
   stickyEditColor: 'coral',
   ctxTargetPage: null,
   ctxPos: null,
+  ctxActionText: '',
+  ctxActionCoords: null,
   navHistory: [], // [{ page, reason }]
   highlights: [],
   marginNotes: [], // [{ id, page, xPct, yPct, color, text, snipRect, createdAt }]
@@ -785,6 +801,9 @@ function disposeBook() {
   if (els.pageContextMenu) els.pageContextMenu.hidden = true;
   clearNavHistory();
   els.scrollPages.innerHTML = '';
+  if (els.shortcutsModal) els.shortcutsModal.hidden = true;
+  if (els.lookupModal) els.lookupModal.hidden = true;
+  if (els.aboutModal) els.aboutModal.hidden = true;
   els.scrollViewport.hidden = true;
   document.body.classList.remove('mode-scroll');
   clearSingleFlights();
@@ -913,6 +932,9 @@ function initScrollView(startIndex = 0) {
 
   buildPageElements();
   els.scrollPages.innerHTML = '';
+  if (els.shortcutsModal) els.shortcutsModal.hidden = true;
+  if (els.lookupModal) els.lookupModal.hidden = true;
+  if (els.aboutModal) els.aboutModal.hidden = true;
   els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
   els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
   const frag = document.createDocumentFragment();
@@ -981,6 +1003,9 @@ function initPageFlip(startIndex = 0) {
     state.scrollObserver = null;
   }
   els.scrollPages.innerHTML = '';
+  if (els.shortcutsModal) els.shortcutsModal.hidden = true;
+  if (els.lookupModal) els.lookupModal.hidden = true;
+  if (els.aboutModal) els.aboutModal.hidden = true;
   els.scrollViewport.hidden = true;
   els.zoomViewport.hidden = false;
   document.body.classList.remove('mode-scroll');
@@ -1790,6 +1815,7 @@ function updateBookDepthChrome() {
     els.bookShell.style.setProperty('--tabs-offset-left', '0px');
     els.bookShell.style.setProperty('--tabs-offset-right', '0px');
   }
+  syncEdgeTabsViewportBounds();
 }
 
 const singleStackMeta = {
@@ -2436,6 +2462,7 @@ function applyZoomTransform(rerender = true, immediate = false) {
   hideHighlightPopover();
   if (state.magEnabled) scheduleMagnifierRedraw();
   if (state.curtainEnabled) positionFocusCurtain();
+  syncEdgeTabsViewportBounds();
 
   if (rerender && state.pdfDoc) {
     clearTimeout(state.zoomRerenderTimer);
@@ -2514,10 +2541,12 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
       const sh = Math.max(160, Math.round(state.pageH * state.zoom));
       els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
       els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
+      syncStickyTabScale(sw);
 
       sv.scrollLeft = Math.max(0, anchorWrap.offsetLeft + relX * sw - vpX);
       sv.scrollTop = Math.max(0, anchorWrap.offsetTop + relY * sh - vpY);
       state.autoScrollPosY = sv.scrollTop;
+      syncEdgeTabsViewportBounds();
 
       clearTimeout(state.zoomRerenderTimer);
       const commitScroll = () => {
@@ -2525,6 +2554,7 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         const visScroll = getVisibleScrollIndices();
         for (const i of visScroll) renderPageNode(i);
         queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 3));
+        syncEdgeTabsViewportBounds();
         if (state.curtainEnabled) positionFocusCurtain();
         if (state.magEnabled) scheduleMagnifierRedraw();
       };
@@ -2988,10 +3018,56 @@ function getTurningTabPages() {
 }
 
 function syncStickyTabScale(pageWidthPx) {
-  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.82, 1.42);
+  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.65, 1.08);
   const val = scale.toFixed(4);
   els.bookShell?.style.setProperty('--tab-zoom', val);
   els.singleFlightLayer?.style.setProperty('--tab-zoom', val);
+  els.scrollPages?.style.setProperty('--tab-zoom', val);
+}
+
+function syncEdgeTabsViewportBounds() {
+  if (!state.pdfDoc) return;
+  const tabZoom = parseFloat(els.bookShell?.style.getPropertyValue('--tab-zoom') || els.scrollPages?.style.getPropertyValue('--tab-zoom') || '1') || 1;
+  const tabMaxOut = Math.round(78 * tabZoom);
+  const margin = 8;
+
+  if (state.scrollMode === 'scroll') {
+    if (!els.scrollPages) return;
+    const vis = getVisibleScrollIndices();
+    const probeWrap = els.scrollPages.children[vis[0] ?? state.currentIndex ?? 0];
+    if (!probeWrap) return;
+    const wr = probeWrap.getBoundingClientRect();
+    let scrollClampX = 0;
+    if (wr.right <= window.innerWidth + 28 && wr.right + tabMaxOut > window.innerWidth - margin) {
+      scrollClampX = Math.round((window.innerWidth - margin) - (wr.right + tabMaxOut));
+    }
+    els.scrollPages.style.setProperty('--scroll-edge-clamp-x', `${scrollClampX}px`);
+    return;
+  }
+
+  if (!els.bookShell || els.bookShell.hidden) return;
+  const sr = els.bookShell.getBoundingClientRect();
+  if (!sr.width) return;
+
+  if (els.bookEdgeTabsLeft) {
+    const leftEdgeX = sr.left + (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-left') || '0') || 0) - (state.leftStackThick || 0);
+    let clampLeftX = 0;
+    if (leftEdgeX >= -tabMaxOut && leftEdgeX - tabMaxOut < margin) {
+      clampLeftX = Math.round((margin + tabMaxOut) - leftEdgeX);
+    }
+    els.bookEdgeTabsLeft.style.setProperty('--edge-clamp-x', `${clampLeftX}px`);
+    els.bookEdgeTabsLeft.classList.toggle('is-edge-clamped', clampLeftX > 2);
+  }
+
+  if (els.bookEdgeTabsRight) {
+    const rightEdgeX = sr.right - (parseFloat(els.bookShell.style.getPropertyValue('--tabs-offset-right') || '0') || 0) + (state.rightStackThick || 0);
+    let clampRightX = 0;
+    if (rightEdgeX <= window.innerWidth + tabMaxOut && rightEdgeX + tabMaxOut > window.innerWidth - margin) {
+      clampRightX = Math.round((window.innerWidth - margin) - (rightEdgeX + tabMaxOut));
+    }
+    els.bookEdgeTabsRight.style.setProperty('--edge-clamp-x', `${clampRightX}px`);
+    els.bookEdgeTabsRight.classList.toggle('is-edge-clamped', clampRightX < -2);
+  }
 }
 
 function createAttachedTurningTabEl(tab, topPct, sideDir) {
@@ -3212,6 +3288,33 @@ function renderBookEdgeTabs() {
     els.bookEdgeTabsLeft.innerHTML = '';
     els.bookEdgeTabsRight.innerHTML = '';
     renderSingleCollectedStackTabs([], posMap);
+    syncStickyTabScale(Math.round(state.pageW * (state.zoom || 1)));
+
+    // Render physical sticky tabs directly on each matching scroll page
+    if (els.scrollPages) {
+      for (const oldHolder of els.scrollPages.querySelectorAll('.scroll-page-edge-tabs')) {
+        oldHolder.remove();
+      }
+      if (state.pdfDoc && tabs.length) {
+        const tabsByPage = new Map();
+        for (const tab of tabs) {
+          if (!tabsByPage.has(tab.page)) tabsByPage.set(tab.page, []);
+          tabsByPage.get(tab.page).push(tab);
+        }
+        for (const [pageNum, pageTabs] of tabsByPage) {
+          const wrap = els.scrollPages.children[pageNum - 1];
+          if (!wrap) continue;
+          const holder = document.createElement('div');
+          holder.className = 'book-edge-tabs book-edge-tabs-right scroll-page-edge-tabs';
+          for (const t of pageTabs) {
+            const topPct = posMap.get(t.page) ?? 20;
+            holder.appendChild(createStickyEdgeTabElement(t, topPct, visible1Based.has(t.page), { withTail: false }));
+          }
+          wrap.appendChild(holder);
+        }
+      }
+    }
+
     if (els.scrollTabsRail) {
       const prevScrollTop = els.scrollTabsRail.scrollTop;
       const prevCurPage = els.scrollTabsRail.dataset.lastCurrentPage || '';
@@ -3243,8 +3346,15 @@ function renderBookEdgeTabs() {
         }
       }
     }
+    syncEdgeTabsViewportBounds();
     if (state.magEnabled) scheduleMagnifierRedraw();
     return;
+  }
+
+  if (els.scrollPages) {
+    for (const oldHolder of els.scrollPages.querySelectorAll('.scroll-page-edge-tabs')) {
+      oldHolder.remove();
+    }
   }
 
   if (els.scrollTabsRail) {
@@ -3296,6 +3406,7 @@ function renderBookEdgeTabs() {
     reconcileEdgeTabContainer(els.bookEdgeTabsLeft, leftSorted, posMap, visible1Based, leftThick, false);
   }
   reconcileEdgeTabContainer(els.bookEdgeTabsRight, rightSorted, posMap, visible1Based, rightThick, true);
+  syncEdgeTabsViewportBounds();
   if (state.magEnabled) {
     state.magAnimUntil = Math.max(state.magAnimUntil || 0, performance.now() + 380);
     scheduleMagnifierRedraw();
@@ -3375,6 +3486,114 @@ function closeStickyTabPopover() {
   els.stickyTabPopover.hidden = true;
 }
 
+function formatMenuSnippet(str, maxLen = 22) {
+  const clean = (str || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return clean.length > maxLen ? `${clean.slice(0, maxLen - 1)}…` : clean;
+}
+
+function extractWordAtClientPoint(clientX, clientY) {
+  let node = null;
+  let offset = 0;
+  if (typeof document.caretPositionFromPoint === 'function') {
+    const pos = document.caretPositionFromPoint(clientX, clientY);
+    if (pos) {
+      node = pos.offsetNode;
+      offset = pos.offset;
+    }
+  } else if (typeof document.caretRangeFromPoint === 'function') {
+    const r = document.caretRangeFromPoint(clientX, clientY);
+    if (r) {
+      node = r.startContainer;
+      offset = r.startOffset;
+    }
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE) return '';
+  const el = node.parentElement;
+  if (!el || !el.closest('.textLayer')) return '';
+  const str = node.textContent || '';
+  if (!str) return '';
+  const isWordChar = (ch) => /[\p{L}\p{N}’'-]/u.test(ch);
+  let idx = clamp(offset, 0, Math.max(0, str.length - 1));
+  if (!isWordChar(str[idx]) && idx > 0 && isWordChar(str[idx - 1])) {
+    idx -= 1;
+  }
+  if (!isWordChar(str[idx])) return '';
+  let start = idx;
+  let end = idx + 1;
+  while (start > 0 && isWordChar(str[start - 1])) start--;
+  while (end < str.length && isWordChar(str[end])) end++;
+  return str.slice(start, end).replace(/^[’'-]+|[’'-]+$/g, '').trim();
+}
+
+async function performLookUpText(rawText, clientX, clientY) {
+  const clean = (rawText || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return;
+  if (document.documentElement.classList.contains('mac-native-window') && window.webkit?.messageHandlers?.flipbook) {
+    window.webkit.messageHandlers.flipbook.postMessage({
+      action: 'lookUp',
+      text: clean.slice(0, 120),
+      x: Math.round(clientX || window.innerWidth / 2),
+      y: Math.round(clientY || window.innerHeight / 2),
+    });
+    return;
+  }
+  if (!els.lookupModal) return;
+  const word = clean.split(/\s+/)[0].slice(0, 64);
+  if (els.lookupWordTitle) els.lookupWordTitle.textContent = `Look Up “${word}”`;
+  if (els.lookupPhonetic) {
+    els.lookupPhonetic.textContent = '';
+    els.lookupPhonetic.hidden = true;
+  }
+  if (els.lookupBody) els.lookupBody.textContent = 'Looking up definition…';
+  if (els.lookupWebDictLink) {
+    els.lookupWebDictLink.href = `https://en.wiktionary.org/wiki/${encodeURIComponent(word)}`;
+  }
+  if (els.lookupTranslateLink) {
+    els.lookupTranslateLink.href = `https://translate.google.com/?sl=auto&tl=en&text=${encodeURIComponent(clean.slice(0, 800))}`;
+  }
+  els.lookupModal.hidden = false;
+  try {
+    const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.toLowerCase())}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const entry = Array.isArray(data) ? data[0] : null;
+    if (!entry) throw new Error('No entry');
+    if (els.lookupPhonetic && entry.phonetic) {
+      els.lookupPhonetic.textContent = entry.phonetic;
+      els.lookupPhonetic.hidden = false;
+    }
+    const meanings = (entry.meanings || []).slice(0, 3);
+    if (!meanings.length) throw new Error('No meanings');
+    if (els.lookupBody) {
+      els.lookupBody.innerHTML = meanings.map((m) => {
+        const defs = (m.definitions || []).slice(0, 2).map((d) => `<div class="lookup-def">• ${escapeHtml(d.definition || '')}</div>`).join('');
+        return `<div class="lookup-pos">${escapeHtml(m.partOfSpeech || '')}</div>${defs}`;
+      }).join('');
+    }
+  } catch {
+    if (els.lookupBody) {
+      els.lookupBody.textContent = `No offline dictionary match for “${clean.slice(0, 120)}”. Use Dictionary Web or Translate below.`;
+    }
+  }
+}
+
+function performTranslateText(rawText, clientX, clientY) {
+  const clean = (rawText || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return;
+  if (document.documentElement.classList.contains('mac-native-window') && window.webkit?.messageHandlers?.flipbook) {
+    window.webkit.messageHandlers.flipbook.postMessage({
+      action: 'translate',
+      text: clean.slice(0, 1500),
+      x: Math.round(clientX || window.innerWidth / 2),
+      y: Math.round(clientY || window.innerHeight / 2),
+    });
+    return;
+  }
+  const url = `https://translate.google.com/?sl=auto&tl=en&text=${encodeURIComponent(clean.slice(0, 1500))}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 function openPageContextMenu(clientX, clientY, pageNum, coords = null) {
   if (!state.pdfDoc || !els.pageContextMenu) return;
   closeStickyTabPopover();
@@ -3388,6 +3607,10 @@ function openPageContextMenu(clientX, clientY, pageNum, coords = null) {
   const existingPin = state.pinnedRefs.find((r) => r.page === p && !r.crop);
   const isBm = state.bookmarks.includes(p);
   const selText = window.getSelection()?.toString()?.trim() || '';
+  const wordUnderCursor = selText ? '' : extractWordAtClientPoint(clientX, clientY);
+  const actionText = selText || wordUnderCursor;
+  state.ctxActionText = actionText;
+  state.ctxActionCoords = { x: clientX, y: clientY };
 
   if (els.ctxPageHeading) els.ctxPageHeading.textContent = `Page ${p}`;
   if (els.ctxPinPageLabel) {
@@ -3400,11 +3623,17 @@ function openPageContextMenu(clientX, clientY, pageNum, coords = null) {
   if (els.ctxBookmarkLabel) {
     els.ctxBookmarkLabel.textContent = isBm ? `Remove Bookmark (p. ${p})` : `Bookmark Page ${p}`;
   }
-  if (els.ctxSelDivider) els.ctxSelDivider.hidden = !selText;
+
+  const labelPreview = formatMenuSnippet(actionText);
+  if (els.ctxSelDivider) els.ctxSelDivider.hidden = !actionText;
+  if (els.ctxLookUp) els.ctxLookUp.hidden = !actionText;
+  if (els.ctxLookUpLabel) els.ctxLookUpLabel.textContent = labelPreview ? `Look Up “${labelPreview}”` : 'Look Up';
+  if (els.ctxTranslate) els.ctxTranslate.hidden = !actionText;
+  if (els.ctxTranslateLabel) els.ctxTranslateLabel.textContent = labelPreview ? `Translate “${labelPreview}”` : 'Translate';
   if (els.ctxCopyText) els.ctxCopyText.hidden = !selText;
 
   els.pageContextMenu.hidden = false;
-  positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 224, 240);
+  positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 236, 290);
 }
 
 function closePageContextMenu() {
@@ -8455,6 +8684,33 @@ function wireEvents() {
     els.libraryModal.hidden = false;
   };
 
+  const openShortcutsModal = () => {
+    closeMarginNotePopover();
+    closeStickyTabPopover();
+    closePageContextMenu();
+    hideHighlightPopover();
+    els.moreMenu.hidden = true;
+    els.btnMore?.classList.remove('active');
+    if (els.libraryModal) els.libraryModal.hidden = true;
+    if (els.aboutModal) els.aboutModal.hidden = true;
+    if (els.lookupModal) els.lookupModal.hidden = true;
+    if (els.shortcutsModal) els.shortcutsModal.hidden = false;
+  };
+  els.btnShortcutsApp?.addEventListener('click', openShortcutsModal);
+  els.btnCloseShortcuts?.addEventListener('click', () => {
+    if (els.shortcutsModal) els.shortcutsModal.hidden = true;
+  });
+  els.shortcutsModal?.addEventListener('click', (e) => {
+    if (e.target === els.shortcutsModal) els.shortcutsModal.hidden = true;
+  });
+
+  els.btnCloseLookup?.addEventListener('click', () => {
+    if (els.lookupModal) els.lookupModal.hidden = true;
+  });
+  els.lookupModal?.addEventListener('click', (e) => {
+    if (e.target === els.lookupModal) els.lookupModal.hidden = true;
+  });
+
   const openAboutModal = () => {
     closeMarginNotePopover();
     closeStickyTabPopover();
@@ -8463,6 +8719,8 @@ function wireEvents() {
     els.moreMenu.hidden = true;
     els.btnMore?.classList.remove('active');
     if (els.libraryModal) els.libraryModal.hidden = true;
+    if (els.shortcutsModal) els.shortcutsModal.hidden = true;
+    if (els.lookupModal) els.lookupModal.hidden = true;
     if (els.aboutModal) els.aboutModal.hidden = false;
   };
   els.btnAboutApp?.addEventListener('click', openAboutModal);
@@ -9137,6 +9395,20 @@ function wireEvents() {
     updateBookmarkUi();
     schedulePersistState();
   });
+  els.ctxLookUp?.addEventListener('click', () => {
+    const txt = state.ctxActionText || window.getSelection()?.toString()?.trim() || '';
+    const coords = state.ctxActionCoords || state.ctxPos || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    closePageContextMenu();
+    if (!txt) return;
+    performLookUpText(txt, coords.x, coords.y);
+  });
+  els.ctxTranslate?.addEventListener('click', () => {
+    const txt = state.ctxActionText || window.getSelection()?.toString()?.trim() || '';
+    const coords = state.ctxActionCoords || state.ctxPos || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    closePageContextMenu();
+    if (!txt) return;
+    performTranslateText(txt, coords.x, coords.y);
+  });
   els.ctxCopyText?.addEventListener('click', async () => {
     const txt = window.getSelection()?.toString()?.trim() || '';
     closePageContextMenu();
@@ -9237,7 +9509,7 @@ function wireEvents() {
 
     const sel = window.getSelection();
     const hasSelection = !!(sel && !sel.isCollapsed && sel.toString().trim());
-    const clickedUiChrome = Boolean(e.target.closest('#topBar, #bottomBar, #sideDrawer, #moreMenu, #libraryModal, #aboutModal'));
+    const clickedUiChrome = Boolean(e.target.closest('#topBar, #bottomBar, #sideDrawer, #moreMenu, #libraryModal, #aboutModal, #shortcutsModal, #lookupModal'));
     if (!e.target.closest('#hlPopover') && (!hasSelection || clickedUiChrome)) {
       const wasPanDrag = state.panMoved;
       state.panMoved = false;
@@ -9524,6 +9796,7 @@ function wireEvents() {
     if (now - (state.autoScrollRenderTickAt || 0) >= 140) {
       state.autoScrollRenderTickAt = now;
       queueNearbyRenders(state.currentIndex, 0, { withText: false });
+      syncEdgeTabsViewportBounds();
     }
     clearTimeout(state.scrollSyncTimer);
     state.scrollSyncTimer = setTimeout(() => {
@@ -9639,7 +9912,7 @@ function wireEvents() {
     if (shouldKeepBarVisible('footer')) showBar('footer', false);
     else scheduleHideBar('footer', 420);
   });
-  [els.moreMenu, els.thumbnailsStrip, els.libraryModal, els.aboutModal, els.stickyTabPopover]
+  [els.moreMenu, els.thumbnailsStrip, els.libraryModal, els.aboutModal, els.shortcutsModal, els.lookupModal, els.stickyTabPopover]
     .filter(Boolean)
     .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
 
@@ -9996,7 +10269,9 @@ function wireEvents() {
       else if (!els.moreMenu.hidden) {
         els.moreMenu.hidden = true;
         els.btnMore.classList.remove('active');
-      } else if (els.aboutModal && !els.aboutModal.hidden) els.aboutModal.hidden = true;
+      } else if (els.lookupModal && !els.lookupModal.hidden) els.lookupModal.hidden = true;
+      else if (els.shortcutsModal && !els.shortcutsModal.hidden) els.shortcutsModal.hidden = true;
+      else if (els.aboutModal && !els.aboutModal.hidden) els.aboutModal.hidden = true;
       else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
       else if (!els.sideDrawer.hidden) {
         els.sideDrawer.hidden = true;
@@ -10027,10 +10302,22 @@ function wireEvents() {
       return;
     }
 
+    if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (els.shortcutsModal && !els.shortcutsModal.hidden) {
+        els.shortcutsModal.hidden = true;
+      } else {
+        openShortcutsModal();
+      }
+      return;
+    }
+
     if (hasMod) return;
 
     if ((e.key === 'l' || e.key === 'L') && !e.shiftKey) {
       if (els.aboutModal && !els.aboutModal.hidden) els.aboutModal.hidden = true;
+      if (els.shortcutsModal && !els.shortcutsModal.hidden) els.shortcutsModal.hidden = true;
+      if (els.lookupModal && !els.lookupModal.hidden) els.lookupModal.hidden = true;
       if (!els.libraryModal.hidden) {
         els.libraryModal.hidden = true;
       } else {
@@ -10043,7 +10330,7 @@ function wireEvents() {
       return;
     }
 
-    if (!state.pdfDoc || !els.libraryModal.hidden || (els.aboutModal && !els.aboutModal.hidden)) return;
+    if (!state.pdfDoc || !els.libraryModal.hidden || (els.aboutModal && !els.aboutModal.hidden) || (els.shortcutsModal && !els.shortcutsModal.hidden) || (els.lookupModal && !els.lookupModal.hidden)) return;
 
     switch (e.key) {
       case 'ArrowLeft':

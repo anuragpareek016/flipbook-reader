@@ -3,6 +3,71 @@ import WebKit
 import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
+import SwiftUI
+import Translation
+
+@available(macOS 15.0, *)
+private final class NativeTranslateModel: ObservableObject {
+    var isPresented: Bool = false {
+        willSet { objectWillChange.send() }
+    }
+    var text: String = "" {
+        willSet { objectWillChange.send() }
+    }
+}
+
+@available(macOS 15.0, *)
+private struct NativeTranslateAnchorView: View {
+    @ObservedObject var model: NativeTranslateModel
+    var onDismiss: () -> Void
+
+    var body: some View {
+        let binding = Binding<Bool>(
+            get: { model.isPresented },
+            set: { next in
+                model.isPresented = next
+                if !next {
+                    onDismiss()
+                }
+            }
+        )
+        Color.clear
+            .frame(width: 24, height: 24)
+            .translationPresentation(isPresented: binding, text: model.text)
+    }
+}
+
+@available(macOS 15.0, *)
+private final class NativeTranslateBridge {
+    private var hostView: NSHostingView<NativeTranslateAnchorView>?
+    private var model = NativeTranslateModel()
+
+    func present(text: String, at point: NSPoint, in parent: NSView) {
+        dismiss()
+        let nextModel = NativeTranslateModel()
+        nextModel.text = text
+        model = nextModel
+        let root = NativeTranslateAnchorView(model: nextModel) { [weak self] in
+            DispatchQueue.main.async {
+                self?.dismiss()
+            }
+        }
+        let hv = NSHostingView(rootView: root)
+        let clampedX = max(12, min(point.x, max(12, parent.bounds.width - 12)))
+        let clampedY = max(12, min(point.y, max(12, parent.bounds.height - 12)))
+        hv.frame = NSRect(x: clampedX - 12, y: clampedY - 12, width: 24, height: 24)
+        parent.addSubview(hv)
+        hostView = hv
+        DispatchQueue.main.async { [weak nextModel] in
+            nextModel?.isPresented = true
+        }
+    }
+
+    func dismiss() {
+        hostView?.removeFromSuperview()
+        hostView = nil
+    }
+}
 
 /// Native AVAudioPlayer pool with sleep/wake recovery so WKWebView process throttling never silences page turns.
 final class NativeFlipSoundEngine {
@@ -396,6 +461,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private var appActivity: NSObjectProtocol?
     private var soundEngine: NativeFlipSoundEngine?
     private var ambientEngine: NativeAmbientSoundEngine?
+    private var translateBridgeObj: AnyObject?
 
     private let devRoot = ProcessInfo.processInfo.environment["DEVELOPER_ROOT"] ?? "/Users/openfrontierlabs/Developer"
 
@@ -1075,6 +1141,49 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
                 pb.clearContents()
                 let ok = pb.setString(text, forType: .string)
                 self?.resolveNativeJsCallback(callbackId, ok: ok)
+            }
+        } else if action == "lookUp" {
+            let text = ((dict["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            let x = (dict["x"] as? NSNumber)?.doubleValue ?? Double(webView?.bounds.midX ?? 200)
+            let y = (dict["y"] as? NSNumber)?.doubleValue ?? Double(webView?.bounds.midY ?? 200)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let wv = self.webView else { return }
+                let clipped = String(text.prefix(120))
+                let pt = NSPoint(
+                    x: max(12, min(CGFloat(x), max(12, wv.bounds.width - 12))),
+                    y: max(12, min(CGFloat(y), max(12, wv.bounds.height - 12)))
+                )
+                wv.showDefinition(for: NSAttributedString(string: clipped), at: pt)
+            }
+        } else if action == "translate" {
+            let text = ((dict["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            let x = (dict["x"] as? NSNumber)?.doubleValue ?? Double(webView?.bounds.midX ?? 200)
+            let y = (dict["y"] as? NSNumber)?.doubleValue ?? Double(webView?.bounds.midY ?? 200)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let wv = self.webView else { return }
+                let clipped = String(text.prefix(1500))
+                if #available(macOS 15.0, *) {
+                    let bridge: NativeTranslateBridge
+                    if let existing = self.translateBridgeObj as? NativeTranslateBridge {
+                        bridge = existing
+                    } else {
+                        bridge = NativeTranslateBridge()
+                        self.translateBridgeObj = bridge
+                    }
+                    bridge.present(text: clipped, at: NSPoint(x: x, y: y), in: wv)
+                } else {
+                    var comps = URLComponents(string: "https://translate.google.com/")!
+                    comps.queryItems = [
+                        URLQueryItem(name: "sl", value: "auto"),
+                        URLQueryItem(name: "tl", value: "en"),
+                        URLQueryItem(name: "text", value: clipped),
+                    ]
+                    if let url = comps.url {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             }
         } else if action == "saveFile" {
             let filename = (dict["filename"] as? String) ?? "export.bin"

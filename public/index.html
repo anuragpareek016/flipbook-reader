@@ -141,6 +141,12 @@
         <kbd>B</kbd>
       </button>
       <div class="menu-divider" id="ctxSelDivider" hidden></div>
+      <button type="button" class="menu-item" id="ctxLookUp" hidden role="menuitem">
+        <span id="ctxLookUpLabel">Look Up</span>
+      </button>
+      <button type="button" class="menu-item" id="ctxTranslate" hidden role="menuitem">
+        <span id="ctxTranslateLabel">Translate</span>
+      </button>
       <button type="button" class="menu-item" id="ctxCopyText" hidden role="menuitem">
         <span>Copy Selected Text</span>
         <kbd>⌘C</kbd>
@@ -587,11 +593,10 @@
         </div>
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-shortcuts">
-        <div><kbd>←</kbd><kbd>→</kbd> Flip &nbsp; <kbd>R</kbd> Curtain &nbsp; <kbd>M</kbd> Lens</div>
-        <div><kbd>⌘F</kbd> Search &nbsp; <kbd>+</kbd>/<kbd>-</kbd> Zoom &nbsp; <kbd>F</kbd> Full</div>
-      </div>
-      <div class="menu-divider"></div>
+      <button type="button" id="btnShortcutsApp" class="menu-item">
+        <span>Keyboard Shortcuts</span>
+        <span class="menu-val">? ›</span>
+      </button>
       <button type="button" id="btnAboutApp" class="menu-item">
         <span>About FlipBook Reader</span>
         <span class="menu-val">v1.0.0 ›</span>
@@ -689,6 +694,66 @@
           <button type="button" id="btnModalBrowsePdf" class="btn-secondary">Browse File</button>
         </div>
         <div id="libraryList" class="library-list"></div>
+      </div>
+    </div>
+
+    <!-- Dedicated Keyboard & Gesture Shortcuts Modal -->
+    <div id="shortcutsModal" class="modal-backdrop" hidden>
+      <div class="modal-card shortcuts-modal-card" role="dialog" aria-modal="true" aria-labelledby="shortcutsModalTitle">
+        <div class="modal-head">
+          <h2 id="shortcutsModalTitle">Keyboard &amp; Gesture Shortcuts</h2>
+          <button type="button" id="btnCloseShortcuts" class="drawer-close" aria-label="Close Shortcuts">✕</button>
+        </div>
+        <div class="shortcuts-grid">
+          <section class="shortcuts-group">
+            <h3 class="shortcuts-group-title">Navigation</h3>
+            <div class="shortcut-row"><span>Next / Previous page</span><span class="shortcut-keys"><kbd>←</kbd><kbd>→</kbd></span></div>
+            <div class="shortcut-row"><span>Page Up / Page Down</span><span class="shortcut-keys"><kbd>PgUp</kbd><kbd>PgDn</kbd></span></div>
+            <div class="shortcut-row"><span>First / Last page</span><span class="shortcut-keys"><kbd>Home</kbd><kbd>End</kbd></span></div>
+            <div class="shortcut-row"><span>Jump back in history</span><span class="shortcut-keys"><kbd>⌥</kbd><kbd>←</kbd></span></div>
+            <div class="shortcut-row"><span>Play / Pause Auto-Scroll</span><span class="shortcut-keys"><kbd>Space</kbd></span></div>
+          </section>
+          <section class="shortcuts-group">
+            <h3 class="shortcuts-group-title">Zoom &amp; Display</h3>
+            <div class="shortcut-row"><span>Zoom in / out / reset</span><span class="shortcut-keys"><kbd>+</kbd><kbd>-</kbd><kbd>0</kbd></span></div>
+            <div class="shortcut-row"><span>Pinch zoom at pointer</span><span class="shortcut-keys"><kbd>⌘</kbd>/<kbd>⌃</kbd>+Scroll</span></div>
+            <div class="shortcut-row"><span>Smart toggle zoom</span><span class="shortcut-keys"><kbd>2-Finger Dbl-Click</kbd></span></div>
+            <div class="shortcut-row"><span>Full Screen</span><span class="shortcut-keys"><kbd>F</kbd> or <kbd>⌃⌘F</kbd></span></div>
+            <div class="shortcut-row"><span>Dark Mode reading</span><span class="shortcut-keys"><kbd>D</kbd></span></div>
+          </section>
+          <section class="shortcuts-group">
+            <h3 class="shortcuts-group-title">Reading Tools</h3>
+            <div class="shortcut-row"><span>Magnifying Glass lens</span><span class="shortcut-keys"><kbd>M</kbd></span></div>
+            <div class="shortcut-row"><span>Focus Line Curtain</span><span class="shortcut-keys"><kbd>R</kbd></span></div>
+            <div class="shortcut-row"><span>Move Curtain up / down</span><span class="shortcut-keys"><kbd>↑</kbd><kbd>↓</kbd></span></div>
+            <div class="shortcut-row"><span>Snip diagram (3× HD)</span><span class="shortcut-keys"><kbd>S</kbd></span></div>
+            <div class="shortcut-row"><span>Paper fiber texture</span><span class="shortcut-keys"><kbd>G</kbd></span></div>
+          </section>
+          <section class="shortcuts-group">
+            <h3 class="shortcuts-group-title">Panels, Notes &amp; Files</h3>
+            <div class="shortcut-row"><span>Search inside PDF</span><span class="shortcut-keys"><kbd>⌘F</kbd></span></div>
+            <div class="shortcut-row"><span>Open PDF / Book Library</span><span class="shortcut-keys"><kbd>⌘O</kbd> / <kbd>L</kbd></span></div>
+            <div class="shortcut-row"><span>Reader Panel &amp; Thumbnails</span><span class="shortcut-keys"><kbd>H</kbd> / <kbd>T</kbd></span></div>
+            <div class="shortcut-row"><span>Drop Margin Sticky Note</span><span class="shortcut-keys"><kbd>⌥</kbd>+Click</span></div>
+            <div class="shortcut-row"><span>Close panel / reset zoom</span><span class="shortcut-keys"><kbd>Esc</kbd></span></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Look Up / Quick Translate Fallback Modal (for regular browsers) -->
+    <div id="lookupModal" class="modal-backdrop" hidden>
+      <div class="modal-card lookup-modal-card" role="dialog" aria-modal="true" aria-labelledby="lookupWordTitle">
+        <div class="modal-head">
+          <h2 id="lookupWordTitle">Look Up</h2>
+          <button type="button" id="btnCloseLookup" class="drawer-close" aria-label="Close Look Up">✕</button>
+        </div>
+        <div id="lookupPhonetic" class="lookup-phonetic" hidden></div>
+        <div id="lookupBody" class="lookup-body">Loading definition…</div>
+        <div class="lookup-actions">
+          <a id="lookupWebDictLink" class="btn-secondary lookup-ext-link" target="_blank" rel="noopener noreferrer">Dictionary Web ↗</a>
+          <a id="lookupTranslateLink" class="btn-primary lookup-ext-link" target="_blank" rel="noopener noreferrer">Translate ↗</a>
+        </div>
       </div>
     </div>
 
