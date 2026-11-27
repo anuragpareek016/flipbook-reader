@@ -26,6 +26,13 @@
             <path d="M10.5 7.1a3.4 3.4 0 0 0-3.4 3.4.9.9 0 0 0 1.8 0 1.6 1.6 0 0 1 1.6-1.6.9.9 0 0 0 0-1.8Z"/>
           </svg>
         </button>
+        <button id="btnFocusCurtain" class="icon-chip" title="Focus Reading Line Curtain (R)" aria-label="Toggle focus reading line curtain" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <rect x="3" y="3.5" width="18" height="4" rx="1.5" opacity="0.45"/>
+            <rect x="2" y="9.5" width="20" height="5" rx="2"/>
+            <rect x="3" y="16.5" width="18" height="4" rx="1.5" opacity="0.45"/>
+          </svg>
+        </button>
         <button id="btnDarkRead" class="icon-chip" title="Dark Mode Reading (D)" aria-label="Toggle dark reading mode">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
             <path d="M21.05 13.38a.85.85 0 0 0-1.05-.13A6.95 6.95 0 0 1 10.75 4a.85.85 0 0 0-.97-1.15A9.35 9.35 0 1 0 21.15 14.35a.85.85 0 0 0-.1-.97Z"/>
@@ -205,16 +212,39 @@
       </div>
 
       <!-- Focus Reading Line Curtain (Spotlight Ruler Mode) -->
-      <div id="focusCurtainOverlay" class="focus-curtain-overlay" hidden aria-hidden="true">
-        <div id="focusCurtainTop" class="focus-curtain-pane focus-curtain-top"></div>
-        <div id="focusCurtainBand" class="focus-curtain-band"></div>
-        <div id="focusCurtainBottom" class="focus-curtain-pane focus-curtain-bottom"></div>
+      <div id="focusCurtainOverlay" class="focus-curtain-overlay" hidden>
+        <div id="focusCurtainBookBox" class="focus-curtain-book-box" aria-hidden="true">
+          <div id="focusCurtainTop" class="focus-curtain-pane focus-curtain-top"></div>
+          <div id="focusCurtainBand" class="focus-curtain-band has-guides"></div>
+          <div id="focusCurtainBottom" class="focus-curtain-pane focus-curtain-bottom"></div>
+        </div>
+        <div id="focusCurtainPill" class="mag-controls-pill focus-curtain-pill" role="toolbar" aria-label="Focus reading line curtain controls">
+          <div class="mag-seg" role="group" aria-label="Spotlight line height presets">
+            <button type="button" id="btnCurtain1L" class="mag-seg-btn" data-curtain-lines="1" title="Single line strip (32px)">1L</button>
+            <button type="button" id="btnCurtain2L" class="mag-seg-btn active" data-curtain-lines="2" title="Two-line strip (54px)">2L</button>
+            <button type="button" id="btnCurtain3L" class="mag-seg-btn" data-curtain-lines="3" title="Three-line strip (78px)">3L</button>
+            <button type="button" id="btnCurtain4L" class="mag-seg-btn" data-curtain-lines="4" title="Four-line strip (104px)">4L</button>
+          </div>
+          <span class="mag-pill-sep"></span>
+          <button type="button" id="btnCurtainHeightDec" class="hud-step-btn" title="Narrower spotlight band (−)" aria-label="Decrease spotlight height">−</button>
+          <span id="curtainHeightLabel" class="hud-readout curtain-readout">54px</span>
+          <button type="button" id="btnCurtainHeightInc" class="hud-step-btn" title="Wider spotlight band (+)" aria-label="Increase spotlight height">+</button>
+          <span class="mag-pill-sep"></span>
+          <button type="button" id="btnCurtainDimDec" class="hud-step-btn" title="Lighter curtain dim (−)" aria-label="Decrease curtain dim">−</button>
+          <span id="curtainDimLabel" class="hud-readout curtain-readout">30% dim</span>
+          <button type="button" id="btnCurtainDimInc" class="hud-step-btn" title="Darker curtain dim (+)" aria-label="Increase curtain dim">+</button>
+          <span class="mag-pill-sep"></span>
+          <button type="button" id="btnCurtainTone" class="mag-mode-btn" title="Cycle curtain shade tint (Clean / Warm / Deep)" aria-label="Cycle curtain shade tint">Tint: Clean</button>
+          <button type="button" id="btnCurtainGuide" class="mag-mode-btn active" title="Toggle thin reading ruler lines" aria-label="Toggle reading ruler guide lines">Guides</button>
+          <button type="button" id="btnCurtainFollow" class="mag-mode-btn active" title="Move spotlight band with cursor or Arrow Up/Down keys" aria-label="Toggle Follow cursor or Arrow keys">Follow Cursor</button>
+          <button type="button" id="btnCurtainClose" class="hud-stop-btn" title="Close Focus Line Curtain (R)" aria-label="Close focus reading line curtain">✕</button>
+        </div>
       </div>
 
       <!-- Interactive 3D Magnifying Glass / Reading Bar -->
       <div id="magnifierOverlay" class="mag-overlay" hidden>
-        <div id="magControlsPill" class="mag-controls-pill" role="toolbar" aria-label="Magnifying glass and focus curtain controls">
-          <div class="mag-seg" role="group" aria-label="Reading tool mode">
+        <div id="magControlsPill" class="mag-controls-pill" role="toolbar" aria-label="Magnifying glass controls">
+          <div class="mag-seg" role="group" aria-label="Magnifier shape">
             <button type="button" id="btnMagShapeCircle" class="mag-seg-btn active" data-mag-shape="circle" title="3D Circle Lens">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <circle cx="11" cy="11" r="7"/>
@@ -227,15 +257,6 @@
                 <rect x="2" y="7" width="20" height="10" rx="3"/>
               </svg>
               <span>Bar</span>
-            </button>
-            <button type="button" id="btnMagShapeCurtain" class="mag-seg-btn" data-mag-shape="curtain" title="Focus Reading Line Curtain (R)">
-              <svg width="13" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
-                <rect x="3" y="4" width="18" height="4" rx="1" fill="currentColor" opacity="0.35" stroke="none"/>
-                <line x1="2" y1="9.5" x2="22" y2="9.5"/>
-                <line x1="2" y1="14.5" x2="22" y2="14.5"/>
-                <rect x="3" y="16" width="18" height="4" rx="1" fill="currentColor" opacity="0.35" stroke="none"/>
-              </svg>
-              <span>Curtain</span>
             </button>
           </div>
           <span class="mag-pill-sep"></span>
@@ -332,13 +353,6 @@
       <button class="menu-item is-on" id="menuTwoFingerPan" aria-pressed="true">
         <span>Two-Finger Zoom Pan</span>
         <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
-      </button>
-      <button class="menu-item" id="menuFocusCurtain" aria-pressed="false" title="Focus Reading Line Curtain (R)">
-        <span>Focus Line Curtain</span>
-        <span class="menu-toggle-end">
-          <kbd>R</kbd>
-          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
-        </span>
       </button>
       <div class="menu-divider"></div>
       <div class="menu-auto-block" id="menuAutoBlock">

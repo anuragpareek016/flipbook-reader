@@ -19,15 +19,31 @@ const els = {
   bookTitleLabel: document.getElementById('bookTitleLabel'),
   btnDarkRead: document.getElementById('btnDarkRead'),
   btnMagnifier: document.getElementById('btnMagnifier'),
+  btnFocusCurtain: document.getElementById('btnFocusCurtain'),
   magnifierOverlay: document.getElementById('magnifierOverlay'),
   magControlsPill: document.getElementById('magControlsPill'),
   btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
   btnMagShapeBar: document.getElementById('btnMagShapeBar'),
-  btnMagShapeCurtain: document.getElementById('btnMagShapeCurtain'),
   focusCurtainOverlay: document.getElementById('focusCurtainOverlay'),
+  focusCurtainBookBox: document.getElementById('focusCurtainBookBox'),
   focusCurtainTop: document.getElementById('focusCurtainTop'),
   focusCurtainBand: document.getElementById('focusCurtainBand'),
   focusCurtainBottom: document.getElementById('focusCurtainBottom'),
+  focusCurtainPill: document.getElementById('focusCurtainPill'),
+  btnCurtain1L: document.getElementById('btnCurtain1L'),
+  btnCurtain2L: document.getElementById('btnCurtain2L'),
+  btnCurtain3L: document.getElementById('btnCurtain3L'),
+  btnCurtain4L: document.getElementById('btnCurtain4L'),
+  btnCurtainHeightDec: document.getElementById('btnCurtainHeightDec'),
+  curtainHeightLabel: document.getElementById('curtainHeightLabel'),
+  btnCurtainHeightInc: document.getElementById('btnCurtainHeightInc'),
+  btnCurtainDimDec: document.getElementById('btnCurtainDimDec'),
+  curtainDimLabel: document.getElementById('curtainDimLabel'),
+  btnCurtainDimInc: document.getElementById('btnCurtainDimInc'),
+  btnCurtainTone: document.getElementById('btnCurtainTone'),
+  btnCurtainGuide: document.getElementById('btnCurtainGuide'),
+  btnCurtainFollow: document.getElementById('btnCurtainFollow'),
+  btnCurtainClose: document.getElementById('btnCurtainClose'),
   btnMagPowerDec: document.getElementById('btnMagPowerDec'),
   magPowerLabel: document.getElementById('magPowerLabel'),
   btnMagPowerInc: document.getElementById('btnMagPowerInc'),
@@ -111,7 +127,6 @@ const els = {
   valClickMode: document.getElementById('valClickMode'),
   menuAutoHideBars: document.getElementById('menuAutoHideBars'),
   menuTwoFingerPan: document.getElementById('menuTwoFingerPan'),
-  menuFocusCurtain: document.getElementById('menuFocusCurtain'),
   menuAutoBlock: document.getElementById('menuAutoBlock'),
   menuAutoFlipGroup: document.getElementById('menuAutoFlipGroup'),
   menuAutoFlip: document.getElementById('menuAutoFlip'),
@@ -305,19 +320,24 @@ const state = {
   highlightsUiDirty: true,
 
   magEnabled: false,
-  magStyle: 'circle', // 'circle' | 'bar' | 'curtain'
+  magStyle: 'circle', // 'circle' | 'bar'
   magPower: 2.4,
   magCircleSize: 196,
   magBarWidth: 420,
   magBarHeight: 86,
   magFollow: false, // false = drag & place on book, true = follow cursor
+  curtainEnabled: false,
   curtainY: null,
-  curtainHeight: 56, // 34..120px (2-4 reading lines)
-  curtainDim: 28, // 15..55% dim curtain
+  curtainHeight: 54, // 24..150px (1-4+ reading lines)
+  curtainDim: 30, // 15..75% dim curtain
+  curtainTone: 'clean', // 'clean' | 'warm' | 'deep'
+  curtainGuide: true,
   curtainFollow: true, // follow cursor Y + arrow keys
   ambientPreset: 'off', // 'off' | 'rain' | 'fireplace' | 'library'
   ambientVolume: 30, // 0..100
   lastCurtainPointerY: null,
+  curtainAnimUntil: 0,
+  curtainSyncRaf: 0,
   magX: null,
   magY: null,
   magDragging: false,
@@ -462,7 +482,7 @@ function applySavedSettings(settings) {
   if (Number.isFinite(Number(settings.autoScrollSpeed))) {
     state.autoScrollSpeed = clamp(Math.round(Number(settings.autoScrollSpeed) * 10) / 10, 0.2, 5);
   }
-  if (settings.magStyle === 'circle' || settings.magStyle === 'bar' || settings.magStyle === 'curtain') {
+  if (settings.magStyle === 'circle' || settings.magStyle === 'bar') {
     state.magStyle = settings.magStyle;
   }
   if (Number.isFinite(Number(settings.magPower))) {
@@ -478,16 +498,23 @@ function applySavedSettings(settings) {
     state.magBarHeight = clamp(Math.round(Number(settings.magBarHeight)), 48, 240);
   }
   if (Number.isFinite(Number(settings.curtainHeight))) {
-    state.curtainHeight = clamp(Math.round(Number(settings.curtainHeight)), 34, 120);
+    state.curtainHeight = clamp(Math.round(Number(settings.curtainHeight)), 24, 150);
   }
   if (Number.isFinite(Number(settings.curtainDim))) {
-    state.curtainDim = clamp(Math.round(Number(settings.curtainDim)), 15, 55);
+    state.curtainDim = clamp(Math.round(Number(settings.curtainDim)), 15, 75);
+  }
+  if (settings.curtainTone === 'clean' || settings.curtainTone === 'warm' || settings.curtainTone === 'deep') {
+    state.curtainTone = settings.curtainTone;
+  }
+  if (typeof settings.curtainGuide === 'boolean') {
+    state.curtainGuide = settings.curtainGuide;
   }
   if (typeof settings.curtainFollow === 'boolean') {
     state.curtainFollow = settings.curtainFollow;
   }
   updateMenuValues();
   updateMagnifierUi();
+  updateFocusCurtainUi();
 }
 
 function schedulePersistState() {
@@ -521,6 +548,8 @@ function schedulePersistState() {
         magBarHeight: state.magBarHeight,
         curtainHeight: state.curtainHeight,
         curtainDim: state.curtainDim,
+        curtainTone: state.curtainTone,
+        curtainGuide: state.curtainGuide,
         curtainFollow: state.curtainFollow,
       },
     };
@@ -828,10 +857,12 @@ function initPageFlip(startIndex = 0) {
 
   pf.on('activeFlipsChange', () => {
     renderBookEdgeTabs();
+    if (state.curtainEnabled) scheduleCurtainBoundsSync(180);
   });
 
   pf.on('frame', () => {
     if (state.magEnabled) scheduleMagnifierRedraw();
+    if (state.curtainEnabled) positionFocusCurtain();
   });
 
   pf.on('flipStart', (e) => {
@@ -1303,6 +1334,9 @@ function updateCenterShift() {
     if (state.magEnabled) {
       state.magAnimUntil = Math.max(state.magAnimUntil, performance.now() + 560);
       scheduleMagnifierRedraw();
+    }
+    if (state.curtainEnabled) {
+      scheduleCurtainBoundsSync(560);
     }
   }
 }
@@ -1862,6 +1896,9 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
     scheduleMagnifierRedraw();
     setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
   }
+  if (state.curtainEnabled) {
+    scheduleCurtainBoundsSync(460);
+  }
   if (persist) schedulePersistState();
 }
 
@@ -2010,6 +2047,7 @@ function applyZoomTransform(rerender = true, immediate = false) {
   state.pageFlip?.setInteractionDisabled?.(zoomed);
   hideHighlightPopover();
   if (state.magEnabled) scheduleMagnifierRedraw();
+  if (state.curtainEnabled) positionFocusCurtain();
 
   if (rerender && state.pdfDoc) {
     clearTimeout(state.zoomRerenderTimer);
@@ -2094,6 +2132,7 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         const visScroll = getVisibleScrollIndices();
         for (const i of visScroll) renderPageNode(i);
         queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 3));
+        if (state.curtainEnabled) positionFocusCurtain();
       };
       if (immediate) commitScroll();
       else state.zoomRerenderTimer = setTimeout(commitScroll, 85);
@@ -2517,6 +2556,8 @@ function updateStickyEdgeTabElement(btn, tab, topPct, isCurrent, { stackOutPx = 
   const nextTitle = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
   if (btn.title !== nextTitle) btn.title = nextTitle;
 
+  const hitEl = btn.querySelector('.sticky-tab-hit');
+  if (hitEl && hitEl.title !== nextTitle) hitEl.title = nextTitle;
   const tailEl = btn.querySelector('.sticky-tab-tail');
   if (tailEl) tailEl.hidden = !withTail;
   const textEl = btn.querySelector('.sticky-tab-text');
@@ -2527,7 +2568,7 @@ function createStickyEdgeTabElement(tab, topPct, isCurrent, opts = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.dataset.tabKey = String(tab.page);
-  btn.innerHTML = `<span class="sticky-tab-tail" aria-hidden="true"></span><span class="sticky-tab-dot"></span><span class="sticky-tab-text"></span>`;
+  btn.innerHTML = `<span class="sticky-tab-face"><span class="sticky-tab-tail" aria-hidden="true"></span><span class="sticky-tab-dot"></span><span class="sticky-tab-text"></span></span><span class="sticky-tab-hit" aria-hidden="true"></span>`;
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const p = Number(btn.dataset.page);
@@ -4305,14 +4346,16 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
   for (let idx = 0; idx < containerEl.children.length; idx++) {
     const btn = containerEl.children[idx];
     if (btn.hidden) continue;
+    const faceEl = btn.querySelector('.sticky-tab-face') || btn;
     const cs = getComputedStyle(btn);
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.01) continue;
-    const r = btn.getBoundingClientRect();
+    const r = faceEl.getBoundingClientRect();
     if (r.width <= 1 || r.height <= 1) continue;
     const tailEl = btn.querySelector('.sticky-tab-tail');
     const tailRect = tailEl && !tailEl.hidden ? tailEl.getBoundingClientRect() : null;
     items.push({
       btn,
+      faceEl,
       r,
       tailW: tailRect && tailRect.width > 0.5 ? tailRect.width : 0,
       z: parseInt(cs.zIndex, 10) || 0,
@@ -4326,7 +4369,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
   const tabZoomScale = Math.max(0.32, domTabZoom * power);
 
   for (const item of items) {
-    const { btn, r, tailW } = item;
+    const { btn, faceEl, r, tailW } = item;
     const dx = fw / 2 + (r.left - lensCx) * power;
     const dy = fh / 2 + (r.top - lensCy) * power;
     const dw = r.width * power;
@@ -4338,7 +4381,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
 
     const textEl = btn.querySelector('.sticky-tab-text');
     const domTruncated = textEl ? textEl.scrollWidth > textEl.clientWidth + 1.5 : null;
-    const domFontPx = (parseFloat(getComputedStyle(btn).fontSize) || 10 * domTabZoom) * power;
+    const domFontPx = (parseFloat(getComputedStyle(faceEl).fontSize) || 10 * domTabZoom) * power;
 
     drawMagStickyTab(ctx, dx, dy, dw, dh, {
       color: getStickyTabColorKey(btn),
@@ -4975,19 +5018,115 @@ function drawMagnifierFrame() {
 }
 
 function scheduleMagnifierRedraw() {
-  if (!state.magEnabled || state.magStyle === 'curtain' || state.magRedrawRaf) return;
+  if (!state.magEnabled || state.magRedrawRaf) return;
   state.magRedrawRaf = requestAnimationFrame(drawMagnifierFrame);
 }
 
-function positionFocusCurtain(cy) {
-  if (!els.focusCurtainOverlay || !els.stage) return;
-  const stageH = els.stage.clientHeight || window.innerHeight || 700;
-  const h = clamp(Math.round(state.curtainHeight), 34, Math.min(140, Math.max(40, stageH - 40)));
-  const clampedCenter = clamp(cy, h / 2 + 12, Math.max(h / 2 + 12, stageH - h / 2 - 12));
+const CURTAIN_LINE_PRESETS = { 1: 32, 2: 54, 3: 78, 4: 104 };
+const CURTAIN_TONES = [
+  { id: 'clean', label: 'Tint: Clean' },
+  { id: 'warm', label: 'Tint: Warm' },
+  { id: 'deep', label: 'Tint: Deep' },
+];
+
+function getFocusCurtainBookRect() {
+  if (!els.stage || !state.pdfDoc) return null;
+  const sr = els.stage.getBoundingClientRect();
+  if (sr.width <= 0 || sr.height <= 0) return null;
+
+  let left = sr.right;
+  let top = sr.bottom;
+  let right = sr.left;
+  let bottom = sr.top;
+
+  if (state.scrollMode === 'scroll') {
+    const wraps = els.scrollPages?.children;
+    if (!wraps || !wraps.length) return null;
+    let found = false;
+    for (let i = 0; i < wraps.length; i++) {
+      const r = wraps[i].getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (r.bottom <= sr.top || r.top >= sr.bottom) continue;
+      found = true;
+      if (r.left < left) left = r.left;
+      if (r.top < top) top = r.top;
+      if (r.right > right) right = r.right;
+      if (r.bottom > bottom) bottom = r.bottom;
+    }
+    if (!found) {
+      const fallback = wraps[clamp(state.currentIndex, 0, wraps.length - 1)] || wraps[0];
+      const r = fallback.getBoundingClientRect();
+      left = r.left;
+      top = r.top;
+      right = r.right;
+      bottom = r.bottom;
+    }
+  } else {
+    const bc = els.bookContainer?.getBoundingClientRect();
+    if (!bc || bc.width <= 0 || bc.height <= 0) return null;
+    left = bc.left;
+    top = bc.top;
+    right = bc.right;
+    bottom = bc.bottom;
+
+    const visible = getVisibleIndices();
+    const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+    const hasActiveFlip = Boolean(
+      (state.pageFlip?.interactiveFlip && state.pageFlip.interactiveFlip.mode !== 'hover') ||
+      state.pageFlip?.flyingFlips?.length
+    );
+    if (!single && visible.length === 1 && !hasActiveFlip) {
+      if (visible[0] === 0) {
+        left = bc.left + bc.width / 2;
+      } else if (visible[0] >= state.totalPages - 1) {
+        right = bc.left + bc.width / 2;
+      }
+    }
+  }
+
+  const cl = Math.max(sr.left, left);
+  const ct = Math.max(sr.top, top);
+  const cr = Math.min(sr.right, right);
+  const cb = Math.min(sr.bottom, bottom);
+  const width = Math.max(0, cr - cl);
+  const height = Math.max(0, cb - ct);
+  if (width < 4 || height < 4) return null;
+  return {
+    left: cl - sr.left,
+    top: ct - sr.top,
+    width,
+    height,
+  };
+}
+
+function positionFocusCurtain(cy = null) {
+  if (!els.focusCurtainOverlay || !els.focusCurtainBookBox || !els.stage) return;
+  const box = getFocusCurtainBookRect();
+  if (!box) {
+    els.focusCurtainBookBox.style.width = '0px';
+    els.focusCurtainBookBox.style.height = '0px';
+    return;
+  }
+
+  const boxLeft = Math.round(box.left);
+  const boxTop = Math.round(box.top);
+  const boxW = Math.round(box.width);
+  const boxH = Math.round(box.height);
+  const bs = els.focusCurtainBookBox.style;
+  bs.left = `${boxLeft}px`;
+  bs.top = `${boxTop}px`;
+  bs.width = `${boxW}px`;
+  bs.height = `${boxH}px`;
+
+  const h = clamp(Math.round(state.curtainHeight), 24, Math.min(150, Math.max(28, boxH - 8)));
+  const rawCenter = Number.isFinite(cy) ? cy : (state.curtainY ?? boxTop + boxH * 0.42);
+  const clampedCenter = clamp(rawCenter, boxTop + h / 2, Math.max(boxTop + h / 2, boxTop + boxH - h / 2));
   state.curtainY = clampedCenter;
-  const slotTop = clamp(Math.round(clampedCenter - h / 2), 0, Math.max(0, stageH - h));
+
+  const slotTop = clamp(Math.round(clampedCenter - boxTop - h / 2), 0, Math.max(0, boxH - h));
   const slotBottom = slotTop + h;
-  const effectiveDim = clamp((state.curtainDim + (state.readDark ? 12 : 0)) / 100, 0.14, 0.68);
+  const toneBoost = state.curtainTone === 'deep' ? 12 : 0;
+  const effectiveDim = clamp((state.curtainDim + toneBoost + (state.readDark ? 12 : 0)) / 100, 0.14, 0.85);
 
   els.focusCurtainOverlay.style.setProperty('--curtain-dim', effectiveDim.toFixed(2));
   if (els.focusCurtainTop) {
@@ -5002,46 +5141,126 @@ function positionFocusCurtain(cy) {
   }
 }
 
-function stepFocusCurtainHeight(dir) {
-  state.curtainHeight = clamp(Math.round(state.curtainHeight + dir * 8), 34, 120);
-  updateMagnifierUi();
-  if (state.magEnabled && state.magStyle === 'curtain') {
-    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
-    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
-  }
-  schedulePersistState();
+function scheduleCurtainBoundsSync(durationMs = 420) {
+  if (!state.curtainEnabled) return;
+  state.curtainAnimUntil = Math.max(state.curtainAnimUntil || 0, performance.now() + durationMs);
+  positionFocusCurtain();
+  if (state.curtainSyncRaf) return;
+  const tick = () => {
+    state.curtainSyncRaf = 0;
+    if (!state.curtainEnabled) return;
+    positionFocusCurtain();
+    if (performance.now() < state.curtainAnimUntil) {
+      state.curtainSyncRaf = requestAnimationFrame(tick);
+    }
+  };
+  state.curtainSyncRaf = requestAnimationFrame(tick);
 }
 
-function stepFocusCurtainDim(dir) {
-  state.curtainDim = clamp(Math.round(state.curtainDim + dir * 4), 15, 55);
-  updateMagnifierUi();
-  if (state.magEnabled && state.magStyle === 'curtain') {
-    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
-    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+function updateFocusCurtainUi() {
+  const active = Boolean(state.pdfDoc && state.curtainEnabled);
+  if (els.btnFocusCurtain) {
+    els.btnFocusCurtain.classList.toggle('active', active);
+    els.btnFocusCurtain.setAttribute('aria-pressed', String(active));
   }
-  schedulePersistState();
+  if (els.focusCurtainOverlay) {
+    els.focusCurtainOverlay.hidden = !active;
+    els.focusCurtainOverlay.classList.toggle('with-mag-pill', Boolean(state.magEnabled));
+    els.focusCurtainOverlay.classList.toggle('tone-warm', state.curtainTone === 'warm');
+    els.focusCurtainOverlay.classList.toggle('tone-deep', state.curtainTone === 'deep');
+  }
+  if (els.focusCurtainBand) {
+    els.focusCurtainBand.classList.toggle('has-guides', Boolean(state.curtainGuide));
+  }
+
+  let matchedLines = null;
+  let minDiff = Infinity;
+  for (const [linesStr, px] of Object.entries(CURTAIN_LINE_PRESETS)) {
+    const diff = Math.abs(state.curtainHeight - px);
+    if (diff <= 5 && diff < minDiff) {
+      minDiff = diff;
+      matchedLines = Number(linesStr);
+    }
+  }
+  const lineBtns = [els.btnCurtain1L, els.btnCurtain2L, els.btnCurtain3L, els.btnCurtain4L];
+  for (const btn of lineBtns) {
+    if (!btn) continue;
+    const isMatch = Number(btn.dataset.curtainLines) === matchedLines;
+    btn.classList.toggle('active', isMatch);
+    btn.setAttribute('aria-pressed', String(isMatch));
+  }
+
+  if (els.curtainHeightLabel) els.curtainHeightLabel.textContent = `${state.curtainHeight}px`;
+  if (els.curtainDimLabel) els.curtainDimLabel.textContent = `${state.curtainDim}% dim`;
+  if (els.btnCurtainTone) {
+    const info = CURTAIN_TONES.find((t) => t.id === state.curtainTone) || CURTAIN_TONES[0];
+    els.btnCurtainTone.textContent = info.label;
+    els.btnCurtainTone.classList.toggle('active', state.curtainTone !== 'clean');
+  }
+  if (els.btnCurtainGuide) {
+    els.btnCurtainGuide.classList.toggle('active', Boolean(state.curtainGuide));
+    els.btnCurtainGuide.setAttribute('aria-pressed', String(Boolean(state.curtainGuide)));
+  }
+  if (els.btnCurtainFollow) {
+    els.btnCurtainFollow.classList.toggle('active', Boolean(state.curtainFollow));
+    els.btnCurtainFollow.setAttribute('aria-pressed', String(Boolean(state.curtainFollow)));
+    els.btnCurtainFollow.textContent = state.curtainFollow ? 'Follow Cursor' : 'Arrow Lock (↑↓)';
+  }
 }
 
-function moveFocusCurtainByLines(deltaPx) {
-  if (!state.magEnabled || state.magStyle !== 'curtain' || !els.stage) return;
-  const stageH = els.stage.clientHeight || window.innerHeight || 700;
-  const cur = state.curtainY ?? stageH * 0.42;
-  positionFocusCurtain(cur + deltaPx);
+function setFocusCurtainEnabled(enabled, { persist = false } = {}) {
+  const next = Boolean(enabled && state.pdfDoc);
+  state.curtainEnabled = next;
+  if (!next && state.curtainSyncRaf) {
+    cancelAnimationFrame(state.curtainSyncRaf);
+    state.curtainSyncRaf = 0;
+  }
+  updateFocusCurtainUi();
+  if (next) positionFocusCurtain();
+  if (persist) schedulePersistState();
 }
 
 function toggleFocusCurtain() {
   if (!state.pdfDoc) return;
-  if (state.magEnabled && state.magStyle === 'curtain') {
-    setMagnifierEnabled(false);
-    return;
-  }
-  state.magStyle = 'curtain';
-  setMagnifierEnabled(true, { persist: true });
+  setFocusCurtainEnabled(!state.curtainEnabled, { persist: true });
+}
+
+function setFocusCurtainHeight(px) {
+  state.curtainHeight = clamp(Math.round(px), 24, 150);
+  updateFocusCurtainUi();
+  if (state.curtainEnabled) positionFocusCurtain();
+  schedulePersistState();
+}
+
+function stepFocusCurtainHeight(dir) {
+  setFocusCurtainHeight(state.curtainHeight + dir * 6);
+}
+
+function stepFocusCurtainDim(dir) {
+  state.curtainDim = clamp(Math.round(state.curtainDim + dir * 5), 15, 75);
+  updateFocusCurtainUi();
+  if (state.curtainEnabled) positionFocusCurtain();
+  schedulePersistState();
+}
+
+function cycleFocusCurtainTone() {
+  const idx = CURTAIN_TONES.findIndex((t) => t.id === state.curtainTone);
+  state.curtainTone = CURTAIN_TONES[(idx + 1) % CURTAIN_TONES.length].id;
+  updateFocusCurtainUi();
+  if (state.curtainEnabled) positionFocusCurtain();
+  schedulePersistState();
+}
+
+function moveFocusCurtainByLines(deltaPx) {
+  if (!state.curtainEnabled || !els.stage) return;
+  const box = getFocusCurtainBookRect();
+  const base = box ? box.top + box.height * 0.42 : (els.stage.clientHeight || 700) * 0.42;
+  const cur = state.curtainY ?? base;
+  positionFocusCurtain(cur + deltaPx);
 }
 
 function updateMagnifierUi() {
   const active = Boolean(state.pdfDoc && state.magEnabled);
-  const isCurtain = state.magStyle === 'curtain';
   const powerStr = `${state.magPower.toFixed(1)}×`;
   const { w, h } = getMagnifierDimensions();
 
@@ -5049,19 +5268,11 @@ function updateMagnifierUi() {
     els.btnMagnifier.classList.toggle('active', active);
     els.btnMagnifier.setAttribute('aria-pressed', String(active));
   }
-  if (els.menuFocusCurtain) {
-    const curtainOn = active && isCurtain;
-    els.menuFocusCurtain.classList.toggle('is-on', curtainOn);
-    els.menuFocusCurtain.setAttribute('aria-pressed', String(curtainOn));
-  }
   if (els.magnifierOverlay) {
     els.magnifierOverlay.hidden = !active;
   }
-  if (els.focusCurtainOverlay) {
-    els.focusCurtainOverlay.hidden = !(active && isCurtain);
-  }
   if (els.magLens) {
-    els.magLens.hidden = isCurtain;
+    els.magLens.hidden = false;
     els.magLens.classList.toggle('mag-shape-circle', state.magStyle === 'circle');
     els.magLens.classList.toggle('mag-shape-bar', state.magStyle === 'bar');
     els.magLens.classList.toggle('is-follow', state.magFollow);
@@ -5078,38 +5289,21 @@ function updateMagnifierUi() {
     els.btnMagShapeBar.classList.toggle('active', isBar);
     els.btnMagShapeBar.setAttribute('aria-pressed', String(isBar));
   }
-  if (els.btnMagShapeCurtain) {
-    els.btnMagShapeCurtain.classList.toggle('active', isCurtain);
-    els.btnMagShapeCurtain.setAttribute('aria-pressed', String(isCurtain));
-  }
   if (els.magPowerLabel) {
-    els.magPowerLabel.textContent = isCurtain ? `${state.curtainDim}% dim` : powerStr;
+    els.magPowerLabel.textContent = powerStr;
   }
   if (els.magSizeLabel) {
-    els.magSizeLabel.textContent = isCurtain ? `${state.curtainHeight}px` : (state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`);
+    els.magSizeLabel.textContent = state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`;
   }
-  if (els.btnMagPowerDec) els.btnMagPowerDec.title = isCurtain ? 'Lighter curtain dim' : 'Decrease zoom power';
-  if (els.btnMagPowerInc) els.btnMagPowerInc.title = isCurtain ? 'Darker curtain dim' : 'Increase zoom power';
-  if (els.btnMagSizeDec) els.btnMagSizeDec.title = isCurtain ? 'Narrower reading strip (fewer lines)' : 'Smaller lens / bar';
-  if (els.btnMagSizeInc) els.btnMagSizeInc.title = isCurtain ? 'Wider reading strip (more lines)' : 'Larger lens / bar';
   if (els.btnMagFollow) {
-    const followActive = isCurtain ? state.curtainFollow : state.magFollow;
-    els.btnMagFollow.classList.toggle('active', followActive);
-    els.btnMagFollow.setAttribute('aria-pressed', String(followActive));
-    els.btnMagFollow.textContent = isCurtain
-      ? (state.curtainFollow ? 'Follow Cursor' : 'Arrow Lock (↑↓)')
-      : (state.magFollow ? 'Following' : 'Drag & Place');
-    els.btnMagFollow.title = isCurtain
-      ? 'Move spotlight band with cursor or Arrow Up/Down keys'
-      : 'Place on book (drag) or Follow cursor';
+    els.btnMagFollow.classList.toggle('active', state.magFollow);
+    els.btnMagFollow.setAttribute('aria-pressed', String(state.magFollow));
+    els.btnMagFollow.textContent = state.magFollow ? 'Following' : 'Drag & Place';
   }
+  updateFocusCurtainUi();
 }
 
 function stepMagnifierSize(dir) {
-  if (state.magStyle === 'curtain') {
-    stepFocusCurtainHeight(dir);
-    return;
-  }
   if (state.magStyle === 'bar') {
     state.magBarWidth = clamp(Math.round(state.magBarWidth + dir * 36), 180, 780);
     state.magBarHeight = clamp(Math.round(state.magBarHeight + dir * 10), 48, 240);
@@ -5137,10 +5331,7 @@ function setMagnifierEnabled(enabled, { persist = false } = {}) {
     return;
   }
   updateMagnifierUi();
-  if (state.magStyle === 'curtain') {
-    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
-    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
-  } else if (state.magX === null || state.magY === null) {
+  if (state.magX === null || state.magY === null) {
     const def = getDefaultMagnifierCenter();
     positionMagnifier(def.x, def.y);
   } else {
@@ -5150,16 +5341,11 @@ function setMagnifierEnabled(enabled, { persist = false } = {}) {
 }
 
 function setMagnifierStyle(style) {
-  state.magStyle = style === 'curtain' ? 'curtain' : style === 'bar' ? 'bar' : 'circle';
+  state.magStyle = style === 'bar' ? 'bar' : 'circle';
   updateMagnifierUi();
   if (state.magEnabled) {
-    if (state.magStyle === 'curtain') {
-      const stageH = els.stage?.clientHeight || window.innerHeight || 700;
-      positionFocusCurtain(state.curtainY ?? stageH * 0.42);
-    } else {
-      const sr = els.stage.getBoundingClientRect();
-      positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
-    }
+    const sr = els.stage.getBoundingClientRect();
+    positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
   }
   schedulePersistState();
 }
@@ -5169,7 +5355,7 @@ function setMagnifierPower(power) {
   if (!Number.isFinite(num)) return;
   state.magPower = clamp(Math.round(num * 10) / 10, 1.4, 4.5);
   updateMagnifierUi();
-  if (state.magEnabled && state.magStyle !== 'curtain') scheduleMagnifierRedraw();
+  if (state.magEnabled) scheduleMagnifierRedraw();
   schedulePersistState();
 }
 
@@ -5531,12 +5717,10 @@ function setReadDark(enabled, persist = true) {
     });
   }
   if (state.magEnabled) {
-    if (state.magStyle === 'curtain') {
-      const stageH = els.stage?.clientHeight || window.innerHeight || 700;
-      positionFocusCurtain(state.curtainY ?? stageH * 0.42);
-    } else {
-      scheduleMagnifierRedraw();
-    }
+    scheduleMagnifierRedraw();
+  }
+  if (state.curtainEnabled) {
+    positionFocusCurtain();
   }
   if (persist) schedulePersistState();
 }
@@ -6158,28 +6342,44 @@ function wireEvents() {
     setMagnifierEnabled(!state.magEnabled);
     els.btnMagnifier.blur();
   });
+  els.btnFocusCurtain?.addEventListener('click', () => {
+    toggleFocusCurtain();
+    els.btnFocusCurtain.blur();
+  });
+  [els.btnCurtain1L, els.btnCurtain2L, els.btnCurtain3L, els.btnCurtain4L].forEach((btn) => {
+    btn?.addEventListener('click', () => {
+      const lines = Number(btn.dataset.curtainLines);
+      if (CURTAIN_LINE_PRESETS[lines]) setFocusCurtainHeight(CURTAIN_LINE_PRESETS[lines]);
+    });
+  });
+  els.btnCurtainHeightDec?.addEventListener('click', () => stepFocusCurtainHeight(-1));
+  els.btnCurtainHeightInc?.addEventListener('click', () => stepFocusCurtainHeight(1));
+  els.btnCurtainDimDec?.addEventListener('click', () => stepFocusCurtainDim(-1));
+  els.btnCurtainDimInc?.addEventListener('click', () => stepFocusCurtainDim(1));
+  els.btnCurtainTone?.addEventListener('click', () => cycleFocusCurtainTone());
+  els.btnCurtainGuide?.addEventListener('click', () => {
+    state.curtainGuide = !state.curtainGuide;
+    updateFocusCurtainUi();
+    schedulePersistState();
+    els.btnCurtainGuide.blur();
+  });
+  els.btnCurtainFollow?.addEventListener('click', () => {
+    state.curtainFollow = !state.curtainFollow;
+    updateFocusCurtainUi();
+    schedulePersistState();
+    els.btnCurtainFollow.blur();
+  });
+  els.btnCurtainClose?.addEventListener('click', () => setFocusCurtainEnabled(false, { persist: true }));
+
   els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
   els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
-  els.btnMagShapeCurtain?.addEventListener('click', () => setMagnifierStyle('curtain'));
-  els.btnMagPowerDec?.addEventListener('click', () => {
-    if (state.magStyle === 'curtain') stepFocusCurtainDim(-1);
-    else setMagnifierPower(state.magPower - 0.2);
-  });
-  els.btnMagPowerInc?.addEventListener('click', () => {
-    if (state.magStyle === 'curtain') stepFocusCurtainDim(1);
-    else setMagnifierPower(state.magPower + 0.2);
-  });
+  els.btnMagPowerDec?.addEventListener('click', () => setMagnifierPower(state.magPower - 0.2));
+  els.btnMagPowerInc?.addEventListener('click', () => setMagnifierPower(state.magPower + 0.2));
   els.btnMagSizeDec?.addEventListener('click', () => stepMagnifierSize(-1));
   els.btnMagSizeInc?.addEventListener('click', () => stepMagnifierSize(1));
   els.btnMagFollow?.addEventListener('click', () => {
-    if (state.magStyle === 'curtain') {
-      state.curtainFollow = !state.curtainFollow;
-      updateMagnifierUi();
-      schedulePersistState();
-    } else {
-      state.magFollow = !state.magFollow;
-      updateMagnifierUi();
-    }
+    state.magFollow = !state.magFollow;
+    updateMagnifierUi();
     els.btnMagFollow.blur();
   });
   els.btnMagClose?.addEventListener('click', () => setMagnifierEnabled(false));
@@ -6480,9 +6680,6 @@ function wireEvents() {
     }
   });
   els.menuTwoFingerPan?.addEventListener('click', toggleTwoFingerPan);
-  els.menuFocusCurtain?.addEventListener('click', () => {
-    toggleFocusCurtain();
-  });
 
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
@@ -6770,6 +6967,7 @@ function wireEvents() {
       queueNearbyRenders(state.currentIndex, 4);
     }, 90);
     if (state.magEnabled) scheduleMagnifierRedraw();
+    if (state.curtainEnabled) positionFocusCurtain();
   }, { passive: true });
   els.scrollViewport.addEventListener('wheel', (e) => {
     if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
@@ -6899,19 +7097,16 @@ function wireEvents() {
   // Track pointer position inside stage so keyboard +/- zoom anchors at cursor & Follow modes track smoothly
   els.stage.addEventListener('mousemove', (e) => {
     state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
-    if (!state.magEnabled || e.target?.closest?.('#magControlsPill')) return;
-    if (state.magStyle === 'curtain') {
-      if (state.curtainFollow) {
-        const prevY = state.lastCurtainPointerY;
-        if (prevY === null || Math.abs(e.clientY - prevY) >= 1) {
-          state.lastCurtainPointerY = e.clientY;
-          const sr = els.stage.getBoundingClientRect();
-          positionFocusCurtain(e.clientY - sr.top);
-        }
+    const onFloatingPill = Boolean(e.target?.closest?.('#magControlsPill, #focusCurtainPill'));
+    if (state.curtainEnabled && state.curtainFollow && !onFloatingPill) {
+      const prevY = state.lastCurtainPointerY;
+      if (prevY === null || Math.abs(e.clientY - prevY) >= 1) {
+        state.lastCurtainPointerY = e.clientY;
+        const sr = els.stage.getBoundingClientRect();
+        positionFocusCurtain(e.clientY - sr.top);
       }
-      return;
     }
-    if (state.magFollow && !state.magDragging) {
+    if (state.magEnabled && state.magFollow && !state.magDragging && !onFloatingPill) {
       const sr = els.stage.getBoundingClientRect();
       positionMagnifier(e.clientX - sr.left, e.clientY - sr.top);
     }
@@ -7123,13 +7318,13 @@ function wireEvents() {
         break;
       }
       case 'ArrowUp':
-        if (state.magEnabled && state.magStyle === 'curtain') {
+        if (state.curtainEnabled) {
           e.preventDefault();
           moveFocusCurtainByLines(e.shiftKey ? -44 : -20);
         }
         break;
       case 'ArrowDown':
-        if (state.magEnabled && state.magStyle === 'curtain') {
+        if (state.curtainEnabled) {
           e.preventDefault();
           moveFocusCurtainByLines(e.shiftKey ? 44 : 20);
         }
@@ -7218,6 +7413,7 @@ function wireEvents() {
         }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
         else if (state.magEnabled) setMagnifierEnabled(false);
+        else if (state.curtainEnabled) setFocusCurtainEnabled(false, { persist: true });
         else if (state.zoom > 1) setZoom(1, true);
         break;
     }
@@ -7229,9 +7425,7 @@ function wireEvents() {
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
       initReaderView(state.currentIndex);
-      if (state.magEnabled && state.magStyle === 'curtain') {
-        positionFocusCurtain(state.curtainY ?? (els.stage?.clientHeight || 700) * 0.42);
-      }
+      if (state.curtainEnabled) scheduleCurtainBoundsSync(240);
     }, 180);
   });
 }
