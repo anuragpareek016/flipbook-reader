@@ -54,12 +54,6 @@ const els = {
   ctxBookmarkLabel: document.getElementById('ctxBookmarkLabel'),
   ctxSelDivider: document.getElementById('ctxSelDivider'),
   ctxCopyText: document.getElementById('ctxCopyText'),
-  zoomPill: document.getElementById('zoomPill'),
-  zoomLabel: document.getElementById('zoomLabel'),
-  btnZoomOut: document.getElementById('btnZoomOut'),
-  btnZoomInPill: document.getElementById('btnZoomInPill'),
-  btnZoomPanMode: document.getElementById('btnZoomPanMode'),
-  btnZoomReset: document.getElementById('btnZoomReset'),
 
   stage: document.getElementById('stage'),
   welcomeOverlay: document.getElementById('welcomeOverlay'),
@@ -1896,8 +1890,6 @@ function applyZoomTransform(rerender = true, immediate = false) {
   const zoomed = state.zoom > 1.01;
   els.zoomViewport.classList.toggle('is-zoomed', zoomed);
   els.bookCenterShift?.classList?.toggle('is-zoomed', zoomed);
-  els.zoomPill.hidden = !zoomed;
-  els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   state.pageFlip?.setInteractionDisabled?.(zoomed);
   hideHighlightPopover();
   if (state.magEnabled) scheduleMagnifierRedraw();
@@ -1940,9 +1932,6 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
 
   if (state.scrollMode === 'scroll') {
     hideHighlightPopover();
-    const zoomed = state.zoom > 1.01;
-    els.zoomPill.hidden = !zoomed;
-    els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
 
     if (state.pdfDoc && els.scrollPages.children.length) {
       const sv = els.scrollViewport;
@@ -4946,13 +4935,6 @@ function updateMenuValues() {
   els.menuTwoFingerPan?.classList.toggle('is-on', !!state.twoFingerPan);
   els.menuTwoFingerPan?.setAttribute('aria-pressed', String(!!state.twoFingerPan));
 
-  if (els.btnZoomPanMode) {
-    els.btnZoomPanMode.classList.toggle('active', state.twoFingerPan);
-    els.btnZoomPanMode.setAttribute('aria-pressed', String(!!state.twoFingerPan));
-    els.btnZoomPanMode.title = state.twoFingerPan
-      ? 'Two-Finger Zoom Pan (Active)'
-      : 'Two-Finger Zoom Pan';
-  }
   updatePaperComfortUi();
   updatePlaybackUi();
 }
@@ -5293,9 +5275,6 @@ function wireEvents() {
     els.moreMenu.hidden = !els.moreMenu.hidden;
     els.btnMore.classList.toggle('active', !els.moreMenu.hidden);
   });
-  els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom + getZoomStepDelta(-1), true));
-  els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + getZoomStepDelta(1), true));
-  els.btnZoomReset.addEventListener('click', () => setZoom(1, true));
 
   els.btnThumbs.addEventListener('click', () => {
     els.thumbnailsStrip.hidden = !els.thumbnailsStrip.hidden;
@@ -5678,10 +5657,6 @@ function wireEvents() {
     }
   });
   els.menuTwoFingerPan?.addEventListener('click', toggleTwoFingerPan);
-  els.btnZoomPanMode?.addEventListener('click', () => {
-    toggleTwoFingerPan();
-    els.btnZoomPanMode.blur();
-  });
 
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
