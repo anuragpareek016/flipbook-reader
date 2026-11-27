@@ -9242,28 +9242,71 @@ function wireEvents() {
     }
   });
 
-  // '+' More Menu items
-  els.menuLibrary.addEventListener('click', openLibraryModal);
-  els.menuScrollMode?.addEventListener('click', () => {
-    if (state.scrollMode === 'scroll') {
-      stopAutoScroll({ resetPlaying: true });
-      state.scrollMode = 'flip';
-    } else {
+  const applyReadingLayout = (mode, { announce = false } = {}) => {
+    const prevScroll = state.scrollMode;
+    const prevPageMode = state.pageMode;
+
+    if (mode === 'scroll') {
       stopAutoFlip();
       state.scrollMode = 'scroll';
       state.autoScrollEnabled = false;
       state.autoScrollPlaying = false;
+    } else if (mode === 'flip') {
+      stopAutoScroll({ resetPlaying: true });
+      state.scrollMode = 'flip';
+    } else if (mode === 'toggleScroll') {
+      if (state.scrollMode === 'scroll') {
+        stopAutoScroll({ resetPlaying: true });
+        state.scrollMode = 'flip';
+      } else {
+        stopAutoFlip();
+        state.scrollMode = 'scroll';
+        state.autoScrollEnabled = false;
+        state.autoScrollPlaying = false;
+      }
+    } else if (mode === 'double' || mode === 'single') {
+      if (state.scrollMode === 'scroll') {
+        stopAutoScroll({ resetPlaying: true });
+        state.scrollMode = 'flip';
+      }
+      state.pageMode = mode;
+    } else if (mode === 'togglePage') {
+      const nextPageMode = isEffectiveSingleMode() ? 'double' : 'single';
+      if (state.scrollMode === 'scroll') {
+        stopAutoScroll({ resetPlaying: true });
+        state.scrollMode = 'flip';
+      }
+      state.pageMode = nextPageMode;
+    } else if (mode === 'cyclePage') {
+      state.pageMode = state.pageMode === 'auto' ? 'single' : state.pageMode === 'single' ? 'double' : 'auto';
+    } else {
+      return;
     }
+
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initReaderView(state.currentIndex);
-  });
-  els.menuPageMode.addEventListener('click', () => {
-    state.pageMode = state.pageMode === 'auto' ? 'single' : state.pageMode === 'single' ? 'double' : 'auto';
-    updateMenuValues();
-    schedulePersistState();
-    if (state.pdfDoc && state.scrollMode === 'flip') initReaderView(state.currentIndex);
-  });
+    const layoutChanged = state.scrollMode !== prevScroll || (state.scrollMode === 'flip' && state.pageMode !== prevPageMode) || mode === 'togglePage';
+    if (state.pdfDoc && (state.scrollMode === 'flip' || state.scrollMode !== prevScroll || mode === 'cyclePage') && layoutChanged) {
+      initReaderView(state.currentIndex);
+    }
+    if (announce) {
+      const msg = state.scrollMode === 'scroll'
+        ? 'View: Continuous Scroll'
+        : state.pageMode === 'single'
+          ? 'View: Single Page Flip'
+          : state.pageMode === 'double'
+            ? 'View: Double Page Flip'
+            : 'View: Book Flip (Auto)';
+      showToast(msg, { durationMs: 1400 });
+      showBar('header', true, 1400);
+    }
+  };
+  window.__flipbookApplyLayout = (mode) => applyReadingLayout(mode, { announce: true });
+
+  // '+' More Menu items
+  els.menuLibrary.addEventListener('click', openLibraryModal);
+  els.menuScrollMode?.addEventListener('click', () => applyReadingLayout('toggleScroll'));
+  els.menuPageMode.addEventListener('click', () => applyReadingLayout('cyclePage'));
   els.menuHardCover.addEventListener('click', () => {
     state.showCover = !state.showCover;
     updateMenuValues();
@@ -10511,6 +10554,14 @@ function wireEvents() {
       pickFileViaHost();
       return;
     }
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && ['1', '2', '3'].includes(e.key)) {
+      e.preventDefault();
+      if (!editing && els.libraryModal.hidden) {
+        const modeMap = { '1': 'double', '2': 'single', '3': 'scroll' };
+        window.__flipbookApplyLayout?.(modeMap[e.key]);
+      }
+      return;
+    }
 
     if (e.key === 'Escape') {
       if (activeEl === els.pageInput) return; // handled by pageInput's own Escape handler
@@ -10662,6 +10713,19 @@ function wireEvents() {
       case 'p':
       case 'P':
         togglePinCurrentPage();
+        break;
+      case 'v':
+      case 'V':
+        window.__flipbookApplyLayout?.(e.shiftKey ? 'togglePage' : 'toggleScroll');
+        break;
+      case '1':
+        window.__flipbookApplyLayout?.('double');
+        break;
+      case '2':
+        window.__flipbookApplyLayout?.('single');
+        break;
+      case '3':
+        window.__flipbookApplyLayout?.('scroll');
         break;
       case '+':
       case '=':

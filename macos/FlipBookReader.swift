@@ -673,6 +673,28 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         mainMenu.addItem(viewMenuItem)
         let viewMenu = NSMenu(title: "View")
         viewMenuItem.submenu = viewMenu
+        let doubleModeItem = NSMenuItem(title: "Double Page Flip", action: #selector(selectLayoutMode(_:)), keyEquivalent: "1")
+        doubleModeItem.target = self
+        doubleModeItem.representedObject = "double"
+        viewMenu.addItem(doubleModeItem)
+        let singleModeItem = NSMenuItem(title: "Single Page Flip", action: #selector(selectLayoutMode(_:)), keyEquivalent: "2")
+        singleModeItem.target = self
+        singleModeItem.representedObject = "single"
+        viewMenu.addItem(singleModeItem)
+        let scrollModeItem = NSMenuItem(title: "Continuous Scroll", action: #selector(selectLayoutMode(_:)), keyEquivalent: "3")
+        scrollModeItem.target = self
+        scrollModeItem.representedObject = "scroll"
+        viewMenu.addItem(scrollModeItem)
+        viewMenu.addItem(NSMenuItem.separator())
+        let toggleScrollItem = NSMenuItem(title: "Toggle Book Flip / Scroll", action: #selector(selectLayoutMode(_:)), keyEquivalent: "")
+        toggleScrollItem.target = self
+        toggleScrollItem.representedObject = "toggleScroll"
+        viewMenu.addItem(toggleScrollItem)
+        let togglePageItem = NSMenuItem(title: "Toggle Single / Double Page", action: #selector(selectLayoutMode(_:)), keyEquivalent: "")
+        togglePageItem.target = self
+        togglePageItem.representedObject = "togglePage"
+        viewMenu.addItem(togglePageItem)
+        viewMenu.addItem(NSMenuItem.separator())
         let fullScreenItem = NSMenuItem(title: "Toggle Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreenItem.keyEquivalentModifierMask = [.control, .command]
         viewMenu.addItem(fullScreenItem)
@@ -1077,6 +1099,17 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
                 )
             }
         }.resume()
+    }
+
+    @objc private func selectLayoutMode(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? String, !mode.isEmpty else { return }
+        let safeMode = mode.replacingOccurrences(of: "'", with: "")
+        DispatchQueue.main.async { [weak self] in
+            self?.webView?.evaluateJavaScript(
+                "window.__flipbookApplyLayout && window.__flipbookApplyLayout('\(safeMode)');",
+                completionHandler: nil
+            )
+        }
     }
 
     @objc private func openFileDialog() {
