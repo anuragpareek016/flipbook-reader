@@ -3276,8 +3276,57 @@ function getSnipCacheKey(page, rect) {
   return `${page}:${rect.l.toFixed(2)},${rect.t.toFixed(2)},${rect.w.toFixed(2)},${rect.h.toFixed(2)}`;
 }
 
+const nativePendingCallbacks = new Map();
+let nativeCallbackSeq = 0;
+
+window.__flipbookResolveNative = (id, ok) => {
+  const resolve = nativePendingCallbacks.get(id);
+  if (!resolve) return;
+  nativePendingCallbacks.delete(id);
+  resolve(Boolean(ok));
+};
+
+function callNativeBridgeAsync(action, payload = {}) {
+  const handler = window.webkit?.messageHandlers?.flipbook;
+  if (!handler) return Promise.resolve(null);
+  const callbackId = `cb-${++nativeCallbackSeq}-${Date.now().toString(36)}`;
+  return new Promise((resolve) => {
+    nativePendingCallbacks.set(callbackId, resolve);
+    try {
+      handler.postMessage({ action, callbackId, ...payload });
+    } catch {
+      nativePendingCallbacks.delete(callbackId);
+      resolve(false);
+    }
+  });
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  const nativeResult = await callNativeBridgeAsync('copyText', { text: String(text) });
+  if (nativeResult !== null) return nativeResult;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(String(text));
+      return true;
+    }
+  } catch {
+    // ignore clipboard permission errors
+  }
+  return false;
+}
+
 async function copyCanvasPngToClipboard(canvas) {
   if (!canvas) return false;
+  if (window.webkit?.messageHandlers?.flipbook) {
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const nativeResult = await callNativeBridgeAsync('copyPng', { dataUrl });
+      if (nativeResult !== null) return nativeResult;
+    } catch {
+      // fall through to browser clipboard API
+    }
+  }
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   if (!blob) return false;
   try {
@@ -3291,12 +3340,42 @@ async function copyCanvasPngToClipboard(canvas) {
   return false;
 }
 
-function downloadCanvasPng(canvas, filename) {
-  if (!canvas) return;
+async function downloadCanvasPng(canvas, filename) {
+  if (!canvas) return false;
+  const dataUrl = canvas.toDataURL('image/png');
+  if (window.webkit?.messageHandlers?.flipbook) {
+    const nativeResult = await callNativeBridgeAsync('saveFile', {
+      filename,
+      ext: 'png',
+      dataBase64: dataUrl,
+    });
+    if (nativeResult !== null) return nativeResult;
+  }
   const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/png');
+  link.href = dataUrl;
   link.download = filename;
   link.click();
+  return true;
+}
+
+async function saveTextFileNativeOrDownload(text, filename, ext = 'md', mime = 'text/markdown;charset=utf-8') {
+  if (!text) return false;
+  if (window.webkit?.messageHandlers?.flipbook) {
+    const nativeResult = await callNativeBridgeAsync('saveFile', {
+      filename,
+      ext,
+      text: String(text),
+    });
+    if (nativeResult !== null) return nativeResult;
+  }
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
 }
 
 /* ---------- 4. Pin Page / Diagram Floating Reference Cards ---------- */
@@ -8228,11 +8307,11 @@ function wireEvents() {
   });
   els.btnNavBackDismiss?.addEventListener('click', clearNavHistory);
   els.btnCopySpreadText.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(els.pageTextPreview.textContent || '');
+    const ok = await copyTextToClipboard(els.pageTextPreview.textContent || '');
+    if (ok) {
       els.btnCopySpreadText.textContent = 'Copied!';
       setTimeout(() => { els.btnCopySpreadText.textContent = 'Copy Text'; }, 1200);
-    } catch {}
+    }
   });
 
   // '+' More Menu items
@@ -8528,7 +8607,7 @@ function wireEvents() {
     const txt = window.getSelection()?.toString()?.trim() || '';
     closePageContextMenu();
     if (!txt) return;
-    try { await navigator.clipboard.writeText(txt); } catch {}
+    await copyTextToClipboard(txt);
   });
 
   // File Pickers & Drag-Drop
@@ -8737,11 +8816,14 @@ function wireEvents() {
       els.snipResultStatus.textContent = ok ? 'Copied 3× HD Image to Clipboard!' : 'Clipboard prompt blocked — use Save PNG';
     }
   });
-  els.btnSnipSave?.addEventListener('click', () => {
+  els.btnSnipSave?.addEventListener('click', async () => {
     const cap = state.snipCapture;
     if (!cap?.canvas) return;
     const slug = (state.bookTitle || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32);
-    downloadCanvasPng(cap.canvas, `${slug}-p${cap.page}-3x.png`);
+    const saved = await downloadCanvasPng(cap.canvas, `${slug}-p${cap.page}-3x.png`);
+    if (els.snipResultStatus && saved) {
+      els.snipResultStatus.textContent = 'Saved 3× HD PNG!';
+    }
   });
   els.btnSnipPin?.addEventListener('click', () => {
     const cap = state.snipCapture;
@@ -8783,23 +8865,17 @@ function wireEvents() {
   els.btnCopyPageNotes?.addEventListener('click', async () => {
     const md = formatStudyNotesMarkdown(getFilteredSortedHighlights(), getFilteredSortedMarginNotes());
     if (!md) return;
-    try {
-      await navigator.clipboard.writeText(md);
+    const ok = await copyTextToClipboard(md);
+    if (ok) {
       els.btnCopyPageNotes.textContent = 'Copied!';
       setTimeout(() => { els.btnCopyPageNotes.textContent = 'Copy MD'; }, 1200);
-    } catch {}
+    }
   });
-  els.btnExportMarkdown?.addEventListener('click', () => {
+  els.btnExportMarkdown?.addEventListener('click', async () => {
     const md = formatStudyNotesMarkdown(getFilteredSortedHighlights(), getFilteredSortedMarginNotes());
     if (!md) return;
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
     const slug = (state.bookTitle || 'study-notes').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${slug}-study-notes.md`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    await saveTextFileNativeOrDownload(md, `${slug}-study-notes.md`, 'md');
   });
   els.hlPageSelect?.addEventListener('change', () => {
     const raw = els.hlPageSelect.value.trim();

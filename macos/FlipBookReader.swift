@@ -2,6 +2,7 @@ import AppKit
 import WebKit
 import AVFoundation
 import Foundation
+import UniformTypeIdentifiers
 
 /// Native AVAudioPlayer pool with sleep/wake recovery so WKWebView process throttling never silences page turns.
 final class NativeFlipSoundEngine {
@@ -617,9 +618,50 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
+    private func resolveNativeJsCallback(_ callbackId: String?, ok: Bool) {
+        guard let id = callbackId, !id.isEmpty else { return }
+        let safeId = id
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        DispatchQueue.main.async { [weak self] in
+            self?.webView?.evaluateJavaScript(
+                "window.__flipbookResolveNative && window.__flipbookResolveNative('\(safeId)', \(ok ? "true" : "false"));",
+                completionHandler: nil
+            )
+        }
+    }
+
+    private func saveFileWithPanel(filename: String, data: Data, ext: String, callbackId: String?) {
+        let panel = NSSavePanel()
+        panel.title = ext == "png" ? "Save Snip PNG" : "Save File"
+        panel.nameFieldStringValue = filename
+        panel.canCreateDirectories = true
+        if !ext.isEmpty, let ut = UTType(filenameExtension: ext) {
+            panel.allowedContentTypes = [ut]
+        }
+        let handleResponse: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            guard resp == .OK, let dest = panel.url else {
+                self?.resolveNativeJsCallback(callbackId, ok: false)
+                return
+            }
+            do {
+                try data.write(to: dest, options: .atomic)
+                self?.resolveNativeJsCallback(callbackId, ok: true)
+            } catch {
+                self?.resolveNativeJsCallback(callbackId, ok: false)
+            }
+        }
+        if let win = window {
+            panel.beginSheetModal(for: win, completionHandler: handleResponse)
+        } else {
+            handleResponse(panel.runModal())
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let dict = message.body as? [String: Any],
               let action = dict["action"] as? String else { return }
+        let callbackId = dict["callbackId"] as? String
         if action == "pickFile" {
             DispatchQueue.main.async { [weak self] in
                 self?.openFileDialog()
@@ -642,6 +684,47 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         } else if action == "setAmbientVolume" {
             let volume = (dict["volume"] as? NSNumber)?.floatValue ?? 30.0
             ambientEngine?.setVolume(volume)
+        } else if action == "copyPng" {
+            let raw = (dict["dataUrl"] as? String) ?? ""
+            let b64 = raw.components(separatedBy: ",").last ?? raw
+            guard let pngData = Data(base64Encoded: b64) else {
+                resolveNativeJsCallback(callbackId, ok: false)
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                var ok = pb.setData(pngData, forType: .png)
+                if !ok, let img = NSImage(data: pngData) {
+                    ok = pb.writeObjects([img])
+                }
+                self?.resolveNativeJsCallback(callbackId, ok: ok)
+            }
+        } else if action == "copyText" {
+            let text = (dict["text"] as? String) ?? ""
+            DispatchQueue.main.async { [weak self] in
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                let ok = pb.setString(text, forType: .string)
+                self?.resolveNativeJsCallback(callbackId, ok: ok)
+            }
+        } else if action == "saveFile" {
+            let filename = (dict["filename"] as? String) ?? "export.bin"
+            let ext = (dict["ext"] as? String) ?? ""
+            var fileData: Data?
+            if let b64 = dict["dataBase64"] as? String {
+                let clean = b64.components(separatedBy: ",").last ?? b64
+                fileData = Data(base64Encoded: clean)
+            } else if let txt = dict["text"] as? String {
+                fileData = txt.data(using: .utf8)
+            }
+            guard let dataToWrite = fileData else {
+                resolveNativeJsCallback(callbackId, ok: false)
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.saveFileWithPanel(filename: filename, data: dataToWrite, ext: ext, callbackId: callbackId)
+            }
         }
     }
 
