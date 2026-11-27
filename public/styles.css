@@ -93,101 +93,71 @@ body.header-hidden .top-bar-right {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
 }
 
 .icon-chip {
-  padding: 0 9px;
-}
-
-.chip-has-toggle {
   position: relative;
-  gap: 6px;
-  padding: 0 8px 0 9px;
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+  background: rgba(24, 26, 32, 0.78);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eef1f6;
 }
 
-.mini-switch {
-  width: 24px;
-  height: 14px;
-  padding: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  transition: background 0.18s ease, border-color 0.18s ease;
-}
-
-.mini-switch-thumb {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #c5cbd6;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
-}
-
-.active > .mini-switch {
-  background: #60a5fa;
-  border-color: #8ab4f8;
-}
-
-.active > .mini-switch .mini-switch-thumb {
-  transform: translateX(10px);
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+.icon-chip:hover {
+  background: rgba(38, 42, 52, 0.92);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
 }
 
 .icon-chip.active {
-  color: #9dc2ff;
-  background: rgba(20, 28, 44, 0.90);
-  border-color: rgba(138, 180, 248, 0.88);
-  box-shadow: 0 0 10px rgba(138, 180, 248, 0.30);
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #60a5fa;
+  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.45);
 }
 
 .icon-chip.active:hover {
-  background: rgba(28, 38, 58, 0.94);
+  background: #1d4ed8;
+  border-color: #93c5fd;
+  color: #ffffff;
 }
 
 #btnBookmarkPage.active {
-  color: #ffd54f;
-  background: rgba(34, 28, 14, 0.90);
-  border-color: rgba(255, 213, 79, 0.86);
-  box-shadow: 0 0 10px rgba(255, 213, 79, 0.28);
+  color: #1c1404;
+  background: #f59e0b;
+  border-color: #fcd34d;
+  box-shadow: 0 2px 12px rgba(245, 158, 11, 0.44);
 }
 
 #btnBookmarkPage.active:hover {
-  background: rgba(46, 38, 18, 0.94);
+  background: #fbbf24;
+  border-color: #fde68a;
 }
 
 #btnBookmarkPage.active svg {
-  fill: #ffd54f;
-}
-
-#btnBookmarkPage.active > .mini-switch {
-  background: #ffd54f;
-  border-color: #ffe082;
-}
-
-#btnBookmarkPage.active > .mini-switch .mini-switch-thumb {
-  background: #1b1d22;
+  fill: #1c1404;
+  stroke: #1c1404;
 }
 
 #btnDarkRead {
-  background: rgba(24, 26, 32, 0.90);
-  border-color: rgba(255, 255, 255, 0.20);
+  background: rgba(24, 26, 32, 0.84);
+  border-color: rgba(255, 255, 255, 0.18);
   color: #f4f5f7;
 }
 
 #btnDarkRead:hover {
-  background: rgba(38, 42, 52, 0.98);
+  background: rgba(38, 42, 52, 0.96);
+  border-color: rgba(255, 255, 255, 0.30);
 }
 
 #btnDarkRead.active {
-  background: rgba(246, 247, 250, 0.94);
-  border-color: rgba(255, 255, 255, 0.98);
-  color: #1b1d22;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.28);
+  background: #f4f6fa;
+  border-color: #ffffff;
+  color: #14171f;
+  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.30), 0 0 0 1px rgba(15, 23, 42, 0.12);
 }
 
 #btnDarkRead.active:hover {
@@ -195,20 +165,15 @@ body.header-hidden .top-bar-right {
 }
 
 #btnDarkRead.active svg {
-  fill: #1b1d22;
-  stroke: #1b1d22;
-}
-
-#btnDarkRead.active > .mini-switch {
-  background: #1b1d22;
-  border-color: #1b1d22;
+  fill: #14171f;
+  stroke: #14171f;
 }
 
 #btnHighlightsTop.has-hl::after {
   content: '';
   position: absolute;
-  top: 4px;
-  left: 21px;
+  top: 5px;
+  right: 5px;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -216,15 +181,8 @@ body.header-hidden .top-bar-right {
   pointer-events: none;
 }
 
-#btnMagnifier.active {
-  color: #9dc2ff;
-  border-color: rgba(138, 180, 248, 0.90);
-  background: rgba(20, 28, 44, 0.90);
-  box-shadow: 0 0 10px rgba(138, 180, 248, 0.30);
-}
-
-.top-chip:hover, .icon-chip:hover {
-  background: rgba(34, 34, 34, 0.85);
+.top-chip:hover {
+  background: rgba(34, 34, 34, 0.88);
 }
 
 .book-title-text {
@@ -264,23 +222,31 @@ body.header-hidden .top-bar-right {
 .zoom-pill button.zoom-pill-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
+  padding: 3px 8px;
   border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #aab1be;
-  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  color: #b4bcc9;
+  font-weight: 500;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.zoom-pill button.zoom-pill-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
 }
 
 .zoom-pill button.zoom-pill-toggle.active {
-  background: rgba(138, 180, 248, 0.20);
-  border-color: rgba(138, 180, 248, 0.72);
+  background: #2563eb;
+  border-color: #60a5fa;
   color: #ffffff;
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: 0 1px 8px rgba(37, 99, 235, 0.42);
 }
 
 .zoom-pill button.zoom-pill-toggle.active:hover {
-  background: rgba(138, 180, 248, 0.30);
+  background: #1d4ed8;
+  border-color: #93c5fd;
 }
 
 /* Main Stage */
@@ -1029,62 +995,56 @@ body.footer-hidden .bottom-bar {
   width: 34px;
   height: 32px;
   border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: #e6e6e6;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6e8ed;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
-}
-
-.bar-btn-toggle {
-  width: auto;
-  padding: 0 8px;
-  gap: 6px;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .bar-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.24);
   color: #ffffff;
 }
 
 .bar-btn.active {
-  background: rgba(138, 180, 248, 0.22);
-  border-color: rgba(138, 180, 248, 0.72);
+  background: #2563eb;
+  border-color: #60a5fa;
   color: #ffffff;
-  box-shadow: 0 0 10px rgba(138, 180, 248, 0.22);
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.44);
 }
 
 .bar-btn.active:hover {
-  background: rgba(138, 180, 248, 0.32);
+  background: #1d4ed8;
+  border-color: #93c5fd;
 }
 
 #btnSound.active {
-  background: rgba(138, 180, 248, 0.16);
-  border-color: rgba(138, 180, 248, 0.48);
-  color: #e6efff;
+  background: #2563eb;
+  border-color: #60a5fa;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.40);
+}
+
+#btnSound.active:hover {
+  background: #1d4ed8;
+  border-color: #93c5fd;
 }
 
 #btnSound.is-muted {
-  background: rgba(248, 113, 113, 0.16);
-  border-color: rgba(248, 113, 113, 0.56);
-  color: #fca5a5;
+  background: #dc2626;
+  border-color: #f87171;
+  color: #ffffff;
+  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.40);
 }
 
 #btnSound.is-muted:hover {
-  background: rgba(248, 113, 113, 0.24);
-}
-
-#btnSound.is-muted > .mini-switch {
-  background: rgba(248, 113, 113, 0.28);
-  border-color: rgba(248, 113, 113, 0.65);
-}
-
-#btnSound.is-muted > .mini-switch .mini-switch-thumb {
-  background: #fca5a5;
+  background: #b91c1c;
+  border-color: #fca5a5;
 }
 
 .page-counter-wrap {
