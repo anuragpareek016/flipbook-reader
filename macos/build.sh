@@ -13,6 +13,8 @@ cp "$SCRIPT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 swift "$SCRIPT_DIR/make_icon.swift" "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/FlipBookIcon.icns"
+cp "$SCRIPT_DIR/openfrontier-logo.png" "$APP_DIR/Contents/Resources/openfrontier-logo.png"
+cp "$SCRIPT_DIR/openfrontier-mark.png" "$APP_DIR/Contents/Resources/openfrontier-mark.png"
 
 swiftc -O -framework AppKit -framework WebKit -framework AVFoundation -framework UniformTypeIdentifiers -framework SwiftUI -framework Translation "$SCRIPT_DIR/FlipBookReader.swift" -o "$APP_DIR/Contents/MacOS/FlipBookReader"
 codesign --force --deep --sign - "$APP_DIR"
