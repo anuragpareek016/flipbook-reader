@@ -1032,6 +1032,7 @@ function wireGlobalTextLayerSelectionGuard() {
     const selection = document.getSelection();
     if (!selection || selection.rangeCount === 0) {
       if (!isPointerDown) resetAllTextLayersSelecting();
+      if (state.magEnabled) scheduleMagnifierRedraw();
       return;
     }
 
@@ -1081,6 +1082,7 @@ function wireGlobalTextLayerSelectionGuard() {
     } catch {
       prevSelectionRange = null;
     }
+    if (state.magEnabled) scheduleMagnifierRedraw();
   });
 }
 
@@ -3630,7 +3632,7 @@ function shouldKeepBarVisible(zone) {
   if (!els.moreMenu.hidden || !els.thumbnailsStrip.hidden) return true;
   if (isBarInputFocused(els.bottomBar)) return true;
   if (els.bottomBar?.matches(':hover')) return true;
-  if (els.btnFirstPage?.matches(':hover') || els.btnLastPage?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
+  if (els.autoPlaybackHud?.matches(':hover') || els.navBackPill?.matches(':hover')) {
     return false;
   }
   return Boolean(p && p.clientY >= window.innerHeight - FOOTER_WAKE_PX);
@@ -4046,6 +4048,8 @@ function drawMagPageContent(
       }
       ctx.restore();
     }
+
+    drawMagTextSelection(ctx, state.pageNodes[idx], x, y, w, h, dark);
   }
 
   if (innerSpine) {
@@ -4053,6 +4057,62 @@ function drawMagPageContent(
   }
 
   ctx.restore();
+}
+
+function drawMagTextSelection(ctx, pageNode, x, y, w, h, dark) {
+  const sel = document.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+  const textLayer = pageNode?.querySelector('.textLayer');
+  if (!textLayer) return;
+  const pr = pageNode.getBoundingClientRect();
+  if (!pr.width || !pr.height) return;
+
+  let started = false;
+  const subRange = document.createRange();
+
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i);
+    if (range.collapsed || !range.intersectsNode(textLayer)) continue;
+
+    const root = textLayer.contains(range.commonAncestorContainer) ? range.commonAncestorContainer : textLayer;
+    let node = root.nodeType === Node.TEXT_NODE ? root : null;
+    let walker = null;
+    if (!node) {
+      walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      node = walker.nextNode();
+    }
+
+    while (node) {
+      if (textLayer.contains(node) && range.intersectsNode(node)) {
+        const len = node.nodeValue?.length || 0;
+        if (len > 0) {
+          const start = node === range.startContainer ? range.startOffset : 0;
+          const end = node === range.endContainer ? range.endOffset : len;
+          if (end > start) {
+            subRange.setStart(node, start);
+            subRange.setEnd(node, end);
+            for (const cr of subRange.getClientRects()) {
+              if (cr.width < 0.5 || cr.height < 0.5) continue;
+              const rx = (cr.left - pr.left) / pr.width;
+              const ry = (cr.top - pr.top) / pr.height;
+              const rw = cr.width / pr.width;
+              const rh = cr.height / pr.height;
+              if (rx + rw <= 0 || rx >= 1 || ry + rh <= 0 || ry >= 1) continue;
+              if (!started) {
+                ctx.save();
+                ctx.fillStyle = dark ? 'rgba(138, 180, 248, 0.36)' : 'rgba(0, 122, 255, 0.28)';
+                started = true;
+              }
+              ctx.fillRect(x + rx * w, y + ry * h, rw * w, rh * h);
+            }
+          }
+        }
+      }
+      node = walker ? walker.nextNode() : null;
+    }
+  }
+
+  if (started) ctx.restore();
 }
 
 function drawMagFilteredCanvas(ctx, srcCanvas, x, y, w, h) {
@@ -7009,7 +7069,7 @@ function wireEvents() {
   window.addEventListener('mousemove', (e) => {
     state.lastBarPointer = { clientX: e.clientX, clientY: e.clientY };
     const inHeaderZone = e.clientY <= HEADER_WAKE_PX || state.hoveringTopBar;
-    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.corner-nav, .auto-playback-hud'));
+    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.auto-playback-hud, .nav-back-pill'));
     const inFooterZone = (!onFloatingCornerOrHud && e.clientY >= window.innerHeight - FOOTER_WAKE_PX) || state.hoveringBottomBar;
 
     if (inHeaderZone) {
@@ -7030,7 +7090,7 @@ function wireEvents() {
     const t = e.touches?.[0];
     if (!t) return;
     const inHeaderZone = t.clientY <= HEADER_WAKE_PX;
-    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.corner-nav, .auto-playback-hud'));
+    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.auto-playback-hud, .nav-back-pill'));
     const inFooterZone = !onFloatingCornerOrHud && t.clientY >= window.innerHeight - FOOTER_WAKE_PX;
     if (inHeaderZone || inFooterZone) {
       state.lastBarPointer = { clientX: t.clientX, clientY: t.clientY };

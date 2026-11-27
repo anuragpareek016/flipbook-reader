@@ -348,7 +348,6 @@ body.is-flip-dragging {
 }
 
 body.is-flip-dragging .side-nav,
-body.is-flip-dragging .corner-nav,
 body.is-flip-dragging .top-bar,
 body.is-flip-dragging .bottom-bar,
 body.is-flip-dragging .sticky-edge-tab,
@@ -809,8 +808,7 @@ body.is-selecting-text .fb-page .textLayer:not(.selecting-origin) {
   -webkit-user-select: none;
 }
 
-body.is-selecting-text .side-nav,
-body.is-selecting-text .corner-nav {
+body.is-selecting-text .side-nav {
   pointer-events: none;
 }
 
@@ -883,47 +881,13 @@ body.is-selecting-text .corner-nav {
 .side-nav-left { left: 10px; }
 .side-nav-right { right: 10px; }
 
-/* Corner First/Last Page Buttons */
-.corner-nav {
-  position: absolute;
-  bottom: calc(var(--bar-height) + 12px);
-  z-index: 35;
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(28, 30, 36, 0.42);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: none;
-  border-radius: 50%;
-  color: rgba(240, 243, 248, 0.78);
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
-}
-
-.corner-nav:hover:not(:disabled) {
-  color: #ffffff;
-  background: rgba(28, 30, 36, 0.84);
-  transform: scale(1.06);
-}
-
-.corner-nav:disabled {
-  opacity: 0.22;
-  cursor: default;
-}
-
-.corner-nav-left { left: 14px; }
-.corner-nav-right { right: 14px; }
-
 /* Bottom Floating Dock Card & Tactile Circular Buttons */
 .bottom-bar {
   position: absolute;
   left: 18px;
   right: 18px;
   bottom: 12px;
-  max-width: 1180px;
+  max-width: 1120px;
   margin: 0 auto;
   z-index: 50;
   height: 48px;
@@ -938,7 +902,11 @@ body.is-selecting-text .corner-nav {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--card-shadow);
-  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.20s ease;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.20s ease, max-width 0.20s ease;
+}
+
+body:not(.footer-hidden):has(#navBackPill:not([hidden])) .bottom-bar {
+  max-width: min(1040px, calc(100vw - 410px));
 }
 
 body.footer-hidden .bottom-bar {
@@ -984,7 +952,7 @@ body.footer-hidden .bottom-bar {
     transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.bar-btn:hover {
+.bar-btn:hover:not(:disabled) {
   background: #1a1d24;
   color: #ffffff;
   transform: translateY(-1px) scale(1.05);
@@ -993,8 +961,15 @@ body.footer-hidden .bottom-bar {
     inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
-.bar-btn:active {
+.bar-btn:active:not(:disabled) {
   transform: scale(0.94);
+}
+
+.bar-btn:disabled {
+  opacity: 0.34;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
 }
 
 .bar-btn.active {
@@ -3656,8 +3631,8 @@ body.read-dark .scs-flying-shade {
 /* ---------- 3. Navigation Jump-Back Stack Floating Pill ---------- */
 .nav-back-pill {
   position: absolute;
-  left: 58px;
-  bottom: calc(var(--bar-height) + 12px);
+  left: 16px;
+  bottom: 19px;
   z-index: 47;
   height: 34px;
   padding: 0 5px 0 6px;
@@ -3673,8 +3648,21 @@ body.read-dark .scs-flying-shade {
   transition: bottom 0.20s ease, transform 0.16s ease;
 }
 
-body:has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
+body.footer-hidden .nav-back-pill {
+  bottom: 14px;
+}
+
+body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   bottom: calc(var(--bar-height) + 194px);
+}
+
+@media (max-width: 1119px) {
+  body:not(.footer-hidden) .bottom-bar {
+    max-width: 1120px;
+  }
+  body:not(.footer-hidden) .nav-back-pill {
+    bottom: calc(var(--bar-height) + 18px);
+  }
 }
 
 .nav-back-pill:hover {

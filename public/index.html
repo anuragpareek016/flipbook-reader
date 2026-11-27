@@ -178,20 +178,6 @@
         </svg>
       </button>
 
-      <!-- Bottom-corner First / Last page buttons (FlipHTML5 style) -->
-      <button id="btnFirstPage" class="corner-nav corner-nav-left" title="First Page (Home)" aria-label="First Page" hidden>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="6" y1="5" x2="6" y2="19"/>
-          <polyline points="17 6 10 12 17 18"/>
-        </svg>
-      </button>
-      <button id="btnLastPage" class="corner-nav corner-nav-right" title="Last Page (End)" aria-label="Last Page" hidden>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="7 6 14 12 7 18"/>
-          <line x1="18" y1="5" x2="18" y2="19"/>
-        </svg>
-      </button>
-
       <!-- Floating Text Highlighter Toolbar -->
       <div id="hlPopover" class="hl-popover" hidden role="toolbar" aria-label="Text highlight colors">
         <button class="hl-swatch" data-color="yellow" title="Yellow highlight" aria-label="Yellow highlight"></button>
@@ -626,6 +612,13 @@
         <div class="page-counter-wrap" title="Click to jump to page">
           <input id="pageInput" class="page-input" type="text" value="0/0" aria-label="Page number" autocomplete="off" />
         </div>
+
+        <button id="btnFirstPage" class="bar-btn" title="First Page (Home)" aria-label="First Page" hidden>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <rect x="4.5" y="4.5" width="2.6" height="15" rx="1.3"/>
+            <path d="M18.2 5.4a1.2 1.2 0 0 1 0 1.8L12.7 12l5.5 4.8a1.2 1.2 0 1 1-1.6 1.8l-6.6-5.7a1.2 1.2 0 0 1 0-1.8l6.6-5.7a1.2 1.2 0 0 1 1.6 0Z"/>
+          </svg>
+        </button>
       </div>
 
       <div class="bottom-center">
@@ -636,6 +629,13 @@
       </div>
 
       <div class="bottom-right">
+        <button id="btnLastPage" class="bar-btn" title="Last Page (End)" aria-label="Last Page" hidden>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <path d="M5.8 5.4a1.2 1.2 0 0 1 1.6 0l6.6 5.7a1.2 1.2 0 0 1 0 1.8l-6.6 5.7a1.2 1.2 0 1 1-1.6-1.8l5.5-4.8-5.5-4.8a1.2 1.2 0 0 1 0-1.8Z"/>
+            <rect x="16.9" y="4.5" width="2.6" height="15" rx="1.3"/>
+          </svg>
+        </button>
+
         <button id="btnSound" class="bar-btn" title="Page Flip Sound" aria-label="Toggle sound">
           <svg id="iconSoundOn" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
             <path d="M11.6 4.4a1 1 0 0 1 1.4.92v13.36a1 1 0 0 1-1.64.77L6.7 15.5H3.5A1.5 1.5 0 0 1 2 14v-4a1.5 1.5 0 0 1 1.5-1.5h3.2l4.9-4.1ZM16.1 8.1a1.1 1.1 0 0 1 1.55.02 5.45 5.45 0 0 1 0 7.76 1.1 1.1 0 1 1-1.56-1.55 3.25 3.25 0 0 0 0-4.66 1.1 1.1 0 0 1 .01-1.57Zm2.92-2.9a1.1 1.1 0 0 1 1.55.02 9.55 9.55 0 0 1 0 13.56 1.1 1.1 0 0 1-1.56-1.55 7.35 7.35 0 0 0 0-10.46 1.1 1.1 0 0 1 .01-1.57Z"/>
