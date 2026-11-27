@@ -838,11 +838,7 @@ body.is-selecting-text .corner-nav {
   border-radius: 6px;
   color: rgba(225, 225, 225, 0.55);
   cursor: pointer;
-  transition: bottom 0.26s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s ease, background 0.15s ease;
-}
-
-body.footer-hidden .corner-nav {
-  bottom: 14px;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .corner-nav:hover:not(:disabled) {
@@ -1307,12 +1303,11 @@ body.footer-hidden .bottom-bar {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.44);
-  transition: bottom 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+  transition: opacity 0.22s ease;
 }
 
 body.footer-hidden .auto-playback-hud {
-  bottom: 14px;
-  opacity: 0.48;
+  opacity: 0.54;
 }
 
 body.footer-hidden .auto-playback-hud:hover,

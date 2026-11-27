@@ -2656,7 +2656,7 @@ function renderLibraryLists() {
 
 /* ---------- Toolbar Auto-Hide ---------- */
 const HEADER_WAKE_PX = 56;
-const FOOTER_WAKE_PX = 60;
+const FOOTER_WAKE_PX = 48;
 
 function isBarInputFocused(barEl) {
   const active = document.activeElement;
@@ -2675,7 +2675,10 @@ function shouldKeepBarVisible(zone) {
   }
   if (!els.moreMenu.hidden || !els.thumbnailsStrip.hidden) return true;
   if (isBarInputFocused(els.bottomBar)) return true;
-  if (els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) return true;
+  if (els.bottomBar?.matches(':hover')) return true;
+  if (els.btnFirstPage?.matches(':hover') || els.btnLastPage?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
+    return false;
+  }
   return Boolean(p && p.clientY >= window.innerHeight - FOOTER_WAKE_PX);
 }
 
@@ -3638,7 +3641,8 @@ function wireEvents() {
   window.addEventListener('mousemove', (e) => {
     state.lastBarPointer = { clientX: e.clientX, clientY: e.clientY };
     const inHeaderZone = e.clientY <= HEADER_WAKE_PX;
-    const inFooterZone = e.clientY >= window.innerHeight - FOOTER_WAKE_PX;
+    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.corner-nav, .auto-playback-hud'));
+    const inFooterZone = !onFloatingCornerOrHud && e.clientY >= window.innerHeight - FOOTER_WAKE_PX;
 
     if (inHeaderZone || els.topBar?.matches(':hover')) {
       showBar('header', false);
@@ -3646,7 +3650,7 @@ function wireEvents() {
       scheduleHideBar('header', 420);
     }
 
-    if (inFooterZone || els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
+    if (inFooterZone || els.bottomBar?.matches(':hover')) {
       showBar('footer', false);
     } else if (!state.footerHideTimer && !document.body.classList.contains('footer-hidden')) {
       scheduleHideBar('footer', 420);
@@ -3656,7 +3660,8 @@ function wireEvents() {
     const t = e.touches?.[0];
     if (!t) return;
     const inHeaderZone = t.clientY <= HEADER_WAKE_PX;
-    const inFooterZone = t.clientY >= window.innerHeight - FOOTER_WAKE_PX;
+    const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.corner-nav, .auto-playback-hud'));
+    const inFooterZone = !onFloatingCornerOrHud && t.clientY >= window.innerHeight - FOOTER_WAKE_PX;
     if (inHeaderZone || inFooterZone) {
       state.lastBarPointer = { clientX: t.clientX, clientY: t.clientY };
       if (inHeaderZone) showBar('header', true, 2200);
@@ -3677,15 +3682,12 @@ function wireEvents() {
   });
   els.topBar?.addEventListener('focusout', () => scheduleHideBar('header', 420));
 
-  [els.bottomBar, els.autoPlaybackHud].forEach((bar) => {
-    if (!bar) return;
-    bar.addEventListener('mouseenter', () => showBar('footer', false));
-    bar.addEventListener('mouseleave', () => scheduleHideBar('footer', 420));
-    bar.addEventListener('focusin', () => {
-      if (isBarInputFocused(els.bottomBar)) showBar('footer', false);
-    });
-    bar.addEventListener('focusout', () => scheduleHideBar('footer', 420));
+  els.bottomBar?.addEventListener('mouseenter', () => showBar('footer', false));
+  els.bottomBar?.addEventListener('mouseleave', () => scheduleHideBar('footer', 420));
+  els.bottomBar?.addEventListener('focusin', () => {
+    if (isBarInputFocused(els.bottomBar)) showBar('footer', false);
   });
+  els.bottomBar?.addEventListener('focusout', () => scheduleHideBar('footer', 420));
 
   const overlayObserver = new MutationObserver(() => {
     if (shouldKeepBarVisible('header')) showBar('header', false);
