@@ -79,13 +79,10 @@ const els = {
   menuPageMode: document.getElementById('menuPageMode'),
   valPageMode: document.getElementById('valPageMode'),
   menuHardCover: document.getElementById('menuHardCover'),
-  valHardCover: document.getElementById('valHardCover'),
   menuClickMode: document.getElementById('menuClickMode'),
   valClickMode: document.getElementById('valClickMode'),
   menuAutoHideBars: document.getElementById('menuAutoHideBars'),
-  valAutoHideBars: document.getElementById('valAutoHideBars'),
   menuTwoFingerPan: document.getElementById('menuTwoFingerPan'),
-  valTwoFingerPan: document.getElementById('valTwoFingerPan'),
   menuAutoBlock: document.getElementById('menuAutoBlock'),
   menuAutoFlipGroup: document.getElementById('menuAutoFlipGroup'),
   menuAutoFlip: document.getElementById('menuAutoFlip'),
@@ -3900,7 +3897,7 @@ function updateSoundUi() {
   const info = flipSound.getPresetInfo(state.soundPreset);
   state.soundPreset = info.id;
   if (els.valSoundPreset) {
-    els.valSoundPreset.textContent = state.soundEnabled ? info.label : 'Off';
+    els.valSoundPreset.textContent = state.soundEnabled ? info.label : 'Muted';
   }
   if (els.btnSound) {
     els.btnSound.classList.toggle('active', state.soundEnabled);
@@ -3908,7 +3905,7 @@ function updateSoundUi() {
     els.btnSound.setAttribute('aria-pressed', String(state.soundEnabled));
     els.btnSound.title = state.soundEnabled
       ? `Page Turn Sound: ${info.fullName} (Click to mute, Right-click for presets)`
-      : 'Page Turn Sound: Off (Click to enable, Right-click for presets)';
+      : 'Page Turn Sound: Muted (Click to enable, Right-click for presets)';
   }
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
@@ -3954,11 +3951,7 @@ function updatePlaybackUi() {
     els.menuAutoFlip.setAttribute('aria-pressed', String(autoFlipOn));
   }
   if (els.valAutoFlip) {
-    els.valAutoFlip.textContent = !state.autoFlipEnabled
-      ? `Off • ${secLabel}`
-      : state.autoFlipPaused
-        ? `Paused • ${secLabel}`
-        : `On • ${secLabel}`;
+    els.valAutoFlip.textContent = secLabel;
   }
   if (els.autoFlipRange) {
     els.autoFlipRange.value = String(clamp(state.autoFlipSeconds, 0.5, 30));
@@ -3980,9 +3973,7 @@ function updatePlaybackUi() {
     els.menuAutoScrollToggle.setAttribute('aria-pressed', String(autoScrollOn));
   }
   if (els.valAutoScroll) {
-    els.valAutoScroll.textContent = state.autoScrollPlaying
-      ? `Playing • ${spdLabel}`
-      : `Paused • ${spdLabel}`;
+    els.valAutoScroll.textContent = spdLabel;
   }
   if (els.autoScrollRange) {
     els.autoScrollRange.value = String(clamp(state.autoScrollSpeed, 0.2, 5));
@@ -4040,29 +4031,24 @@ function updateMenuValues() {
   els.valPageMode.textContent = state.pageMode === 'single' ? 'Single' : state.pageMode === 'double' ? 'Double' : 'Auto (Double)';
   els.menuPageMode?.classList.toggle('is-alt', state.pageMode !== 'auto');
 
-  els.valHardCover.textContent = state.showCover ? 'On' : 'Off';
   els.menuHardCover?.classList.toggle('is-on', !!state.showCover);
   els.menuHardCover?.setAttribute('aria-pressed', String(!!state.showCover));
 
   els.valClickMode.textContent = state.clickMode === 'smart' ? 'Corner + Select' : 'Click Anywhere';
   els.menuClickMode?.classList.toggle('is-alt', state.clickMode !== 'smart');
 
-  if (els.valAutoHideBars) {
-    els.valAutoHideBars.textContent = state.autoHideBars ? 'On' : 'Off';
-    els.menuAutoHideBars?.classList.toggle('is-on', !!state.autoHideBars);
-    els.menuAutoHideBars?.setAttribute('aria-pressed', String(!!state.autoHideBars));
-  }
-  if (els.valTwoFingerPan) {
-    els.valTwoFingerPan.textContent = state.twoFingerPan ? 'On' : 'Off';
-    els.menuTwoFingerPan?.classList.toggle('is-on', !!state.twoFingerPan);
-    els.menuTwoFingerPan?.setAttribute('aria-pressed', String(!!state.twoFingerPan));
-  }
+  els.menuAutoHideBars?.classList.toggle('is-on', !!state.autoHideBars);
+  els.menuAutoHideBars?.setAttribute('aria-pressed', String(!!state.autoHideBars));
+
+  els.menuTwoFingerPan?.classList.toggle('is-on', !!state.twoFingerPan);
+  els.menuTwoFingerPan?.setAttribute('aria-pressed', String(!!state.twoFingerPan));
+
   if (els.btnZoomPanMode) {
     els.btnZoomPanMode.classList.toggle('active', state.twoFingerPan);
     els.btnZoomPanMode.setAttribute('aria-pressed', String(!!state.twoFingerPan));
     els.btnZoomPanMode.title = state.twoFingerPan
-      ? 'Two-Finger Pan: On (Click to disable)'
-      : 'Two-Finger Pan: Off (Click to enable)';
+      ? 'Two-Finger Zoom Pan (Active)'
+      : 'Two-Finger Zoom Pan';
   }
   updatePlaybackUi();
 }
