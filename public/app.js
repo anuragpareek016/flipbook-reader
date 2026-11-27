@@ -1,5 +1,5 @@
 import * as pdfjsLib from '/vendor/pdfjs/build/pdf.min.mjs';
-import { flipSound, DEFAULT_SOUND_PRESET } from '/assets/sound.js';
+import { flipSound, ambientSound, DEFAULT_SOUND_PRESET, AMBIENT_PRESETS } from '/assets/sound.js';
 import { FlipBookEngine, bakeDarkCanvasInPlace, getBakedDarkCanvas } from '/assets/flip-engine.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
@@ -23,6 +23,11 @@ const els = {
   magControlsPill: document.getElementById('magControlsPill'),
   btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
   btnMagShapeBar: document.getElementById('btnMagShapeBar'),
+  btnMagShapeCurtain: document.getElementById('btnMagShapeCurtain'),
+  focusCurtainOverlay: document.getElementById('focusCurtainOverlay'),
+  focusCurtainTop: document.getElementById('focusCurtainTop'),
+  focusCurtainBand: document.getElementById('focusCurtainBand'),
+  focusCurtainBottom: document.getElementById('focusCurtainBottom'),
   btnMagPowerDec: document.getElementById('btnMagPowerDec'),
   magPowerLabel: document.getElementById('magPowerLabel'),
   btnMagPowerInc: document.getElementById('btnMagPowerInc'),
@@ -106,6 +111,7 @@ const els = {
   valClickMode: document.getElementById('valClickMode'),
   menuAutoHideBars: document.getElementById('menuAutoHideBars'),
   menuTwoFingerPan: document.getElementById('menuTwoFingerPan'),
+  menuFocusCurtain: document.getElementById('menuFocusCurtain'),
   menuAutoBlock: document.getElementById('menuAutoBlock'),
   menuAutoFlipGroup: document.getElementById('menuAutoFlipGroup'),
   menuAutoFlip: document.getElementById('menuAutoFlip'),
@@ -200,6 +206,13 @@ const els = {
   iconSoundOff: document.getElementById('iconSoundOff'),
   valSoundPreset: document.getElementById('valSoundPreset'),
   soundPresetPills: document.getElementById('soundPresetPills'),
+  valAmbientSound: document.getElementById('valAmbientSound'),
+  ambientPresetPills: document.getElementById('ambientPresetPills'),
+  ambientVolRow: document.getElementById('ambientVolRow'),
+  btnAmbientVolDec: document.getElementById('btnAmbientVolDec'),
+  ambientVolRange: document.getElementById('ambientVolRange'),
+  btnAmbientVolInc: document.getElementById('btnAmbientVolInc'),
+  valAmbientVol: document.getElementById('valAmbientVol'),
   btnFullscreen: document.getElementById('btnFullscreen'),
   fileInputHidden: document.getElementById('fileInputHidden'),
 };
@@ -292,12 +305,19 @@ const state = {
   highlightsUiDirty: true,
 
   magEnabled: false,
-  magStyle: 'circle', // 'circle' | 'bar'
+  magStyle: 'circle', // 'circle' | 'bar' | 'curtain'
   magPower: 2.4,
   magCircleSize: 196,
   magBarWidth: 420,
   magBarHeight: 86,
   magFollow: false, // false = drag & place on book, true = follow cursor
+  curtainY: null,
+  curtainHeight: 56, // 34..120px (2-4 reading lines)
+  curtainDim: 28, // 15..55% dim curtain
+  curtainFollow: true, // follow cursor Y + arrow keys
+  ambientPreset: 'off', // 'off' | 'rain' | 'fireplace' | 'library'
+  ambientVolume: 30, // 0..100
+  lastCurtainPointerY: null,
   magX: null,
   magY: null,
   magDragging: false,
@@ -423,6 +443,13 @@ function applySavedSettings(settings) {
     state.soundEnabled = settings.soundEnabled;
   }
   updateSoundUi();
+  if (typeof settings.ambientPreset === 'string' && AMBIENT_PRESETS.some((p) => p.id === settings.ambientPreset)) {
+    state.ambientPreset = settings.ambientPreset;
+  }
+  if (Number.isFinite(Number(settings.ambientVolume))) {
+    state.ambientVolume = clamp(Math.round(Number(settings.ambientVolume)), 0, 100);
+  }
+  updateAmbientSoundUi();
   if (settings.scrollMode === 'scroll' || settings.scrollMode === 'flip') {
     state.scrollMode = settings.scrollMode;
   }
@@ -435,7 +462,7 @@ function applySavedSettings(settings) {
   if (Number.isFinite(Number(settings.autoScrollSpeed))) {
     state.autoScrollSpeed = clamp(Math.round(Number(settings.autoScrollSpeed) * 10) / 10, 0.2, 5);
   }
-  if (settings.magStyle === 'circle' || settings.magStyle === 'bar') {
+  if (settings.magStyle === 'circle' || settings.magStyle === 'bar' || settings.magStyle === 'curtain') {
     state.magStyle = settings.magStyle;
   }
   if (Number.isFinite(Number(settings.magPower))) {
@@ -449,6 +476,15 @@ function applySavedSettings(settings) {
   }
   if (Number.isFinite(Number(settings.magBarHeight))) {
     state.magBarHeight = clamp(Math.round(Number(settings.magBarHeight)), 48, 240);
+  }
+  if (Number.isFinite(Number(settings.curtainHeight))) {
+    state.curtainHeight = clamp(Math.round(Number(settings.curtainHeight)), 34, 120);
+  }
+  if (Number.isFinite(Number(settings.curtainDim))) {
+    state.curtainDim = clamp(Math.round(Number(settings.curtainDim)), 15, 55);
+  }
+  if (typeof settings.curtainFollow === 'boolean') {
+    state.curtainFollow = settings.curtainFollow;
   }
   updateMenuValues();
   updateMagnifierUi();
@@ -471,6 +507,8 @@ function schedulePersistState() {
         scrollMode: state.scrollMode,
         soundEnabled: state.soundEnabled,
         soundPreset: state.soundPreset,
+        ambientPreset: state.ambientPreset,
+        ambientVolume: state.ambientVolume,
         pageMode: state.pageMode,
         showCover: state.showCover,
         clickMode: state.clickMode,
@@ -481,6 +519,9 @@ function schedulePersistState() {
         magCircleSize: state.magCircleSize,
         magBarWidth: state.magBarWidth,
         magBarHeight: state.magBarHeight,
+        curtainHeight: state.curtainHeight,
+        curtainDim: state.curtainDim,
+        curtainFollow: state.curtainFollow,
       },
     };
     if (state.bookId) {
@@ -4934,12 +4975,73 @@ function drawMagnifierFrame() {
 }
 
 function scheduleMagnifierRedraw() {
-  if (!state.magEnabled || state.magRedrawRaf) return;
+  if (!state.magEnabled || state.magStyle === 'curtain' || state.magRedrawRaf) return;
   state.magRedrawRaf = requestAnimationFrame(drawMagnifierFrame);
+}
+
+function positionFocusCurtain(cy) {
+  if (!els.focusCurtainOverlay || !els.stage) return;
+  const stageH = els.stage.clientHeight || window.innerHeight || 700;
+  const h = clamp(Math.round(state.curtainHeight), 34, Math.min(140, Math.max(40, stageH - 40)));
+  const clampedCenter = clamp(cy, h / 2 + 12, Math.max(h / 2 + 12, stageH - h / 2 - 12));
+  state.curtainY = clampedCenter;
+  const slotTop = clamp(Math.round(clampedCenter - h / 2), 0, Math.max(0, stageH - h));
+  const slotBottom = slotTop + h;
+  const effectiveDim = clamp((state.curtainDim + (state.readDark ? 12 : 0)) / 100, 0.14, 0.68);
+
+  els.focusCurtainOverlay.style.setProperty('--curtain-dim', effectiveDim.toFixed(2));
+  if (els.focusCurtainTop) {
+    els.focusCurtainTop.style.transform = `translate3d(0, ${slotTop}px, 0)`;
+  }
+  if (els.focusCurtainBand) {
+    els.focusCurtainBand.style.height = `${h}px`;
+    els.focusCurtainBand.style.transform = `translate3d(0, ${slotTop}px, 0)`;
+  }
+  if (els.focusCurtainBottom) {
+    els.focusCurtainBottom.style.transform = `translate3d(0, ${slotBottom}px, 0)`;
+  }
+}
+
+function stepFocusCurtainHeight(dir) {
+  state.curtainHeight = clamp(Math.round(state.curtainHeight + dir * 8), 34, 120);
+  updateMagnifierUi();
+  if (state.magEnabled && state.magStyle === 'curtain') {
+    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+  }
+  schedulePersistState();
+}
+
+function stepFocusCurtainDim(dir) {
+  state.curtainDim = clamp(Math.round(state.curtainDim + dir * 4), 15, 55);
+  updateMagnifierUi();
+  if (state.magEnabled && state.magStyle === 'curtain') {
+    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+  }
+  schedulePersistState();
+}
+
+function moveFocusCurtainByLines(deltaPx) {
+  if (!state.magEnabled || state.magStyle !== 'curtain' || !els.stage) return;
+  const stageH = els.stage.clientHeight || window.innerHeight || 700;
+  const cur = state.curtainY ?? stageH * 0.42;
+  positionFocusCurtain(cur + deltaPx);
+}
+
+function toggleFocusCurtain() {
+  if (!state.pdfDoc) return;
+  if (state.magEnabled && state.magStyle === 'curtain') {
+    setMagnifierEnabled(false);
+    return;
+  }
+  state.magStyle = 'curtain';
+  setMagnifierEnabled(true, { persist: true });
 }
 
 function updateMagnifierUi() {
   const active = Boolean(state.pdfDoc && state.magEnabled);
+  const isCurtain = state.magStyle === 'curtain';
   const powerStr = `${state.magPower.toFixed(1)}×`;
   const { w, h } = getMagnifierDimensions();
 
@@ -4947,10 +5049,19 @@ function updateMagnifierUi() {
     els.btnMagnifier.classList.toggle('active', active);
     els.btnMagnifier.setAttribute('aria-pressed', String(active));
   }
+  if (els.menuFocusCurtain) {
+    const curtainOn = active && isCurtain;
+    els.menuFocusCurtain.classList.toggle('is-on', curtainOn);
+    els.menuFocusCurtain.setAttribute('aria-pressed', String(curtainOn));
+  }
   if (els.magnifierOverlay) {
     els.magnifierOverlay.hidden = !active;
   }
+  if (els.focusCurtainOverlay) {
+    els.focusCurtainOverlay.hidden = !(active && isCurtain);
+  }
   if (els.magLens) {
+    els.magLens.hidden = isCurtain;
     els.magLens.classList.toggle('mag-shape-circle', state.magStyle === 'circle');
     els.magLens.classList.toggle('mag-shape-bar', state.magStyle === 'bar');
     els.magLens.classList.toggle('is-follow', state.magFollow);
@@ -4967,18 +5078,38 @@ function updateMagnifierUi() {
     els.btnMagShapeBar.classList.toggle('active', isBar);
     els.btnMagShapeBar.setAttribute('aria-pressed', String(isBar));
   }
-  if (els.magPowerLabel) els.magPowerLabel.textContent = powerStr;
-  if (els.magSizeLabel) {
-    els.magSizeLabel.textContent = state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`;
+  if (els.btnMagShapeCurtain) {
+    els.btnMagShapeCurtain.classList.toggle('active', isCurtain);
+    els.btnMagShapeCurtain.setAttribute('aria-pressed', String(isCurtain));
   }
+  if (els.magPowerLabel) {
+    els.magPowerLabel.textContent = isCurtain ? `${state.curtainDim}% dim` : powerStr;
+  }
+  if (els.magSizeLabel) {
+    els.magSizeLabel.textContent = isCurtain ? `${state.curtainHeight}px` : (state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`);
+  }
+  if (els.btnMagPowerDec) els.btnMagPowerDec.title = isCurtain ? 'Lighter curtain dim' : 'Decrease zoom power';
+  if (els.btnMagPowerInc) els.btnMagPowerInc.title = isCurtain ? 'Darker curtain dim' : 'Increase zoom power';
+  if (els.btnMagSizeDec) els.btnMagSizeDec.title = isCurtain ? 'Narrower reading strip (fewer lines)' : 'Smaller lens / bar';
+  if (els.btnMagSizeInc) els.btnMagSizeInc.title = isCurtain ? 'Wider reading strip (more lines)' : 'Larger lens / bar';
   if (els.btnMagFollow) {
-    els.btnMagFollow.classList.toggle('active', state.magFollow);
-    els.btnMagFollow.setAttribute('aria-pressed', String(state.magFollow));
-    els.btnMagFollow.textContent = state.magFollow ? 'Following' : 'Drag & Place';
+    const followActive = isCurtain ? state.curtainFollow : state.magFollow;
+    els.btnMagFollow.classList.toggle('active', followActive);
+    els.btnMagFollow.setAttribute('aria-pressed', String(followActive));
+    els.btnMagFollow.textContent = isCurtain
+      ? (state.curtainFollow ? 'Follow Cursor' : 'Arrow Lock (↑↓)')
+      : (state.magFollow ? 'Following' : 'Drag & Place');
+    els.btnMagFollow.title = isCurtain
+      ? 'Move spotlight band with cursor or Arrow Up/Down keys'
+      : 'Place on book (drag) or Follow cursor';
   }
 }
 
 function stepMagnifierSize(dir) {
+  if (state.magStyle === 'curtain') {
+    stepFocusCurtainHeight(dir);
+    return;
+  }
   if (state.magStyle === 'bar') {
     state.magBarWidth = clamp(Math.round(state.magBarWidth + dir * 36), 180, 780);
     state.magBarHeight = clamp(Math.round(state.magBarHeight + dir * 10), 48, 240);
@@ -5006,7 +5137,10 @@ function setMagnifierEnabled(enabled, { persist = false } = {}) {
     return;
   }
   updateMagnifierUi();
-  if (state.magX === null || state.magY === null) {
+  if (state.magStyle === 'curtain') {
+    const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+    positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+  } else if (state.magX === null || state.magY === null) {
     const def = getDefaultMagnifierCenter();
     positionMagnifier(def.x, def.y);
   } else {
@@ -5016,11 +5150,16 @@ function setMagnifierEnabled(enabled, { persist = false } = {}) {
 }
 
 function setMagnifierStyle(style) {
-  state.magStyle = style === 'bar' ? 'bar' : 'circle';
+  state.magStyle = style === 'curtain' ? 'curtain' : style === 'bar' ? 'bar' : 'circle';
   updateMagnifierUi();
   if (state.magEnabled) {
-    const sr = els.stage.getBoundingClientRect();
-    positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
+    if (state.magStyle === 'curtain') {
+      const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+      positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+    } else {
+      const sr = els.stage.getBoundingClientRect();
+      positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
+    }
   }
   schedulePersistState();
 }
@@ -5030,7 +5169,7 @@ function setMagnifierPower(power) {
   if (!Number.isFinite(num)) return;
   state.magPower = clamp(Math.round(num * 10) / 10, 1.4, 4.5);
   updateMagnifierUi();
-  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (state.magEnabled && state.magStyle !== 'curtain') scheduleMagnifierRedraw();
   schedulePersistState();
 }
 
@@ -5391,7 +5530,55 @@ function setReadDark(enabled, persist = true) {
       }
     });
   }
-  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (state.magEnabled) {
+    if (state.magStyle === 'curtain') {
+      const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+      positionFocusCurtain(state.curtainY ?? stageH * 0.42);
+    } else {
+      scheduleMagnifierRedraw();
+    }
+  }
+  if (persist) schedulePersistState();
+}
+
+function updateAmbientSoundUi() {
+  const info = ambientSound.getPresetInfo(state.ambientPreset);
+  state.ambientPreset = info.id;
+  state.ambientVolume = clamp(Math.round(Number(state.ambientVolume) || 0), 0, 100);
+  ambientSound.setVolume(state.ambientVolume);
+  ambientSound.setPreset(state.ambientPreset);
+
+  if (els.valAmbientSound) {
+    els.valAmbientSound.textContent = info.label;
+  }
+  if (els.valAmbientVol) {
+    els.valAmbientVol.textContent = `${state.ambientVolume}%`;
+  }
+  if (els.ambientVolRange) {
+    els.ambientVolRange.value = String(state.ambientVolume);
+  }
+  if (els.ambientVolRow) {
+    els.ambientVolRow.classList.toggle('is-dimmed', state.ambientPreset === 'off');
+  }
+  if (els.ambientPresetPills) {
+    els.ambientPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.ambient === state.ambientPreset);
+    });
+  }
+}
+
+function setAmbientSoundPreset(presetId, persist = true) {
+  state.ambientPreset = AMBIENT_PRESETS.some((p) => p.id === presetId) ? presetId : 'off';
+  updateAmbientSoundUi();
+  if (state.ambientPreset !== 'off') ambientSound.unlock();
+  if (persist) schedulePersistState();
+}
+
+function setAmbientSoundVolume(vol, persist = true) {
+  const v = Number(vol);
+  if (!Number.isFinite(v)) return;
+  state.ambientVolume = clamp(Math.round(v), 0, 100);
+  updateAmbientSoundUi();
   if (persist) schedulePersistState();
 }
 
@@ -5973,13 +6160,26 @@ function wireEvents() {
   });
   els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
   els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
-  els.btnMagPowerDec?.addEventListener('click', () => setMagnifierPower(state.magPower - 0.2));
-  els.btnMagPowerInc?.addEventListener('click', () => setMagnifierPower(state.magPower + 0.2));
+  els.btnMagShapeCurtain?.addEventListener('click', () => setMagnifierStyle('curtain'));
+  els.btnMagPowerDec?.addEventListener('click', () => {
+    if (state.magStyle === 'curtain') stepFocusCurtainDim(-1);
+    else setMagnifierPower(state.magPower - 0.2);
+  });
+  els.btnMagPowerInc?.addEventListener('click', () => {
+    if (state.magStyle === 'curtain') stepFocusCurtainDim(1);
+    else setMagnifierPower(state.magPower + 0.2);
+  });
   els.btnMagSizeDec?.addEventListener('click', () => stepMagnifierSize(-1));
   els.btnMagSizeInc?.addEventListener('click', () => stepMagnifierSize(1));
   els.btnMagFollow?.addEventListener('click', () => {
-    state.magFollow = !state.magFollow;
-    updateMagnifierUi();
+    if (state.magStyle === 'curtain') {
+      state.curtainFollow = !state.curtainFollow;
+      updateMagnifierUi();
+      schedulePersistState();
+    } else {
+      state.magFollow = !state.magFollow;
+      updateMagnifierUi();
+    }
     els.btnMagFollow.blur();
   });
   els.btnMagClose?.addEventListener('click', () => setMagnifierEnabled(false));
@@ -6280,6 +6480,9 @@ function wireEvents() {
     }
   });
   els.menuTwoFingerPan?.addEventListener('click', toggleTwoFingerPan);
+  els.menuFocusCurtain?.addEventListener('click', () => {
+    toggleFocusCurtain();
+  });
 
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
@@ -6300,6 +6503,19 @@ function wireEvents() {
       });
     });
   }
+
+  if (els.ambientPresetPills) {
+    els.ambientPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setAmbientSoundPreset(btn.dataset.ambient);
+      });
+    });
+  }
+  els.btnAmbientVolDec?.addEventListener('click', () => setAmbientSoundVolume(state.ambientVolume - 5));
+  els.btnAmbientVolInc?.addEventListener('click', () => setAmbientSoundVolume(state.ambientVolume + 5));
+  els.ambientVolRange?.addEventListener('input', () => setAmbientSoundVolume(els.ambientVolRange.value));
+  els.ambientVolRange?.addEventListener('change', () => els.ambientVolRange.blur());
+  els.ambientVolRange?.addEventListener('pointerup', () => els.ambientVolRange.blur());
 
   document.querySelectorAll('.theme-dot').forEach((dot) => {
     dot.addEventListener('click', () => setTheme(dot.dataset.theme));
@@ -6680,16 +6896,29 @@ function wireEvents() {
   syncOverlayButtons();
   syncFullscreenUi();
 
-  // Track pointer position inside stage so keyboard +/- zoom anchors at cursor
+  // Track pointer position inside stage so keyboard +/- zoom anchors at cursor & Follow modes track smoothly
   els.stage.addEventListener('mousemove', (e) => {
     state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
-    if (state.magEnabled && state.magFollow && !state.magDragging && !e.target?.closest?.('#magControlsPill')) {
+    if (!state.magEnabled || e.target?.closest?.('#magControlsPill')) return;
+    if (state.magStyle === 'curtain') {
+      if (state.curtainFollow) {
+        const prevY = state.lastCurtainPointerY;
+        if (prevY === null || Math.abs(e.clientY - prevY) >= 1) {
+          state.lastCurtainPointerY = e.clientY;
+          const sr = els.stage.getBoundingClientRect();
+          positionFocusCurtain(e.clientY - sr.top);
+        }
+      }
+      return;
+    }
+    if (state.magFollow && !state.magDragging) {
       const sr = els.stage.getBoundingClientRect();
       positionMagnifier(e.clientX - sr.left, e.clientY - sr.top);
     }
   });
   els.stage.addEventListener('mouseleave', () => {
     state.lastStagePointer = null;
+    state.lastCurtainPointerY = null;
   });
 
   // Smart Text Selection + Zoom Pan isolation inside bookContainer
@@ -6741,6 +6970,7 @@ function wireEvents() {
   // Keep Web Audio unlocked & recover automatically after sleep, audio-route change, or focus loss
   const keepAudioActive = () => {
     if (state.soundEnabled) flipSound.unlock();
+    if (state.ambientPreset !== 'off') ambientSound.unlock();
   };
   window.addEventListener('pointerdown', keepAudioActive, { capture: true, passive: true });
   window.addEventListener('keydown', keepAudioActive, { capture: true, passive: true });
@@ -6892,6 +7122,18 @@ function wireEvents() {
         goNext();
         break;
       }
+      case 'ArrowUp':
+        if (state.magEnabled && state.magStyle === 'curtain') {
+          e.preventDefault();
+          moveFocusCurtainByLines(e.shiftKey ? -44 : -20);
+        }
+        break;
+      case 'ArrowDown':
+        if (state.magEnabled && state.magStyle === 'curtain') {
+          e.preventDefault();
+          moveFocusCurtainByLines(e.shiftKey ? 44 : 20);
+        }
+        break;
       case ' ': {
         e.preventDefault();
         if (state.scrollMode === 'scroll') {
@@ -6942,6 +7184,10 @@ function wireEvents() {
       case 'M':
         setMagnifierEnabled(!state.magEnabled);
         break;
+      case 'r':
+      case 'R':
+        toggleFocusCurtain();
+        break;
       case 'l':
       case 'L':
         fetchLibrary();
@@ -6983,6 +7229,9 @@ function wireEvents() {
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
       initReaderView(state.currentIndex);
+      if (state.magEnabled && state.magStyle === 'curtain') {
+        positionFocusCurtain(state.curtainY ?? (els.stage?.clientHeight || 700) * 0.42);
+      }
     }, 180);
   });
 }

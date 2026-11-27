@@ -1093,7 +1093,7 @@ body.footer-hidden .bottom-bar {
 .popover-panel {
   position: absolute;
   z-index: 65;
-  background: rgba(24, 26, 32, 0.95);
+  background: #191b21;
   border: none;
   border-radius: 20px;
   box-shadow: var(--card-shadow);
@@ -1555,7 +1555,7 @@ body.footer-hidden .auto-playback-hud:focus-within {
   bottom: calc(var(--bar-height) + 12px);
   z-index: 55;
   height: 174px;
-  background: rgba(24, 26, 32, 0.95);
+  background: #191b21;
   border: none;
   border-radius: 20px;
   box-shadow: var(--card-shadow);
@@ -1673,7 +1673,7 @@ body.footer-hidden .auto-playback-hud:focus-within {
   width: 378px;
   max-width: calc(100% - 28px);
   z-index: 60;
-  background: rgba(24, 26, 32, 0.95);
+  background: #191b21;
   border: none;
   border-radius: 20px;
   box-shadow: var(--card-shadow);
@@ -1933,7 +1933,7 @@ body.footer-hidden .auto-playback-hud:focus-within {
   max-width: calc(100% - 32px);
   padding: 30px 28px;
   border-radius: 24px;
-  background: rgba(24, 26, 32, 0.95);
+  background: #191b21;
   border: none;
   box-shadow: 0 24px 58px rgba(0, 0, 0, 0.48);
   text-align: center;
@@ -2817,7 +2817,7 @@ body.read-dark .scs-flying-shade {
   transition: top 0.2s ease;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .mag-controls-pill {
     top: 48px;
   }
@@ -3638,4 +3638,78 @@ body:has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
 .nav-back-dismiss:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
+}
+
+/* ---------- 7. Focus Reading Line Curtain (Spotlight Ruler Mode) ---------- */
+.focus-curtain-overlay {
+  --curtain-dim: 0.28;
+  position: absolute;
+  inset: 0;
+  z-index: 36;
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout style paint;
+}
+
+.focus-curtain-pane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 100%;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.focus-curtain-top {
+  bottom: 100%;
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 8, 12, var(--curtain-dim)) 0%,
+    rgba(6, 8, 12, var(--curtain-dim)) calc(100% - 8px),
+    rgba(6, 8, 12, 0) 100%
+  );
+}
+
+.focus-curtain-bottom {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(6, 8, 12, 0) 0%,
+    rgba(6, 8, 12, var(--curtain-dim)) 8px,
+    rgba(6, 8, 12, var(--curtain-dim)) 100%
+  );
+}
+
+.focus-curtain-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+  border-top: 1px solid rgba(138, 180, 248, 0.26);
+  border-bottom: 1px solid rgba(138, 180, 248, 0.26);
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.01) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+}
+
+body.read-dark .focus-curtain-band {
+  border-top-color: rgba(138, 180, 248, 0.34);
+  border-bottom-color: rgba(138, 180, 248, 0.34);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* ---------- 9. Ambient Focus Soundscape Controls ---------- */
+.menu-ambient-vol-row.is-dimmed {
+  opacity: 0.42;
+}
+
+.ambient-vol-readout {
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }

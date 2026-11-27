@@ -204,10 +204,17 @@
         </button>
       </div>
 
+      <!-- Focus Reading Line Curtain (Spotlight Ruler Mode) -->
+      <div id="focusCurtainOverlay" class="focus-curtain-overlay" hidden aria-hidden="true">
+        <div id="focusCurtainTop" class="focus-curtain-pane focus-curtain-top"></div>
+        <div id="focusCurtainBand" class="focus-curtain-band"></div>
+        <div id="focusCurtainBottom" class="focus-curtain-pane focus-curtain-bottom"></div>
+      </div>
+
       <!-- Interactive 3D Magnifying Glass / Reading Bar -->
       <div id="magnifierOverlay" class="mag-overlay" hidden>
-        <div id="magControlsPill" class="mag-controls-pill" role="toolbar" aria-label="Magnifying glass controls">
-          <div class="mag-seg" role="group" aria-label="Magnifier shape">
+        <div id="magControlsPill" class="mag-controls-pill" role="toolbar" aria-label="Magnifying glass and focus curtain controls">
+          <div class="mag-seg" role="group" aria-label="Reading tool mode">
             <button type="button" id="btnMagShapeCircle" class="mag-seg-btn active" data-mag-shape="circle" title="3D Circle Lens">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                 <circle cx="11" cy="11" r="7"/>
@@ -220,6 +227,15 @@
                 <rect x="2" y="7" width="20" height="10" rx="3"/>
               </svg>
               <span>Bar</span>
+            </button>
+            <button type="button" id="btnMagShapeCurtain" class="mag-seg-btn" data-mag-shape="curtain" title="Focus Reading Line Curtain (R)">
+              <svg width="13" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+                <rect x="3" y="4" width="18" height="4" rx="1" fill="currentColor" opacity="0.35" stroke="none"/>
+                <line x1="2" y1="9.5" x2="22" y2="9.5"/>
+                <line x1="2" y1="14.5" x2="22" y2="14.5"/>
+                <rect x="3" y="16" width="18" height="4" rx="1" fill="currentColor" opacity="0.35" stroke="none"/>
+              </svg>
+              <span>Curtain</span>
             </button>
           </div>
           <span class="mag-pill-sep"></span>
@@ -317,6 +333,13 @@
         <span>Two-Finger Zoom Pan</span>
         <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
       </button>
+      <button class="menu-item" id="menuFocusCurtain" aria-pressed="false" title="Focus Reading Line Curtain (R)">
+        <span>Focus Line Curtain</span>
+        <span class="menu-toggle-end">
+          <kbd>R</kbd>
+          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </span>
+      </button>
       <div class="menu-divider"></div>
       <div class="menu-auto-block" id="menuAutoBlock">
         <div id="menuAutoFlipGroup">
@@ -381,6 +404,25 @@
           <button type="button" class="sound-pill" data-sound="small-page" title="Small Page Flip">Small Page Flip</button>
           <button type="button" class="sound-pill" data-sound="classic-synth" title="Classic 3-Stage Paper Synth">Classic Synth</button>
           <button type="button" class="sound-pill" data-sound="off" title="Mute page turn sound">Mute</button>
+        </div>
+      </div>
+      <div class="menu-divider"></div>
+      <div class="menu-sound-block menu-ambient-block">
+        <div class="menu-sound-head">
+          <span>Ambient Focus Sound</span>
+          <span class="menu-val" id="valAmbientSound">Off</span>
+        </div>
+        <div class="sound-pills" id="ambientPresetPills" role="radiogroup" aria-label="Ambient focus soundscape">
+          <button type="button" class="sound-pill active" data-ambient="off">Off</button>
+          <button type="button" class="sound-pill" data-ambient="rain">Soft Rain</button>
+          <button type="button" class="sound-pill" data-ambient="fireplace">Fireplace</button>
+          <button type="button" class="sound-pill" data-ambient="library">Quiet Library</button>
+        </div>
+        <div class="auto-control-row menu-paper-row menu-ambient-vol-row is-dimmed" id="ambientVolRow">
+          <button type="button" class="auto-step-btn" id="btnAmbientVolDec" title="Quieter ambience (−)" aria-label="Decrease ambient volume">−</button>
+          <input id="ambientVolRange" class="auto-range" type="range" min="0" max="100" step="2" value="30" aria-label="Ambient focus sound volume" />
+          <button type="button" class="auto-step-btn" id="btnAmbientVolInc" title="Louder ambience (+)" aria-label="Increase ambient volume">+</button>
+          <span class="menu-val ambient-vol-readout" id="valAmbientVol">30%</span>
         </div>
       </div>
       <div class="menu-divider"></div>
@@ -455,7 +497,7 @@
       </div>
       <div class="menu-divider"></div>
       <div class="menu-shortcuts">
-        <div><kbd>←</kbd><kbd>→</kbd> Flip &nbsp; <kbd>Home</kbd>/<kbd>End</kbd> Ends</div>
+        <div><kbd>←</kbd><kbd>→</kbd> Flip &nbsp; <kbd>R</kbd> Curtain &nbsp; <kbd>M</kbd> Lens</div>
         <div><kbd>⌘F</kbd> Search &nbsp; <kbd>+</kbd>/<kbd>-</kbd> Zoom &nbsp; <kbd>F</kbd> Full</div>
       </div>
     </div>
