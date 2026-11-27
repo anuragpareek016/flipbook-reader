@@ -919,9 +919,15 @@ function updateBookDepthChrome() {
   const rightIdx = visible[visible.length - 1];
 
   const maxStack = 13;
-  const leftThick = leftIdx > 0 ? clamp(Math.round((leftIdx / state.totalPages) * maxStack), 2, maxStack) : 0;
+  const leftThick = leftIdx > 0
+    ? clamp(Math.round((leftIdx / Math.max(1, state.totalPages - 1)) * maxStack), single ? 3 : 2, maxStack)
+    : 0;
   const rightRemain = state.totalPages - 1 - rightIdx;
-  const rightThick = rightRemain > 0 ? clamp(Math.round((rightRemain / state.totalPages) * maxStack), 2, maxStack) : 0;
+  const rightThick = rightRemain > 0
+    ? clamp(Math.round((rightRemain / Math.max(1, state.totalPages - 1)) * maxStack), single ? 3 : 2, maxStack)
+    : 0;
+
+  els.bookShell.classList.toggle('has-left-stack', leftThick > 0);
 
   if (single) {
     els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';

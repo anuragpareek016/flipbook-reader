@@ -119,9 +119,9 @@ function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
   };
 }
 
-function cloneCanvasSnapshot(pageNode, pageW, pageH) {
+function cloneCanvasSnapshot(pageNode, pageW, pageH, reverseBack = false) {
   const wrap = document.createElement('div');
-  wrap.className = 'fh-snap';
+  wrap.className = reverseBack ? 'fh-snap fh-snap-reverse' : 'fh-snap';
   const srcCanvas = pageNode?.querySelector('canvas.fb-canvas');
   if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
     const snap = document.createElement('canvas');
@@ -131,19 +131,23 @@ function cloneCanvasSnapshot(pageNode, pageW, pageH) {
     const ctx = snap.getContext('2d', { alpha: false });
     ctx.drawImage(srcCanvas, 0, 0);
     wrap.appendChild(snap);
-    const userHl = pageNode.querySelector('.fb-user-highlights');
-    if (userHl && userHl.children.length > 0) {
-      wrap.appendChild(userHl.cloneNode(true));
+    if (!reverseBack) {
+      const userHl = pageNode.querySelector('.fb-user-highlights');
+      if (userHl && userHl.children.length > 0) {
+        wrap.appendChild(userHl.cloneNode(true));
+      }
     }
   } else {
-    const ph = document.createElement('div');
-    ph.className = 'fb-page-num-placeholder';
-    const rawIdx = pageNode ? Number(pageNode.dataset.pageIndex) : NaN;
-    const num = Number.isFinite(rawIdx) ? rawIdx + 1 : '';
-    ph.textContent = String(num);
-    wrap.appendChild(ph);
-    if (Number.isFinite(rawIdx)) {
-      wrap.dataset.pendingPageIdx = String(rawIdx);
+    if (!reverseBack) {
+      const ph = document.createElement('div');
+      ph.className = 'fb-page-num-placeholder';
+      const rawIdx = pageNode ? Number(pageNode.dataset.pageIndex) : NaN;
+      const num = Number.isFinite(rawIdx) ? rawIdx + 1 : '';
+      ph.textContent = String(num);
+      wrap.appendChild(ph);
+      if (Number.isFinite(rawIdx)) {
+        wrap.dataset.pendingPageIdx = String(rawIdx);
+      }
     }
   }
   wrap.style.width = `${pageW}px`;
@@ -476,11 +480,11 @@ export class FlipBookEngine {
     const sp = this._bookToSpine(bp);
     const w = this.pageW;
     const h = this.pageH;
-    const absX = this.single ? Math.max(0, sp.x) : Math.abs(sp.x);
-    if (absX > w - 1 || absX < 0.84 * w) return null;
+    const distIn = this.single ? (side === 'right' ? w - sp.x : sp.x) : w - Math.abs(sp.x);
+    if (distIn < 1 || distIn > 0.16 * w) return null;
     if (bp.y > 0.16 * h && bp.y < 0.84 * h) return null;
 
-    const maxY = Math.sqrt(Math.max(0, Math.pow(0.16 * h, 2) - Math.pow(((w - absX) * h) / w, 2)));
+    const maxY = Math.sqrt(Math.max(0, Math.pow(0.16 * h, 2) - Math.pow((distIn * h) / w, 2)));
     if (bp.y < maxY || bp.y > h - maxY) {
       return side;
     }
@@ -496,6 +500,18 @@ export class FlipBookEngine {
 
   _clampDragTarget(bp, fromPoint, side) {
     const sp = this._bookToSpine(bp);
+    if (this.single && side === 'left') {
+      const tx = clamp(sp.x, 0, this.pageW);
+      let ty = clamp(sp.y, 0, this.pageH);
+      const edgeGuardSpan = Math.min(48, this.pageW * 0.14);
+      if (tx < edgeGuardSpan) {
+        const safeSlope = Math.min(0.65, (this.pageW * 0.72) / Math.max(1, this.pageH));
+        const maxDy = tx * safeSlope;
+        ty = fromPoint.y + clamp(ty - fromPoint.y, -maxDy, maxDy);
+      }
+      return { x: tx, y: ty };
+    }
+
     let tx = clamp(sp.x, -this.pageW, this.pageW);
     if (side === 'right' && tx > fromPoint.x) tx = fromPoint.x;
     if (side === 'left' && tx < fromPoint.x) tx = fromPoint.x;
@@ -538,7 +554,9 @@ export class FlipBookEngine {
     if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
       // Grabbed already-curled hover/fallback corner cleanly without sudden angle jump
       this.interactiveFlip.mode = 'drag';
-      this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
+      if (!this.interactiveFlip.singlePrev) {
+        this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
+      }
       this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, chosenSide);
       const coordAsBook = this.single ? { ...this.interactiveFlip.coord } : { x: this.interactiveFlip.coord.x + this.pageW, y: this.interactiveFlip.coord.y };
       this.interactiveFlip.coord = this._clampDragTarget(coordAsBook, this.interactiveFlip.from, chosenSide);
@@ -576,8 +594,8 @@ export class FlipBookEngine {
       const w = this.pageW;
       const h = this.pageH;
       const isBottom = bp.y > h / 2;
-      const peekX = side === 'right' ? w - 24 : -w + 24;
-      const peekY = isBottom ? h - 22 : 22;
+      const peekX = side === 'right' ? w - 24 : (this.single ? 26 : -w + 24);
+      const peekY = (this.single && side === 'left') ? (isBottom ? h - 120 : 120) : (isBottom ? h - 22 : 22);
 
       if (!this.interactiveFlip) {
         this._beginInteractiveTurn(side, bp, 'hover');
@@ -618,7 +636,7 @@ export class FlipBookEngine {
     const dir = this.interactiveFlip.side === 'right' ? 1 : -1; // +1 forward, -1 back
     const midX = this.single ? this.pageW / 2 : 0;
     const crossedCenter = dir === 1 ? sp.x < midX : sp.x > midX;
-    const flicked = dir === 1 ? this.moveVelX < -4 && sp.x < this.pageW * 0.72 : this.moveVelX > 4 && sp.x > (this.single ? this.pageW * 0.25 : -this.pageW * 0.65);
+    const flicked = dir === 1 ? this.moveVelX < -4 && sp.x < this.pageW * 0.72 : this.moveVelX > 4 && sp.x > (this.single ? this.pageW * 0.22 : -this.pageW * 0.65);
 
     if (crossedCenter || flicked) {
       this._finishTurnAnimated();
@@ -650,7 +668,18 @@ export class FlipBookEngine {
   }
 
   /* ---------- Interactive Flip Construction & rAF Spring Loop ---------- */
-  _createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder, seq, fromHasSpine = !this.single, toHasSpine = !this.single }) {
+  _createFlipDom({
+    side,
+    isHard,
+    fromIdx,
+    toIdx,
+    underIdx,
+    withUnder,
+    seq,
+    fromHasSpine = !this.single,
+    toHasSpine = !this.single,
+    singlePrev = false,
+  }) {
     const els = [];
     let underEl = null;
 
@@ -668,18 +697,15 @@ export class FlipBookEngine {
       els.push(underEl);
     }
 
-    const frontZ = String(2000 - seq * 4);
-    const castZ = String(2000 - seq * 4 - 1);
-    const flapDropZ = String(3000 + seq * 4);
-    const backZ = String(3000 + seq * 4 + 1);
+    const baseUp = singlePrev ? 4000 + seq * 4 : 2000 - seq * 4;
+    const frontZ = String(baseUp);
+    const castZ = String(baseUp - 1);
+    const flapDropZ = String(singlePrev ? baseUp - 2 : 3000 + seq * 4);
+    const backZ = String(singlePrev ? baseUp + 1 : 3000 + seq * 4 + 1);
 
     if (isHard) {
       const hardCard = document.createElement('div');
       hardCard.className = `fh-hard-card ${this.single ? 'fh-hard-left' : side === 'right' ? 'fh-hard-right' : 'fh-hard-left'}`;
-      if (this.single && side === 'left') {
-        hardCard.style.left = '0';
-        hardCard.style.transformOrigin = '0% 50%';
-      }
       hardCard.style.width = `${this.pageW}px`;
       hardCard.style.height = `${this.pageH}px`;
       hardCard.style.zIndex = frontZ;
@@ -705,7 +731,7 @@ export class FlipBookEngine {
       this.flipLayer.appendChild(hardCard);
       els.push(hardCard);
 
-      return { isHard: true, seq, underEl, underIdx, hardCard, hardShade, els };
+      return { isHard: true, singlePrev, seq, underEl, underIdx, fromIdx, toIdx, hardCard, hardShade, els };
     }
 
     let underShadow = null;
@@ -713,7 +739,9 @@ export class FlipBookEngine {
     if (underEl) {
       if (toHasSpine && underIdx !== null && underIdx !== undefined) {
         underSpine = document.createElement('div');
-        underSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
+        underSpine.className = this.single
+          ? 'fh-single-spine-left'
+          : `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
         underEl.appendChild(underSpine);
       }
       underShadow = document.createElement('div');
@@ -721,7 +749,7 @@ export class FlipBookEngine {
       underEl.appendChild(underShadow);
     }
 
-    // Cast shadow falling from the fold crease onto the revealed underlying page
+    // Cast shadow falling from the fold crease onto the revealed/covered underlying page
     const castBounds = document.createElement('div');
     castBounds.className = 'fh-cast-bounds';
     castBounds.style.zIndex = castZ;
@@ -737,7 +765,7 @@ export class FlipBookEngine {
     castMask.appendChild(castGradient);
     castBounds.appendChild(castMask);
 
-    // downMask: clips turning page front side
+    // downMask: clips active front sheet (departing front sheet in Next / unfurling sheet in singlePrev)
     const downMask = document.createElement('div');
     downMask.className = `fh-mask ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
     downMask.style.width = `${this.maskSize}px`;
@@ -750,24 +778,59 @@ export class FlipBookEngine {
     downSide.style.width = `${this.pageW}px`;
     downSide.style.height = `${this.pageH}px`;
     downSide.style.top = `${this.sideTop}px`;
-    if (fromIdx !== null && fromIdx !== undefined) {
-      downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH));
+    const downPageIdx = singlePrev ? toIdx : fromIdx;
+    if (downPageIdx !== null && downPageIdx !== undefined) {
+      downSide.appendChild(cloneCanvasSnapshot(this.pageNodes[downPageIdx], this.pageW, this.pageH));
     }
-    if (fromHasSpine) {
+    if (singlePrev || fromHasSpine) {
       const downSpine = document.createElement('div');
-      downSpine.className = `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
+      downSpine.className = this.single
+        ? 'fh-single-spine-left'
+        : `fh-inner-spine ${side === 'right' ? 'fh-inner-spine-right' : 'fh-inner-spine-left'}`;
       downSide.appendChild(downSpine);
     }
 
     const lightW = this.maskSize;
     const lightH = this.maskSize * 2;
     const frontHighlight = document.createElement('div');
-    frontHighlight.className = 'fh-crease-lighting fh-front-sheen';
+    frontHighlight.className = singlePrev ? 'fh-crease-lighting fh-unfurl-sheen' : 'fh-crease-lighting fh-front-sheen';
     frontHighlight.style.width = `${lightW}px`;
     frontHighlight.style.height = `${lightH}px`;
     frontHighlight.style.margin = `${-lightH / 2}px 0 0 ${-lightW}px`;
     downSide.appendChild(frontHighlight);
     downMask.appendChild(downSide);
+
+    if (singlePrev) {
+      this.flipLayer.appendChild(castBounds);
+      this.flipLayer.appendChild(downMask);
+      els.push(castBounds, downMask);
+
+      return {
+        isHard: false,
+        singlePrev: true,
+        seq,
+        underEl,
+        underIdx,
+        fromIdx,
+        toIdx,
+        underSpine,
+        upSpine: null,
+        castBounds,
+        castMask,
+        castGradient,
+        flapDropBounds: null,
+        flapDropMask: null,
+        flapCaster: null,
+        downMask,
+        downSide,
+        upMask: null,
+        upSide: null,
+        underShadow,
+        frontHighlight,
+        backShade: null,
+        els,
+      };
+    }
 
     // Flap drop shadow cast by floating curled flap onto underlying stack
     const flapDropBounds = document.createElement('div');
@@ -801,7 +864,9 @@ export class FlipBookEngine {
     upSide.style.width = `${this.pageW}px`;
     upSide.style.height = `${this.pageH}px`;
     upSide.style.top = `${this.sideTop}px`;
-    if (toIdx !== null && toIdx !== undefined) {
+    if (this.single && fromIdx !== null && fromIdx !== undefined) {
+      upSide.appendChild(cloneCanvasSnapshot(this.pageNodes[fromIdx], this.pageW, this.pageH, true));
+    } else if (toIdx !== null && toIdx !== undefined) {
       upSide.appendChild(cloneCanvasSnapshot(this.pageNodes[toIdx], this.pageW, this.pageH));
     }
 
@@ -829,9 +894,12 @@ export class FlipBookEngine {
 
     return {
       isHard: false,
+      singlePrev: false,
       seq,
       underEl,
       underIdx,
+      fromIdx,
+      toIdx,
       underSpine,
       upSpine,
       castBounds,
@@ -842,6 +910,7 @@ export class FlipBookEngine {
       flapCaster,
       downMask,
       downSide,
+      unfurlLip: null,
       upMask,
       upSide,
       underShadow,
@@ -853,13 +922,12 @@ export class FlipBookEngine {
 
   _isHardSpreadStep(prevSpread, nextSpread, side) {
     return (
-      (this.single && side === 'left') ||
-      (this.settings.showCover &&
-        !this.single &&
-        (prevSpread === 0 ||
-          nextSpread === 0 ||
-          prevSpread === this.spreads.length - 1 ||
-          nextSpread === this.spreads.length - 1))
+      !this.single &&
+      this.settings.showCover &&
+      (prevSpread === 0 ||
+        nextSpread === 0 ||
+        prevSpread === this.spreads.length - 1 ||
+        nextSpread === this.spreads.length - 1)
     );
   }
 
@@ -868,7 +936,11 @@ export class FlipBookEngine {
     const nextSlots = this._getSpreadSlots(nextSpread);
     const fromIdx = this.single ? curSlots.right : side === 'right' ? curSlots.right : curSlots.left;
     const toIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.left : nextSlots.right;
-    const underIdx = this.single ? nextSlots.right : side === 'right' ? nextSlots.right : nextSlots.left;
+    const underIdx = this.single
+      ? (side === 'left' ? curSlots.right : nextSlots.right)
+      : side === 'right'
+        ? nextSlots.right
+        : nextSlots.left;
     return { fromIdx, toIdx, underIdx };
   }
 
@@ -878,6 +950,7 @@ export class FlipBookEngine {
     const nextSpread = prevSpread + dir;
     if (nextSpread < 0 || nextSpread >= this.spreads.length) return false;
 
+    const singlePrev = this.single && side === 'left';
     const isHard = this._isHardSpreadStep(prevSpread, nextSpread, side);
     const { fromIdx, toIdx, underIdx } = this._getFlipIndices(prevSpread, nextSpread, side);
 
@@ -892,8 +965,19 @@ export class FlipBookEngine {
 
     const seq = ++this.flipSeq;
     const fromHasSpine = !this.single && (this.spreads[prevSpread]?.length === 2);
-    const toHasSpine = !this.single && (this.spreads[nextSpread]?.length === 2);
-    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: true, seq, fromHasSpine, toHasSpine });
+    const toHasSpine = this.single || (this.spreads[nextSpread]?.length === 2);
+    const dom = this._createFlipDom({
+      side,
+      isHard,
+      fromIdx,
+      toIdx,
+      underIdx,
+      withUnder: true,
+      seq,
+      fromHasSpine,
+      toHasSpine,
+      singlePrev,
+    });
 
     if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
     else this.leftSlot.style.visibility = 'hidden';
@@ -915,9 +999,69 @@ export class FlipBookEngine {
     return true;
   }
 
+  _applySinglePrevFrame(f, coord) {
+    const cx = clamp(coord.x, 0, this.pageW);
+    const t = clamp(cx / Math.max(1, this.pageW), 0, 1);
+
+    let deg = 0;
+    const cornerSign = f.from.y < this.pageH / 2 ? 1 : -1;
+    if (f.mode === 'animate' && !f.reversed) {
+      const ramp = Math.min(1, t * 4.5 + 0.35);
+      deg = cornerSign * (1 - t) * 16 * ramp;
+    } else if (t > 0.005) {
+      const dyNorm = cornerSign > 0
+        ? clamp(coord.y / Math.max(1, this.pageH * 0.55), 0.18, 1)
+        : clamp((this.pageH - coord.y) / Math.max(1, this.pageH * 0.55), 0.18, 1);
+      deg = cornerSign * dyNorm * 24 * (1 - t * 0.55);
+    }
+
+    const rad = (deg * Math.PI) / 180;
+    const cosR = Math.cos(rad);
+    const sinR = Math.sin(rad);
+    const centerX = this.pageW / 2;
+    const centerY = this.pageH / 2;
+
+    // Anchor fold crease near the grabbed corner when t is small so corner hovers stay local,
+    // blending smoothly toward vertical mid-page as the sheet sweeps across.
+    const cornerLineY = f.from.y < centerY ? this.pageH * 0.12 : this.pageH * 0.88;
+    const blendMid = clamp(t / 0.35, 0, 1);
+    const lineY = cornerLineY + (centerY - cornerLineY) * blendMid;
+
+    const dCenter = (centerX - cx) * cosR + (centerY - lineY) * sinR;
+    const projX = centerX - dCenter * cosR;
+    const projY = centerY - dCenter * sinR;
+    const maskTranX = projX;
+    const maskTranY = projY - centerY;
+    const pageTranX = -dCenter - centerX;
+    const distCenter = pageTranX + centerX;
+
+    const maskTx = `translate3d(${maskTranX}px, ${maskTranY}px, 0px) rotate(${deg}deg)`;
+    f.downMask.style.transform = maskTx;
+    f.castMask.style.transform = maskTx;
+    f.downSide.style.transform = `translate3d(${-pageTranX}px, 0px, 0px) rotate(${-deg}deg)`;
+    f.frontHighlight.style.transform = `rotate(${deg}deg) translate3d(${distCenter}px, 0px, 0px)`;
+
+    const appear = t < 0.06 ? t / 0.06 : 1;
+    const settleFade = t > 0.84 ? clamp((1 - t) / 0.16, 0, 1) : 1;
+    const env = clamp(appear * settleFade, 0, 1);
+    const castScale = clamp(0.32 + Math.sin(t * Math.PI) * 0.72, 0.28, 1.04);
+
+    f.frontHighlight.style.opacity = String(clamp(env * 0.94, 0, 0.94));
+    f.castGradient.style.transform = `scaleX(${castScale})`;
+    f.castGradient.style.opacity = String(clamp(env * 0.86, 0, 0.86));
+    if (f.underShadow) {
+      f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.12, 0, 0.12));
+    }
+  }
+
   _applyFlipFrame(f, coord) {
     if (!f) return;
     f.coord = coord;
+
+    if (f.singlePrev) {
+      this._applySinglePrevFrame(f, coord);
+      return;
+    }
 
     if (f.isHard) {
       const span = this.single ? this.pageW : 2 * this.pageW;
@@ -989,10 +1133,11 @@ export class FlipBookEngine {
     this.currentPageIndex = (this.spreads[f.nextSpread] || [0])[0];
 
     const targetSlot = this.single || f.side === 'right' ? this.rightSlot : this.leftSlot;
-    this._setSlotPage(targetSlot, f.underIdx);
+    this._setSlotPage(targetSlot, f.singlePrev ? f.fromIdx : f.underIdx);
 
     const targetX = f.side === 'right' ? -this.pageW : this.pageW;
-    const remainingRatio = clamp(Math.abs(targetX - f.coord.x) / (2 * this.pageW), 0.2, 1);
+    const denomW = f.singlePrev ? this.pageW : 2 * this.pageW;
+    const remainingRatio = clamp(Math.abs(targetX - f.coord.x) / Math.max(1, denomW), 0.2, 1);
     const dur = Math.max(170, this.settings.flippingTime * remainingRatio);
 
     f.mode = 'animate';
@@ -1005,7 +1150,7 @@ export class FlipBookEngine {
     f.elapsedMs = 0;
     f.rate = 1 / dur;
     f.baseRate = f.rate;
-    f.arcMode = false;
+    f.arcMode = f.singlePrev;
     f.reversed = false;
 
     this.flyingFlips.push(f);
@@ -1083,7 +1228,9 @@ export class FlipBookEngine {
         let ny = f.animStartY + (f.animToY - f.animStartY) * ease;
 
         if (f.arcMode && !f.isHard && !f.reversed) {
-          const arc = 0.05 * Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
+          const arc = f.singlePrev
+            ? Math.sin(ease * Math.PI) * 0.055 * this.pageW
+            : 0.05 * Math.sqrt(Math.max(0, this.pageW * this.pageW - nx * nx));
           ny = f.from.y === 0 ? arc : this.pageH - arc;
         }
 
@@ -1112,6 +1259,8 @@ export class FlipBookEngine {
           if (!this.single) {
             if (lastDone.dir === 1) this._setSlotPage(this.leftSlot, slots.left);
             else this._setSlotPage(this.rightSlot, slots.right);
+          } else if (lastDone.singlePrev) {
+            this._setSlotPage(this.rightSlot, slots.right);
           }
         }
       }
@@ -1242,7 +1391,8 @@ export class FlipBookEngine {
         rev.arcMode = false;
         rev.delayMs = 0;
         rev.progress = 0;
-        const backFrac = clamp(Math.abs(rev.animToX - rev.coord.x) / (2 * this.pageW), 0.18, 1);
+        const revSpan = rev.singlePrev ? this.pageW : 2 * this.pageW;
+        const backFrac = clamp(Math.abs(rev.animToX - rev.coord.x) / Math.max(1, revSpan), 0.18, 1);
         const dur = Math.max(150, this.settings.flippingTime * backFrac);
         rev.rate = 1 / dur;
         rev.baseRate = rev.rate;
@@ -1264,10 +1414,12 @@ export class FlipBookEngine {
     if (this.flyingFlips.length >= 6) {
       const oldest = this.flyingFlips.shift();
       this._removeFlipDom(oldest);
+      const landedSlots = this._getSpreadSlots(oldest.nextSpread);
       if (!this.single) {
-        const landedSlots = this._getSpreadSlots(oldest.nextSpread);
         if (oldest.dir === 1) this._setSlotPage(this.leftSlot, landedSlots.left);
         else this._setSlotPage(this.rightSlot, landedSlots.right);
+      } else if (oldest.singlePrev) {
+        this._setSlotPage(this.rightSlot, landedSlots.right);
       }
     }
 
@@ -1286,6 +1438,7 @@ export class FlipBookEngine {
     this.currentSpreadIndex = nextSpread;
     this.currentPageIndex = (this.spreads[nextSpread] || [0])[0];
 
+    const singlePrev = this.single && dir === -1;
     const cornerY = corner === 'top' ? 0 : this.pageH;
     const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
     const targetX = side === 'right' ? -this.pageW : this.pageW;
@@ -1308,14 +1461,29 @@ export class FlipBookEngine {
       }
       if (dir === 1) this._setSlotPage(this.rightSlot, nextSlots.right);
       else this._setSlotPage(this.leftSlot, nextSlots.left);
+    } else if (singlePrev) {
+      if (!isCascading) {
+        this._setSlotPage(this.rightSlot, prevSlots.right);
+      }
     } else {
       this._setSlotPage(this.rightSlot, nextSlots.right);
     }
 
     const seq = ++this.flipSeq;
     const fromHasSpine = !this.single && (this.spreads[prevSpread]?.length === 2);
-    const toHasSpine = !this.single && (this.spreads[nextSpread]?.length === 2);
-    const dom = this._createFlipDom({ side, isHard, fromIdx, toIdx, underIdx, withUnder: false, seq, fromHasSpine, toHasSpine });
+    const toHasSpine = this.single || (this.spreads[nextSpread]?.length === 2);
+    const dom = this._createFlipDom({
+      side,
+      isHard,
+      fromIdx,
+      toIdx,
+      underIdx,
+      withUnder: false,
+      seq,
+      fromHasSpine,
+      toHasSpine,
+      singlePrev,
+    });
 
     const baseDuration = isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime;
     const baseRate = 1 / baseDuration;
