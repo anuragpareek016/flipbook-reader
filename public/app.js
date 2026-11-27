@@ -20,13 +20,16 @@ const els = {
   btnDarkRead: document.getElementById('btnDarkRead'),
   btnMagnifier: document.getElementById('btnMagnifier'),
   btnFocusCurtain: document.getElementById('btnFocusCurtain'),
+  btnSnipTool: document.getElementById('btnSnipTool'),
+  btnPinRef: document.getElementById('btnPinRef'),
   magnifierOverlay: document.getElementById('magnifierOverlay'),
   magControlsPill: document.getElementById('magControlsPill'),
   btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
   btnMagShapeBar: document.getElementById('btnMagShapeBar'),
   focusCurtainOverlay: document.getElementById('focusCurtainOverlay'),
   focusCurtainBookBox: document.getElementById('focusCurtainBookBox'),
-  focusCurtainVeil: document.getElementById('focusCurtainVeil'),
+  focusCurtainSvg: document.getElementById('focusCurtainSvg'),
+  focusCurtainVeilPath: document.getElementById('focusCurtainVeilPath'),
   focusCurtainBand: document.getElementById('focusCurtainBand'),
   focusCurtainPill: document.getElementById('focusCurtainPill'),
   btnCurtain1L: document.getElementById('btnCurtain1L'),
@@ -70,6 +73,10 @@ const els = {
   btnStickyTabSave: document.getElementById('btnStickyTabSave'),
   pageContextMenu: document.getElementById('pageContextMenu'),
   ctxPageHeading: document.getElementById('ctxPageHeading'),
+  ctxMarginNote: document.getElementById('ctxMarginNote'),
+  ctxPinPage: document.getElementById('ctxPinPage'),
+  ctxPinPageLabel: document.getElementById('ctxPinPageLabel'),
+  ctxSnipTool: document.getElementById('ctxSnipTool'),
   ctxStickyTab: document.getElementById('ctxStickyTab'),
   ctxStickyTabLabel: document.getElementById('ctxStickyTabLabel'),
   ctxStickyRemove: document.getElementById('ctxStickyRemove'),
@@ -77,6 +84,35 @@ const els = {
   ctxBookmarkLabel: document.getElementById('ctxBookmarkLabel'),
   ctxSelDivider: document.getElementById('ctxSelDivider'),
   ctxCopyText: document.getElementById('ctxCopyText'),
+  marginNoteHoverCard: document.getElementById('marginNoteHoverCard'),
+  marginHoverColorDot: document.getElementById('marginHoverColorDot'),
+  marginHoverTitle: document.getElementById('marginHoverTitle'),
+  marginHoverText: document.getElementById('marginHoverText'),
+  marginHoverThumb: document.getElementById('marginHoverThumb'),
+  marginNotePopover: document.getElementById('marginNotePopover'),
+  marginNotePageTag: document.getElementById('marginNotePageTag'),
+  marginNoteTextInput: document.getElementById('marginNoteTextInput'),
+  marginNoteSnipPreviewWrap: document.getElementById('marginNoteSnipPreviewWrap'),
+  marginNoteSnipPreviewCanvas: document.getElementById('marginNoteSnipPreviewCanvas'),
+  btnMarginNoteCopySnip: document.getElementById('btnMarginNoteCopySnip'),
+  btnMarginNoteDetachSnip: document.getElementById('btnMarginNoteDetachSnip'),
+  marginNoteColors: document.getElementById('marginNoteColors'),
+  btnMarginNoteDelete: document.getElementById('btnMarginNoteDelete'),
+  btnMarginNoteSave: document.getElementById('btnMarginNoteSave'),
+  refPinsLayer: document.getElementById('refPinsLayer'),
+  snipOverlay: document.getElementById('snipOverlay'),
+  snipSelectionBox: document.getElementById('snipSelectionBox'),
+  snipSizeBadge: document.getElementById('snipSizeBadge'),
+  snipResultCard: document.getElementById('snipResultCard'),
+  snipResultStatus: document.getElementById('snipResultStatus'),
+  snipPreviewCanvas: document.getElementById('snipPreviewCanvas'),
+  btnSnipCancel: document.getElementById('btnSnipCancel'),
+  btnSnipResultClose: document.getElementById('btnSnipResultClose'),
+  btnSnipCopy: document.getElementById('btnSnipCopy'),
+  btnSnipSave: document.getElementById('btnSnipSave'),
+  btnSnipPin: document.getElementById('btnSnipPin'),
+  btnSnipAttachNote: document.getElementById('btnSnipAttachNote'),
+  btnSnipAgain: document.getElementById('btnSnipAgain'),
 
   stage: document.getElementById('stage'),
   welcomeOverlay: document.getElementById('welcomeOverlay'),
@@ -195,6 +231,7 @@ const els = {
   highlightsSummary: document.getElementById('highlightsSummary'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
   btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
+  btnExportMarkdown: document.getElementById('btnExportMarkdown'),
   btnClearPageHighlights: document.getElementById('btnClearPageHighlights'),
   btnClearHighlights: document.getElementById('btnClearHighlights'),
   hlPageChips: document.getElementById('hlPageChips'),
@@ -299,6 +336,12 @@ const state = {
   ctxPos: null,
   navHistory: [], // [{ page, reason }]
   highlights: [],
+  marginNotes: [], // [{ id, page, xPct, yPct, color, text, snipRect, createdAt }]
+  pinnedRefs: [], // [{ id, page, label, crop, x, y, width, height, zoom, collapsed }]
+  marginEditDraft: null,
+  ctxPageCoords: null,
+  snipActive: false,
+  snipCapture: null, // { page, rect, canvas }
   hlFilterMode: 'all', // 'all' | 'current' | 'page'
   hlFilterPage: null,
   hlNotesView: false,
@@ -571,6 +614,8 @@ function schedulePersistState() {
       payload.bookmarks = state.bookmarks;
       payload.stickyTabs = state.stickyTabs;
       payload.highlights = state.highlights;
+      payload.marginNotes = state.marginNotes;
+      payload.pinnedRefs = state.pinnedRefs;
     }
     fetch('/api/book-state', {
       method: 'POST',
@@ -585,6 +630,8 @@ function schedulePersistState() {
           bookmarks: state.bookmarks,
           stickyTabs: state.stickyTabs,
           highlights: state.highlights,
+          marginNotes: state.marginNotes,
+          pinnedRefs: state.pinnedRefs,
         }));
       } catch {
         // ignore storage errors
@@ -623,6 +670,11 @@ function disposeBook() {
   stopAutoFlip();
   stopAutoScroll({ resetPlaying: true });
   setMagnifierEnabled(false, { persist: false });
+  if (typeof setSnipToolActive === 'function') setSnipToolActive(false);
+  if (typeof hideMarginNoteHoverCard === 'function') hideMarginNoteHoverCard();
+  if (typeof closeMarginNotePopover === 'function') closeMarginNotePopover();
+  state.pinnedRefs = [];
+  if (els.refPinsLayer) els.refPinsLayer.innerHTML = '';
   clearMagnifierCache();
   state.magX = null;
   state.magY = null;
@@ -1199,12 +1251,17 @@ async function renderPageNode(idx) {
     const hlLayer = document.createElement('div');
     hlLayer.className = 'fb-search-highlights';
 
+    const marginLayer = document.createElement('div');
+    marginLayer.className = 'fb-margin-notes';
+
     inner.innerHTML = '';
     inner.appendChild(canvas);
     inner.appendChild(userHlLayer);
     inner.appendChild(hlLayer);
     inner.appendChild(textLayerDiv);
+    inner.appendChild(marginLayer);
     paintUserHighlightsOnPage(idx);
+    paintMarginNotesOnPage(idx);
     state.pageFlip?.refreshPendingSnapshots?.();
     if (state.magEnabled) scheduleMagnifierRedraw();
 
@@ -1894,6 +1951,7 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
   updateBookmarkUi();
   updateHighlightsUi();
+  updatePinRefHeaderButtons();
   highlightActiveThumbnail(visible);
   queueNearbyRenders(state.currentIndex, renderRadius);
 
@@ -2789,18 +2847,24 @@ function closeStickyTabPopover() {
   els.stickyTabPopover.hidden = true;
 }
 
-function openPageContextMenu(clientX, clientY, pageNum) {
+function openPageContextMenu(clientX, clientY, pageNum, coords = null) {
   if (!state.pdfDoc || !els.pageContextMenu) return;
   closeStickyTabPopover();
+  closeMarginNotePopover();
   const p = clamp(Math.floor(pageNum) || 1, 1, state.totalPages);
   state.ctxTargetPage = p;
   state.ctxPos = { x: clientX, y: clientY };
+  state.ctxPageCoords = coords;
 
   const existingTab = state.stickyTabs.find((t) => t.page === p);
+  const existingPin = state.pinnedRefs.find((r) => r.page === p && !r.crop);
   const isBm = state.bookmarks.includes(p);
   const selText = window.getSelection()?.toString()?.trim() || '';
 
   if (els.ctxPageHeading) els.ctxPageHeading.textContent = `Page ${p}`;
+  if (els.ctxPinPageLabel) {
+    els.ctxPinPageLabel.textContent = existingPin ? `Unpin Page ${p} Card` : `Pin Page ${p} as Reference`;
+  }
   if (els.ctxStickyTabLabel) {
     els.ctxStickyTabLabel.textContent = existingTab ? `Edit Tab "${existingTab.label}"…` : 'Add Sticky Tab…';
   }
@@ -2811,7 +2875,7 @@ function openPageContextMenu(clientX, clientY, pageNum) {
   if (els.ctxSelDivider) els.ctxSelDivider.hidden = !selText;
   if (els.ctxCopyText) els.ctxCopyText.hidden = !selText;
 
-  const estH = selText ? 175 : existingTab ? 142 : 112;
+  const estH = (selText ? 175 : existingTab ? 142 : 112) + 104;
   positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 224, estH);
   els.pageContextMenu.hidden = false;
 }
@@ -2974,6 +3038,663 @@ function repaintRenderedHighlights() {
   }
 }
 
+const MARGIN_NOTE_COLORS = ['yellow', 'blue', 'mint', 'coral', 'violet'];
+const snipThumbCache = new Map(); // `${page}:${l},${t},${w},${h}` -> HTMLCanvasElement
+
+async function renderPdfRegionToCanvas(pageNum, cropRect = null, targetCssW = 340, scaleMult = 3) {
+  if (!state.pdfDoc || !Number.isInteger(pageNum) || pageNum < 1 || pageNum > state.totalPages) {
+    return null;
+  }
+  const pdfPage = await state.pdfDoc.getPage(pageNum);
+  const vp1 = pdfPage.getViewport({ scale: 1 });
+  const baseW = Math.max(240, targetCssW || 340);
+  const scale = clamp((baseW * scaleMult) / Math.max(1, vp1.width), 1.5, 4.5);
+
+  if (!cropRect) {
+    const vp = pdfPage.getViewport({ scale: Math.min(scale, 3600 / Math.max(vp1.width, vp1.height)) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(vp.width));
+    canvas.height = Math.max(1, Math.round(vp.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise;
+    return canvas;
+  }
+
+  // Crop strictly to normalized percentages { l, t, w, h } at crisp HD resolution
+  const fullScale = clamp((baseW * scaleMult) / Math.max(1, vp1.width * (cropRect.w / 100)), 2.2, 6.0);
+  const maxAllowed = 4096 / Math.max(vp1.width, vp1.height);
+  const renderScale = Math.min(fullScale, maxAllowed);
+  const fullVp = pdfPage.getViewport({ scale: renderScale });
+
+  const sx = Math.max(0, Math.floor((cropRect.l / 100) * fullVp.width));
+  const sy = Math.max(0, Math.floor((cropRect.t / 100) * fullVp.height));
+  const sw = Math.max(2, Math.min(Math.round(fullVp.width) - sx, Math.round((cropRect.w / 100) * fullVp.width)));
+  const sh = Math.max(2, Math.min(Math.round(fullVp.height) - sy, Math.round((cropRect.h / 100) * fullVp.height)));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, sw, sh);
+  await pdfPage.render({
+    canvasContext: ctx,
+    viewport: fullVp,
+    transform: [1, 0, 0, 1, -sx, -sy],
+  }).promise;
+  return canvas;
+}
+
+function getSnipCacheKey(page, rect) {
+  return `${page}:${rect.l.toFixed(2)},${rect.t.toFixed(2)},${rect.w.toFixed(2)},${rect.h.toFixed(2)}`;
+}
+
+async function copyCanvasPngToClipboard(canvas) {
+  if (!canvas) return false;
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) return false;
+  try {
+    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      return true;
+    }
+  } catch {
+    // ignore clipboard permission blocks cleanly
+  }
+  return false;
+}
+
+function downloadCanvasPng(canvas, filename) {
+  if (!canvas) return;
+  const link = document.createElement('a');
+  link.href = canvas.toDataURL('image/png');
+  link.download = filename;
+  link.click();
+}
+
+/* ---------- 4. Pin Page / Diagram Floating Reference Cards ---------- */
+function normalizePinnedRefs(list) {
+  if (!Array.isArray(list)) return [];
+  const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+  const byId = new Map();
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const p = Math.floor(Number(item.page));
+    if (!Number.isInteger(p) || p < 1) continue;
+    const crop = item.crop && typeof item.crop === 'object' && item.crop.w > 0 && item.crop.h > 0
+      ? { l: clampPct(item.crop.l), t: clampPct(item.crop.t), w: clampPct(item.crop.w), h: clampPct(item.crop.h) }
+      : null;
+    const id = String(item.id || `pin-${p}-${crop ? 'crop' : 'page'}`).slice(0, 64);
+    byId.set(id, {
+      id,
+      page: p,
+      label: String(item.label || (crop ? `Diagram p. ${p}` : `Page ${p}`)).trim().slice(0, 48) || `Page ${p}`,
+      crop,
+      x: Math.round(Number.isFinite(Number(item.x)) ? Number(item.x) : 24),
+      y: Math.round(Number.isFinite(Number(item.y)) ? Number(item.y) : 64),
+      width: clamp(Math.round(Number(item.width) || 340), 220, 720),
+      height: clamp(Math.round(Number(item.height) || 360), 180, 760),
+      zoom: clamp(Math.round((Number(item.zoom) || 1) * 100) / 100, 0.75, 4.0),
+      collapsed: Boolean(item.collapsed),
+    });
+  }
+  return [...byId.values()].slice(0, 12);
+}
+
+function updatePinRefHeaderButtons() {
+  if (!els.btnPinRef) return;
+  const visible = new Set(getVisibleIndices().map((i) => i + 1));
+  const hasCurPin = Boolean(state.pdfDoc && state.pinnedRefs.some((r) => !r.crop && visible.has(r.page)));
+  const hasAnyPin = Boolean(state.pdfDoc && state.pinnedRefs.length > 0);
+  els.btnPinRef.classList.toggle('active', hasCurPin || hasAnyPin);
+  els.btnPinRef.setAttribute('aria-pressed', String(hasCurPin || hasAnyPin));
+}
+
+async function paintRefPinCanvas(pin, canvasEl, wrapEl) {
+  if (!pin || !canvasEl || !state.pdfDoc) return;
+  const bodyW = Math.max(180, (pin.width || 340) - 20);
+  const targetCssW = bodyW * (pin.zoom || 1);
+  const srcCanvas = await renderPdfRegionToCanvas(pin.page, pin.crop, targetCssW, 2.5);
+  if (!srcCanvas || !canvasEl.isConnected) return;
+
+  const ratio = srcCanvas.height / Math.max(1, srcCanvas.width);
+  const cssW = Math.round(targetCssW);
+  const cssH = Math.round(cssW * ratio);
+  canvasEl.width = srcCanvas.width;
+  canvasEl.height = srcCanvas.height;
+  canvasEl.style.width = `${cssW}px`;
+  canvasEl.style.height = `${cssH}px`;
+  const ctx = canvasEl.getContext('2d', { alpha: false });
+  ctx.drawImage(srcCanvas, 0, 0);
+  if (wrapEl) {
+    wrapEl.style.width = `${cssW}px`;
+    wrapEl.style.height = `${cssH}px`;
+  }
+}
+
+function createRefPinCardElement(pin) {
+  const card = document.createElement('section');
+  card.className = `ref-pin-card${pin.collapsed ? ' is-collapsed' : ''}`;
+  card.dataset.pinId = pin.id;
+  const sr = els.stage?.getBoundingClientRect();
+  const maxX = Math.max(12, (sr?.width || window.innerWidth) - pin.width - 12);
+  const maxY = Math.max(54, (sr?.height || window.innerHeight) - 100);
+  pin.x = clamp(pin.x, 12, maxX);
+  pin.y = clamp(pin.y, 54, maxY);
+
+  card.style.left = `${pin.x}px`;
+  card.style.top = `${pin.y}px`;
+  card.style.width = `${pin.width}px`;
+  card.style.height = `${pin.height}px`;
+
+  card.innerHTML = `
+    <div class="ref-pin-head" title="Drag to reposition">
+      <button type="button" class="ref-pin-title-btn" title="Jump main book to Page ${pin.page}">
+        <span>📌 ${escapeHtml(pin.label)}</span>
+      </button>
+      <div class="ref-pin-ctrls">
+        <button type="button" class="ref-pin-mini-btn" data-pin-act="zdec" title="Zoom out">−</button>
+        <span class="ref-pin-zoom-label">${Math.round((pin.zoom || 1) * 100)}%</span>
+        <button type="button" class="ref-pin-mini-btn" data-pin-act="zinc" title="Zoom in">+</button>
+        <button type="button" class="ref-pin-mini-btn" data-pin-act="collapse" title="${pin.collapsed ? 'Expand' : 'Collapse'}">${pin.collapsed ? '▢' : '–'}</button>
+        <button type="button" class="ref-pin-mini-btn ref-pin-close" data-pin-act="close" title="Unpin card">✕</button>
+      </div>
+    </div>
+    <div class="ref-pin-body">
+      <div class="ref-pin-canvas-wrap">
+        <canvas class="ref-pin-canvas"></canvas>
+      </div>
+    </div>
+    <div class="ref-pin-resize" title="Drag corner to resize card" aria-hidden="true"></div>
+  `;
+
+  const head = card.querySelector('.ref-pin-head');
+  const titleBtn = card.querySelector('.ref-pin-title-btn');
+  const zoomLbl = card.querySelector('.ref-pin-zoom-label');
+  const bodyEl = card.querySelector('.ref-pin-body');
+  const wrapEl = card.querySelector('.ref-pin-canvas-wrap');
+  const canvasEl = card.querySelector('.ref-pin-canvas');
+  const resizeGrip = card.querySelector('.ref-pin-resize');
+
+  const rerenderCard = () => {
+    zoomLbl.textContent = `${Math.round((pin.zoom || 1) * 100)}%`;
+    paintRefPinCanvas(pin, canvasEl, wrapEl);
+  };
+  rerenderCard();
+
+  card.addEventListener('pointerdown', (e) => e.stopPropagation());
+  card.addEventListener('mousedown', (e) => e.stopPropagation());
+
+  titleBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    jumpToPage(pin.page, false, { reason: 'ref-pin' });
+  });
+
+  card.querySelectorAll('[data-pin-act]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.pinAct;
+      if (act === 'close') {
+        removePinnedRef(pin.id);
+      } else if (act === 'collapse') {
+        pin.collapsed = !pin.collapsed;
+        card.classList.toggle('is-collapsed', pin.collapsed);
+        btn.textContent = pin.collapsed ? '▢' : '–';
+        schedulePersistState();
+      } else if (act === 'zdec') {
+        pin.zoom = clamp(Math.round((pin.zoom - 0.25) * 100) / 100, 0.75, 4.0);
+        rerenderCard();
+        schedulePersistState();
+      } else if (act === 'zinc') {
+        pin.zoom = clamp(Math.round((pin.zoom + 0.25) * 100) / 100, 0.75, 4.0);
+        rerenderCard();
+        schedulePersistState();
+      }
+    });
+  });
+
+  // Wheel zoom directly inside floating reference card
+  bodyEl?.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.2 : -0.2;
+    pin.zoom = clamp(Math.round((pin.zoom + delta) * 100) / 100, 0.75, 4.0);
+    rerenderCard();
+    schedulePersistState();
+  }, { passive: false });
+
+  // Drag header to reposition anywhere on stage
+  let dragStart = null;
+  head?.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragStart = { px: e.clientX, py: e.clientY, origX: pin.x, origY: pin.y };
+    head.setPointerCapture?.(e.pointerId);
+  });
+  head?.addEventListener('pointermove', (e) => {
+    if (!dragStart) return;
+    const stageR = els.stage?.getBoundingClientRect();
+    const maxCardX = Math.max(12, (stageR?.width || window.innerWidth) - pin.width - 12);
+    const maxCardY = Math.max(54, (stageR?.height || window.innerHeight) - 48);
+    pin.x = clamp(Math.round(dragStart.origX + (e.clientX - dragStart.px)), 8, maxCardX);
+    pin.y = clamp(Math.round(dragStart.origY + (e.clientY - dragStart.py)), 48, maxCardY);
+    card.style.left = `${pin.x}px`;
+    card.style.top = `${pin.y}px`;
+  });
+  const endHeadDrag = (e) => {
+    if (!dragStart) return;
+    dragStart = null;
+    try { head.releasePointerCapture?.(e.pointerId); } catch {}
+    schedulePersistState();
+  };
+  head?.addEventListener('pointerup', endHeadDrag);
+  head?.addEventListener('pointercancel', endHeadDrag);
+
+  // SE grip resize
+  let resizeStart = null;
+  resizeGrip?.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    resizeStart = { px: e.clientX, py: e.clientY, origW: pin.width, origH: pin.height };
+    resizeGrip.setPointerCapture?.(e.pointerId);
+  });
+  resizeGrip?.addEventListener('pointermove', (e) => {
+    if (!resizeStart) return;
+    pin.width = clamp(Math.round(resizeStart.origW + (e.clientX - resizeStart.px)), 220, 720);
+    pin.height = clamp(Math.round(resizeStart.origH + (e.clientY - resizeStart.py)), 180, 760);
+    card.style.width = `${pin.width}px`;
+    card.style.height = `${pin.height}px`;
+  });
+  const endResize = (e) => {
+    if (!resizeStart) return;
+    resizeStart = null;
+    try { resizeGrip.releasePointerCapture?.(e.pointerId); } catch {}
+    rerenderCard();
+    schedulePersistState();
+  };
+  resizeGrip?.addEventListener('pointerup', endResize);
+  resizeGrip?.addEventListener('pointercancel', endResize);
+
+  return card;
+}
+
+function renderRefPinsLayer() {
+  if (!els.refPinsLayer) return;
+  els.refPinsLayer.innerHTML = '';
+  for (const pin of state.pinnedRefs) {
+    els.refPinsLayer.appendChild(createRefPinCardElement(pin));
+  }
+  updatePinRefHeaderButtons();
+}
+
+function pinReferenceCard({ page, label = null, crop = null }) {
+  if (!state.pdfDoc || !page) return null;
+  const p = clamp(Math.floor(page), 1, state.totalPages);
+  if (!crop) {
+    const existing = state.pinnedRefs.find((r) => r.page === p && !r.crop);
+    if (existing) {
+      existing.collapsed = false;
+      renderRefPinsLayer();
+      schedulePersistState();
+      return existing;
+    }
+  }
+  const sr = els.stage?.getBoundingClientRect();
+  const drawerBlockingRight = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
+  const w = crop ? clamp(Math.round(280 + crop.w * 2), 260, 460) : 320;
+  const h = crop ? clamp(Math.round(140 + crop.h * 3), 220, 420) : 410;
+  const offset = state.pinnedRefs.length * 24;
+  const defaultX = drawerBlockingRight
+    ? 22 + offset
+    : Math.max(16, Math.round((sr?.width || window.innerWidth) - w - 28 - offset));
+  const defaultY = clamp(62 + offset, 54, Math.max(60, (sr?.height || 700) - h - 60));
+
+  const pin = {
+    id: `pin-${p}-${Date.now().toString(36)}`,
+    page: p,
+    label: label || (crop ? `Diagram p. ${p}` : `Page ${p}`),
+    crop: crop || null,
+    x: defaultX,
+    y: defaultY,
+    width: w,
+    height: h,
+    zoom: 1,
+    collapsed: false,
+  };
+  state.pinnedRefs = normalizePinnedRefs([...state.pinnedRefs, pin]);
+  renderRefPinsLayer();
+  schedulePersistState();
+  return pin;
+}
+
+function removePinnedRef(id) {
+  state.pinnedRefs = state.pinnedRefs.filter((r) => r.id !== id);
+  renderRefPinsLayer();
+  schedulePersistState();
+}
+
+function togglePinCurrentPage() {
+  if (!state.pdfDoc) return;
+  const visible = getVisibleIndices().map((i) => i + 1);
+  const existing = state.pinnedRefs.find((r) => !r.crop && visible.includes(r.page));
+  if (existing) {
+    removePinnedRef(existing.id);
+    return;
+  }
+  const targetPage = visible[0] || 1;
+  pinReferenceCard({ page: targetPage });
+}
+
+/* ---------- 5. 3D Folded Post-It Margin Sticky Notes ---------- */
+function normalizeMarginNotes(list) {
+  if (!Array.isArray(list)) return [];
+  const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const page = Math.floor(Number(item.page));
+    if (!Number.isInteger(page) || page < 1) continue;
+    const text = String(item.text || '').slice(0, 2000);
+    const snipRect = item.snipRect && typeof item.snipRect === 'object' && item.snipRect.w > 0 && item.snipRect.h > 0
+      ? { l: clampPct(item.snipRect.l), t: clampPct(item.snipRect.t), w: clampPct(item.snipRect.w), h: clampPct(item.snipRect.h) }
+      : null;
+    if (!text.trim() && !snipRect) continue;
+    out.push({
+      id: String(item.id || `note-${page}-${out.length}`).slice(0, 64),
+      page,
+      xPct: clampPct(Number.isFinite(Number(item.xPct)) ? item.xPct : 8),
+      yPct: clampPct(Number.isFinite(Number(item.yPct)) ? item.yPct : 14),
+      color: MARGIN_NOTE_COLORS.includes(item.color) ? item.color : 'yellow',
+      text,
+      snipRect,
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt.slice(0, 40) : '',
+    });
+  }
+  return out.slice(0, 500);
+}
+
+async function paintRegionIntoPreviewCanvas(pageNum, rect, canvasEl) {
+  if (!canvasEl || !rect) return;
+  const key = getSnipCacheKey(pageNum, rect);
+  let src = snipThumbCache.get(key);
+  if (!src) {
+    src = await renderPdfRegionToCanvas(pageNum, rect, 240, 2.0);
+    if (src) snipThumbCache.set(key, src);
+  }
+  if (!src || !canvasEl.isConnected) return;
+  canvasEl.width = src.width;
+  canvasEl.height = src.height;
+  canvasEl.getContext('2d', { alpha: false }).drawImage(src, 0, 0);
+}
+
+function showMarginNoteHoverCard(note, pinEl) {
+  if (!els.marginNoteHoverCard || !note || !pinEl) return;
+  if (els.marginNotePopover && !els.marginNotePopover.hidden) return;
+  if (els.marginHoverColorDot) {
+    els.marginHoverColorDot.className = `margin-hover-dot color-${note.color}`;
+  }
+  if (els.marginHoverTitle) {
+    els.marginHoverTitle.textContent = `Sticky Note · p. ${note.page}`;
+  }
+  if (els.marginHoverText) {
+    els.marginHoverText.textContent = note.text.trim() || '(Attached diagram snip)';
+  }
+  if (els.marginHoverThumb) {
+    if (note.snipRect) {
+      els.marginHoverThumb.hidden = false;
+      paintRegionIntoPreviewCanvas(note.page, note.snipRect, els.marginHoverThumb);
+    } else {
+      els.marginHoverThumb.hidden = true;
+    }
+  }
+  const r = pinEl.getBoundingClientRect();
+  const estH = note.snipRect ? 210 : 110;
+  positionFloatingBoxAt(els.marginNoteHoverCard, r.right + 10, r.top - 10, 248, estH);
+  els.marginNoteHoverCard.hidden = false;
+}
+
+function hideMarginNoteHoverCard() {
+  if (els.marginNoteHoverCard) els.marginNoteHoverCard.hidden = true;
+}
+
+function paintMarginNotesOnPage(idx) {
+  const node = state.pageNodes[idx];
+  if (!node) return;
+  const layer = node.querySelector('.fb-margin-notes');
+  if (!layer) return;
+  layer.innerHTML = '';
+  const pageNum = idx + 1;
+  for (const note of state.marginNotes) {
+    if (note.page !== pageNum) continue;
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    pin.className = `fb-margin-note-pin color-${note.color}${note.snipRect ? ' has-snip' : ''}`;
+    pin.style.left = `${note.xPct}%`;
+    pin.style.top = `${note.yPct}%`;
+    pin.setAttribute('aria-label', `Sticky note on page ${note.page}`);
+    pin.innerHTML = `<span class="margin-pin-sheet"><span class="margin-pin-fold"></span></span>`;
+
+    let dragMoved = false;
+    let dragStart = null;
+    pin.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      const pr = node.getBoundingClientRect();
+      if (!pr.width || !pr.height) return;
+      dragMoved = false;
+      dragStart = { px: e.clientX, py: e.clientY, xPct: note.xPct, yPct: note.yPct, pr };
+      pin.setPointerCapture?.(e.pointerId);
+    });
+    pin.addEventListener('pointermove', (e) => {
+      if (!dragStart) return;
+      const dx = e.clientX - dragStart.px;
+      const dy = e.clientY - dragStart.py;
+      if (Math.hypot(dx, dy) > 4) {
+        dragMoved = true;
+        hideMarginNoteHoverCard();
+        note.xPct = clamp(dragStart.xPct + (dx / dragStart.pr.width) * 100, 2, 98);
+        note.yPct = clamp(dragStart.yPct + (dy / dragStart.pr.height) * 100, 2, 98);
+        pin.style.left = `${note.xPct}%`;
+        pin.style.top = `${note.yPct}%`;
+      }
+    });
+    const endPinDrag = (e) => {
+      if (!dragStart) return;
+      const moved = dragMoved;
+      dragStart = null;
+      try { pin.releasePointerCapture?.(e.pointerId); } catch {}
+      if (moved) schedulePersistState();
+    };
+    pin.addEventListener('pointerup', endPinDrag);
+    pin.addEventListener('pointercancel', endPinDrag);
+    pin.addEventListener('mousedown', (e) => e.stopPropagation());
+    pin.addEventListener('pointerenter', () => showMarginNoteHoverCard(note, pin));
+    pin.addEventListener('pointerleave', () => hideMarginNoteHoverCard());
+    pin.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (dragMoved) return;
+      hideMarginNoteHoverCard();
+      const pr = pin.getBoundingClientRect();
+      openMarginNotePopover({
+        id: note.id,
+        page: note.page,
+        xPct: note.xPct,
+        yPct: note.yPct,
+        color: note.color,
+        text: note.text,
+        snipRect: note.snipRect,
+        clientX: pr.right + 8,
+        clientY: pr.top - 12,
+      });
+    });
+    layer.appendChild(pin);
+  }
+}
+
+function repaintAllMarginNotes() {
+  const idxs = new Set([...state.renderedMap.keys(), ...getVisibleIndices()]);
+  for (const idx of idxs) {
+    paintMarginNotesOnPage(idx);
+  }
+}
+
+function openMarginNotePopover({ id = null, page, xPct = 8, yPct = 14, color = 'yellow', text = '', snipRect = null, clientX = null, clientY = null }) {
+  if (!state.pdfDoc || !els.marginNotePopover) return;
+  hideMarginNoteHoverCard();
+  closePageContextMenu();
+  const existing = id ? state.marginNotes.find((n) => n.id === id) : null;
+  state.marginEditDraft = {
+    id: existing ? existing.id : null,
+    page: clamp(Math.floor(page) || 1, 1, state.totalPages),
+    xPct: clamp(Number(xPct), 2, 98),
+    yPct: clamp(Number(yPct), 2, 98),
+    color: MARGIN_NOTE_COLORS.includes(color) ? color : 'yellow',
+    snipRect: snipRect || null,
+  };
+
+  if (els.marginNotePageTag) els.marginNotePageTag.textContent = `Page ${state.marginEditDraft.page}`;
+  if (els.marginNoteTextInput) els.marginNoteTextInput.value = existing ? existing.text : (text || '');
+  if (els.btnMarginNoteDelete) els.btnMarginNoteDelete.hidden = !existing;
+  els.marginNoteColors?.querySelectorAll('.sticky-color-dot').forEach((d) => {
+    d.classList.toggle('active', d.dataset.color === state.marginEditDraft.color);
+  });
+  if (els.marginNoteSnipPreviewWrap) {
+    if (state.marginEditDraft.snipRect) {
+      els.marginNoteSnipPreviewWrap.hidden = false;
+      paintRegionIntoPreviewCanvas(state.marginEditDraft.page, state.marginEditDraft.snipRect, els.marginNoteSnipPreviewCanvas);
+    } else {
+      els.marginNoteSnipPreviewWrap.hidden = true;
+    }
+  }
+
+  const posX = Number.isFinite(clientX) ? clientX : window.innerWidth * 0.5 - 145;
+  const posY = Number.isFinite(clientY) ? clientY : window.innerHeight * 0.3;
+  positionFloatingBoxAt(els.marginNotePopover, posX, posY, 290, state.marginEditDraft.snipRect ? 380 : 250);
+  els.marginNotePopover.hidden = false;
+  requestAnimationFrame(() => els.marginNoteTextInput?.focus());
+}
+
+function closeMarginNotePopover() {
+  if (els.marginNotePopover) els.marginNotePopover.hidden = true;
+  state.marginEditDraft = null;
+}
+
+function saveMarginNoteFromPopover() {
+  const draft = state.marginEditDraft;
+  if (!draft || !state.pdfDoc) return;
+  const text = (els.marginNoteTextInput?.value || '').trim();
+  if (!text && !draft.snipRect) {
+    if (draft.id) deleteMarginNoteById(draft.id);
+    else closeMarginNotePopover();
+    return;
+  }
+  const entry = {
+    id: draft.id || `note-${draft.page}-${Date.now().toString(36)}`,
+    page: draft.page,
+    xPct: draft.xPct,
+    yPct: draft.yPct,
+    color: draft.color,
+    text,
+    snipRect: draft.snipRect || null,
+    createdAt: new Date().toISOString(),
+  };
+  if (draft.id) {
+    state.marginNotes = state.marginNotes.map((n) => (n.id === draft.id ? entry : n));
+  } else {
+    state.marginNotes = normalizeMarginNotes([...state.marginNotes, entry]);
+  }
+  closeMarginNotePopover();
+  paintMarginNotesOnPage(draft.page - 1);
+  updateHighlightsUi();
+  schedulePersistState();
+}
+
+function deleteMarginNoteById(id) {
+  const target = state.marginNotes.find((n) => n.id === id);
+  if (!target) return;
+  state.marginNotes = state.marginNotes.filter((n) => n.id !== id);
+  if (state.marginEditDraft?.id === id) closeMarginNotePopover();
+  paintMarginNotesOnPage(target.page - 1);
+  updateHighlightsUi();
+  schedulePersistState();
+}
+
+/* ---------- 6. 3x HD Diagram / Equation Snip Tool ---------- */
+function setSnipToolActive(active) {
+  const next = Boolean(active && state.pdfDoc);
+  state.snipActive = next;
+  if (els.btnSnipTool) {
+    els.btnSnipTool.classList.toggle('active', next);
+    els.btnSnipTool.setAttribute('aria-pressed', String(next));
+  }
+  if (els.snipOverlay) els.snipOverlay.hidden = !next;
+  if (els.snipSelectionBox) els.snipSelectionBox.hidden = true;
+  if (!next && els.snipResultCard) {
+    els.snipResultCard.hidden = true;
+    state.snipCapture = null;
+  }
+}
+
+function toggleSnipTool() {
+  if (!state.pdfDoc) return;
+  setSnipToolActive(!state.snipActive);
+}
+
+async function executeSnipCapture(pageNode, selClientRect) {
+  if (!pageNode || !state.pdfDoc) return;
+  const idx = Number(pageNode.dataset.pageIndex);
+  if (!Number.isFinite(idx)) return;
+  const pageNum = idx + 1;
+  const pr = pageNode.getBoundingClientRect();
+  if (!pr.width || !pr.height) return;
+
+  const left = clamp(selClientRect.left, pr.left, pr.right);
+  const right = clamp(selClientRect.right, pr.left, pr.right);
+  const top = clamp(selClientRect.top, pr.top, pr.bottom);
+  const bottom = clamp(selClientRect.bottom, pr.top, pr.bottom);
+  const cw = right - left;
+  const ch = bottom - top;
+  if (cw < 12 || ch < 12) return;
+
+  const rect = {
+    l: Math.round(((left - pr.left) / pr.width) * 1000) / 10,
+    t: Math.round(((top - pr.top) / pr.height) * 1000) / 10,
+    w: Math.round((cw / pr.width) * 1000) / 10,
+    h: Math.round((ch / pr.height) * 1000) / 10,
+  };
+  if (rect.w < 1 || rect.h < 1) return;
+
+  const hdCanvas = await renderPdfRegionToCanvas(pageNum, rect, cw, 3);
+  if (!hdCanvas || !state.snipActive) return;
+
+  state.snipCapture = { page: pageNum, rect, canvas: hdCanvas, cssW: cw, cssH: ch };
+  if (els.snipPreviewCanvas) {
+    els.snipPreviewCanvas.width = hdCanvas.width;
+    els.snipPreviewCanvas.height = hdCanvas.height;
+    els.snipPreviewCanvas.getContext('2d', { alpha: false }).drawImage(hdCanvas, 0, 0);
+  }
+  const copied = await copyCanvasPngToClipboard(hdCanvas);
+  if (els.snipResultStatus) {
+    els.snipResultStatus.textContent = copied
+      ? `Copied 3× HD (${hdCanvas.width}×${hdCanvas.height})`
+      : `Captured 3× HD (${hdCanvas.width}×${hdCanvas.height})`;
+  }
+  if (els.snipResultCard) {
+    positionFloatingBoxAt(
+      els.snipResultCard,
+      Math.min(window.innerWidth - 396, Math.max(16, right + 14)),
+      Math.max(58, top),
+      380,
+      340
+    );
+    els.snipResultCard.hidden = false;
+  }
+}
+
 function getFilteredSortedHighlights() {
   const visiblePages = new Set(getVisibleIndices().map((i) => i + 1));
   let list = state.highlights;
@@ -2990,19 +3711,58 @@ function getFilteredSortedHighlights() {
   });
 }
 
+function getFilteredSortedMarginNotes() {
+  const visiblePages = new Set(getVisibleIndices().map((i) => i + 1));
+  let list = state.marginNotes;
+  if (state.hlFilterMode === 'current') {
+    list = state.marginNotes.filter((n) => visiblePages.has(n.page));
+  } else if (state.hlFilterMode === 'page' && Number.isInteger(state.hlFilterPage) && state.hlFilterPage >= 1) {
+    list = state.marginNotes.filter((n) => n.page === state.hlFilterPage);
+  }
+  return [...list].sort((a, b) => (a.page - b.page) || (a.yPct - b.yPct) || (a.xPct - b.xPct));
+}
+
+function formatStudyNotesMarkdown(hlList, noteList) {
+  const pagesMap = new Map();
+  for (const hl of hlList) {
+    if (!pagesMap.has(hl.page)) pagesMap.set(hl.page, { highlights: [], notes: [] });
+    pagesMap.get(hl.page).highlights.push(hl);
+  }
+  for (const note of noteList) {
+    if (!pagesMap.has(note.page)) pagesMap.set(note.page, { highlights: [], notes: [] });
+    pagesMap.get(note.page).notes.push(note);
+  }
+  const pages = Array.from(pagesMap.keys()).sort((a, b) => a - b);
+  if (!pages.length) return '';
+
+  const lines = [`# ${state.bookTitle || 'FlipBook Reader'} — Study Notes`, ''];
+  for (const p of pages) {
+    const grp = pagesMap.get(p);
+    lines.push(`## Page ${p}`);
+    if (grp.notes.length) {
+      lines.push('### Sticky Notes');
+      for (const n of grp.notes) {
+        const body = (n.text || '').trim().replace(/\n+/g, ' ');
+        const tag = n.color ? `(${n.color})` : '';
+        lines.push(`- **Note ${tag}:** ${body || '(Attached diagram snip)'}`);
+        if (n.snipRect) {
+          lines.push(`  - _Attached diagram snippet (${Math.round(n.snipRect.w)}% × ${Math.round(n.snipRect.h)}%, Page ${p})_`);
+        }
+      }
+    }
+    if (grp.highlights.length) {
+      lines.push('### Highlights');
+      for (const h of grp.highlights) {
+        lines.push(`- [${h.color || 'yellow'}] ${h.text || '(Highlighted region)'}`);
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trim() + '\n';
+}
+
 function formatHighlightsAsNotesText(list) {
-  if (!list.length) return '';
-  const groups = new Map();
-  for (const hl of list) {
-    if (!groups.has(hl.page)) groups.set(hl.page, []);
-    groups.get(hl.page).push(hl);
-  }
-  const sections = [];
-  for (const [pageNum, items] of groups.entries()) {
-    const lines = items.map((hl) => `- ${hl.text || '(Highlighted region)'}`);
-    sections.push(`Page ${pageNum}\n${lines.join('\n')}`);
-  }
-  return sections.join('\n\n');
+  return formatStudyNotesMarkdown(list, getFilteredSortedMarginNotes());
 }
 
 function removeHighlightById(id) {
@@ -3018,15 +3778,15 @@ function removeHighlightById(id) {
 }
 
 function updateHighlightsUi() {
-  const totalCount = state.highlights.length;
+  const totalCount = state.highlights.length + state.marginNotes.length;
   if (els.valPageNotesCount) {
     els.valPageNotesCount.textContent = String(totalCount);
   }
   const visiblePages = getVisibleIndices().map((i) => i + 1);
   if (els.btnHighlightsTop) {
     const visibleSet = new Set(visiblePages);
-    const spreadHasHl = state.highlights.some((h) => visibleSet.has(h.page));
-    els.btnHighlightsTop.classList.toggle('has-hl', spreadHasHl);
+    const spreadHasItems = state.highlights.some((h) => visibleSet.has(h.page)) || state.marginNotes.some((n) => visibleSet.has(n.page));
+    els.btnHighlightsTop.classList.toggle('has-hl', spreadHasItems);
     els.btnHighlightsTop.classList.toggle('active', Boolean(els.sideDrawer && !els.sideDrawer.hidden));
   }
   const drawerOpen = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
@@ -3037,26 +3797,29 @@ function updateHighlightsUi() {
   }
   state.highlightsUiDirty = false;
 
-  const filtered = getFilteredSortedHighlights();
+  const filteredHls = getFilteredSortedHighlights();
+  const filteredNotes = getFilteredSortedMarginNotes();
+  const filteredCount = filteredHls.length + filteredNotes.length;
+
   const perPageCounts = new Map();
-  for (const hl of state.highlights) {
-    perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
-  }
+  for (const hl of state.highlights) perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
+  for (const n of state.marginNotes) perPageCounts.set(n.page, (perPageCounts.get(n.page) || 0) + 1);
 
   if (state.hlFilterMode === 'page' && state.hlFilterPage) {
-    els.highlightsSummary.textContent = `Page ${state.hlFilterPage}: ${filtered.length} ${filtered.length === 1 ? 'note' : 'notes'}`;
+    els.highlightsSummary.textContent = `Page ${state.hlFilterPage}: ${filteredCount} ${filteredCount === 1 ? 'note' : 'notes'}`;
   } else if (state.hlFilterMode === 'current') {
     const lbl = visiblePages.length === 2 ? `Pages ${visiblePages[0]}-${visiblePages[1]}` : `Page ${visiblePages[0] || 1}`;
-    els.highlightsSummary.textContent = `${lbl}: ${filtered.length} ${filtered.length === 1 ? 'note' : 'notes'}`;
+    els.highlightsSummary.textContent = `${lbl}: ${filteredCount} ${filteredCount === 1 ? 'note' : 'notes'}`;
   } else {
-    els.highlightsSummary.textContent = totalCount === 1 ? '1 highlight' : `${totalCount} highlights`;
+    els.highlightsSummary.textContent = `${state.highlights.length} hl · ${state.marginNotes.length} notes`;
   }
 
   els.btnClearHighlights.hidden = totalCount === 0;
   if (els.btnClearPageHighlights) {
-    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && filtered.length > 0);
+    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && filteredCount > 0);
   }
-  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = filtered.length === 0;
+  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = filteredCount === 0;
+  if (els.btnExportMarkdown) els.btnExportMarkdown.hidden = filteredCount === 0;
   if (els.btnToggleNotesView) {
     els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
     els.btnToggleNotesView.textContent = state.hlNotesView ? 'List View' : 'Notes View';
@@ -3067,7 +3830,7 @@ function updateHighlightsUi() {
     els.btnHighlightsTop.classList.toggle('active', !els.sideDrawer.hidden);
   }
 
-  // Compact filter chips (All / This Page) + dropdown select for specific highlighted pages
+  // Compact filter chips (All / This Page) + dropdown select
   if (els.hlPageChips) {
     els.hlPageChips.innerHTML = '';
     const addChip = (label, active, onClick) => {
@@ -3096,14 +3859,14 @@ function updateHighlightsUi() {
     els.hlPageSelect.innerHTML = '';
     const defaultOpt = document.createElement('option');
     defaultOpt.value = '';
-    defaultOpt.textContent = pages.length ? `Filter by page (${pages.length})` : 'No pages highlighted';
+    defaultOpt.textContent = pages.length ? `Filter by page (${pages.length})` : 'No notes yet';
     els.hlPageSelect.appendChild(defaultOpt);
 
     for (const p of pages) {
       const n = perPageCounts.get(p);
       const opt = document.createElement('option');
       opt.value = String(p);
-      opt.textContent = `Page ${p} (${n} ${n === 1 ? 'note' : 'notes'})`;
+      opt.textContent = `Page ${p} (${n} ${n === 1 ? 'item' : 'items'})`;
       els.hlPageSelect.appendChild(opt);
     }
     els.hlPageSelect.value = state.hlFilterMode === 'page' && state.hlFilterPage && perPageCounts.has(state.hlFilterPage)
@@ -3115,10 +3878,10 @@ function updateHighlightsUi() {
   els.highlightsList.hidden = !!state.hlNotesView;
   if (els.hlNotesSheet) els.hlNotesSheet.hidden = !state.hlNotesView;
 
-  if (!filtered.length) {
+  if (!filteredCount) {
     const emptyMsg = totalCount === 0
-      ? 'Select any text on a PDF page and pick a color to highlight it.'
-      : 'No highlights on the selected page yet.';
+      ? 'Select text to highlight or Alt+Click / right-click a margin to add a 3D Sticky Note.'
+      : 'No highlights or notes on the selected page yet.';
     els.highlightsList.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
     if (els.hlNotesSheet) els.hlNotesSheet.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
     return;
@@ -3126,7 +3889,34 @@ function updateHighlightsUi() {
 
   if (!state.hlNotesView) {
     els.highlightsList.innerHTML = '';
-    for (const hl of filtered) {
+    for (const n of filteredNotes) {
+      const row = document.createElement('div');
+      row.className = 'hl-item';
+      row.innerHTML = `
+        <span class="hl-item-dot color-${n.color === 'blue' ? 'blue' : n.color === 'mint' ? 'green' : n.color === 'coral' ? 'pink' : n.color === 'violet' ? 'orange' : 'yellow'}"></span>
+        <div class="hl-item-body">
+          <div class="hl-item-meta"><span class="hl-note-item-badge">Note</span>Page ${n.page}${n.snipRect ? ' · Diagram' : ''}</div>
+          <div class="hl-item-snippet">${escapeHtml(n.text || '(Attached diagram snippet)')}</div>
+        </div>
+        <button class="drawer-close hl-row-del" title="Delete sticky note" aria-label="Delete sticky note">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
+      `;
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) {
+          deleteMarginNoteById(n.id);
+          return;
+        }
+        jumpToPage(n.page, false);
+        openMarginNotePopover({ id: n.id, page: n.page, xPct: n.xPct, yPct: n.yPct, color: n.color, text: n.text, snipRect: n.snipRect });
+      });
+      els.highlightsList.appendChild(row);
+    }
+
+    for (const hl of filteredHls) {
       const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
       const row = document.createElement('div');
       row.className = 'hl-item';
@@ -3156,28 +3946,50 @@ function updateHighlightsUi() {
     return;
   }
 
-  // Consolidated reading-order Page Notes view
+  // Consolidated reading-order Page Notes view (Sticky Notes + Highlights)
   if (els.hlNotesSheet) {
     els.hlNotesSheet.innerHTML = '';
     const groups = new Map();
-    for (const hl of filtered) {
-      if (!groups.has(hl.page)) groups.set(hl.page, []);
-      groups.get(hl.page).push(hl);
+    for (const n of filteredNotes) {
+      if (!groups.has(n.page)) groups.set(n.page, { notes: [], highlights: [] });
+      groups.get(n.page).notes.push(n);
     }
-    for (const [pageNum, items] of groups.entries()) {
+    for (const hl of filteredHls) {
+      if (!groups.has(hl.page)) groups.set(hl.page, { notes: [], highlights: [] });
+      groups.get(hl.page).highlights.push(hl);
+    }
+    const pages = Array.from(groups.keys()).sort((a, b) => a - b);
+    for (const pageNum of pages) {
+      const grp = groups.get(pageNum);
+      const count = grp.notes.length + grp.highlights.length;
       const card = document.createElement('section');
       card.className = 'hl-notes-group';
 
       const head = document.createElement('button');
       head.type = 'button';
       head.className = 'hl-notes-group-head';
-      head.innerHTML = `<span>Page ${pageNum} Notes</span><span class="toc-page">${items.length} ${items.length === 1 ? 'note' : 'notes'}</span>`;
+      head.innerHTML = `<span>Page ${pageNum} Study Notes</span><span class="toc-page">${count} ${count === 1 ? 'item' : 'items'}</span>`;
       head.addEventListener('click', () => jumpToPage(pageNum, false));
       card.appendChild(head);
 
       const listEl = document.createElement('div');
       listEl.className = 'hl-notes-entries';
-      for (const hl of items) {
+      for (const n of grp.notes) {
+        const entry = document.createElement('div');
+        entry.className = `hl-note-entry color-${n.color === 'blue' ? 'blue' : n.color === 'mint' ? 'green' : n.color === 'coral' ? 'pink' : n.color === 'violet' ? 'orange' : 'yellow'}`;
+        entry.innerHTML = `
+          <div class="hl-note-text"><span class="hl-note-item-badge">Note</span>${escapeHtml(n.text || '(Attached diagram snip)')}</div>
+          <button class="drawer-close hl-row-del hl-note-del" title="Delete sticky note" aria-label="Delete sticky note">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+        `;
+        entry.querySelector('.hl-note-del')?.addEventListener('click', () => deleteMarginNoteById(n.id));
+        listEl.appendChild(entry);
+      }
+      for (const hl of grp.highlights) {
         const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
         const entry = document.createElement('div');
         entry.className = `hl-note-entry color-${color}`;
@@ -3476,7 +4288,7 @@ function findHighlightAtClientPoint(pageNode, clientX, clientY) {
 }
 
 /* ---------- Opening Books ---------- */
-async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], stickyTabs = [], highlights = [] } = {}) {
+async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], stickyTabs = [], highlights = [], marginNotes = [], pinnedRefs = [] } = {}) {
   els.loadingText.textContent = `Opening ${title}…`;
   els.loadingOverlay.hidden = false;
   els.libraryModal.hidden = true;
@@ -3503,6 +4315,8 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     state.bookmarks = Array.isArray(bookmarks) ? [...bookmarks] : [];
     state.stickyTabs = normalizeStickyTabs(stickyTabs);
     state.highlights = normalizeHighlightsList(highlights);
+    state.marginNotes = normalizeMarginNotes(marginNotes);
+    state.pinnedRefs = normalizePinnedRefs(pinnedRefs);
     clearNavHistory();
 
     // Recover saved local progress if missing from server entry
@@ -3517,6 +4331,12 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
         }
         if (Array.isArray(local?.highlights) && !state.highlights.length) {
           state.highlights = normalizeHighlightsList(local.highlights);
+        }
+        if (Array.isArray(local?.marginNotes) && !state.marginNotes.length) {
+          state.marginNotes = normalizeMarginNotes(local.marginNotes);
+        }
+        if (Array.isArray(local?.pinnedRefs) && !state.pinnedRefs.length) {
+          state.pinnedRefs = normalizePinnedRefs(local.pinnedRefs);
         }
       } catch {
         // ignore
@@ -3536,6 +4356,7 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     if (!els.thumbnailsStrip.hidden) buildThumbnailsStrip();
     updateBookmarkUi();
     updateHighlightsUi();
+    renderRefPinsLayer();
     fetchLibrary();
   } catch (err) {
     alert(`Failed to open PDF: ${err.message || err}`);
@@ -3558,6 +4379,8 @@ async function openBookById(bookId, overridePage = null) {
     bookmarks: book.bookmarks || [],
     stickyTabs: book.stickyTabs || [],
     highlights: book.highlights || [],
+    marginNotes: book.marginNotes || [],
+    pinnedRefs: book.pinnedRefs || [],
   });
 }
 
@@ -3590,6 +4413,8 @@ async function pickFileViaHost() {
         bookmarks: data.bookmarks || [],
         stickyTabs: data.stickyTabs || [],
         highlights: data.highlights || [],
+        marginNotes: data.marginNotes || [],
+        pinnedRefs: data.pinnedRefs || [],
       });
     }
   } catch {
@@ -5269,15 +6094,24 @@ function positionFocusCurtain(cy = null, cx = null) {
 
   const toneBoost = state.curtainTone === 'deep' ? 12 : 0;
   const effectiveDim = clamp((state.curtainDim + toneBoost + (state.readDark ? 12 : 0)) / 100, 0.14, 0.85);
-  els.focusCurtainOverlay.style.setProperty('--curtain-dim', effectiveDim.toFixed(2));
-
-  if (els.focusCurtainVeil) {
-    const holeClip = `polygon(evenodd, 0px 0px, ${boxW}px 0px, ${boxW}px ${boxH}px, 0px ${boxH}px, 0px 0px, ${g.slotLeft}px ${g.slotTop}px, ${g.slotLeft}px ${g.slotBottom}px, ${g.slotRight}px ${g.slotBottom}px, ${g.slotRight}px ${g.slotTop}px, ${g.slotLeft}px ${g.slotTop}px)`;
-    els.focusCurtainVeil.style.clipPath = holeClip;
-    els.focusCurtainVeil.style.webkitClipPath = holeClip;
+  if (els.focusCurtainOverlay) {
+    els.focusCurtainOverlay.style.setProperty('--curtain-dim', effectiveDim.toFixed(2));
+  }
+  const r = clamp(Math.min(g.w < boxW - 1 ? 10 : 6, Math.floor(Math.min(g.w, g.h) / 3)), 0, 12);
+  if (els.focusCurtainSvg && els.focusCurtainVeilPath) {
+    els.focusCurtainSvg.setAttribute('viewBox', `0 0 ${boxW} ${boxH}`);
+    const x = g.slotLeft;
+    const y = g.slotTop;
+    const w = g.w;
+    const h = g.h;
+    const d = r > 0
+      ? `M 0 0 H ${boxW} V ${boxH} H 0 Z M ${x + r} ${y} H ${x + w - r} A ${r} ${r} 0 0 1 ${x + w} ${y + r} V ${y + h - r} A ${r} ${r} 0 0 1 ${x + w - r} ${y + h} H ${x + r} A ${r} ${r} 0 0 1 ${x} ${y + h - r} V ${y + r} A ${r} ${r} 0 0 1 ${x + r} ${y} Z`
+      : `M 0 0 H ${boxW} V ${boxH} H 0 Z M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
+    els.focusCurtainVeilPath.setAttribute('d', d);
   }
   if (els.focusCurtainBand) {
     els.focusCurtainBand.classList.toggle('is-partial', g.w < boxW - 1);
+    els.focusCurtainBand.style.setProperty('--curtain-radius', `${r}px`);
     els.focusCurtainBand.style.width = `${g.w}px`;
     els.focusCurtainBand.style.height = `${g.h}px`;
     els.focusCurtainBand.style.transform = `translate3d(${g.slotLeft}px, ${g.slotTop}px, 0)`;
@@ -6503,6 +7337,14 @@ function wireEvents() {
     toggleFocusCurtain();
     els.btnFocusCurtain.blur();
   });
+  els.btnSnipTool?.addEventListener('click', () => {
+    toggleSnipTool();
+    els.btnSnipTool.blur();
+  });
+  els.btnPinRef?.addEventListener('click', () => {
+    togglePinCurrentPage();
+    els.btnPinRef.blur();
+  });
   [els.btnCurtain1L, els.btnCurtain2L, els.btnCurtain3L, els.btnCurtain4L].forEach((btn) => {
     btn?.addEventListener('click', () => {
       const lines = Number(btn.dataset.curtainLines);
@@ -7024,10 +7866,10 @@ function wireEvents() {
     btn.addEventListener('click', () => setPaperGrainScalePx(Number(btn.dataset.scale)));
   });
 
-  // Page Right-Click Context Menu for quick Sticky Tabs / Bookmarks
+  // Page Right-Click Context Menu for quick Margin Notes / Pins / Snip / Sticky Tabs / Bookmarks
   els.stage?.addEventListener('contextmenu', (e) => {
     if (!state.pdfDoc) return;
-    if (e.target.closest('#btnSound, .sticky-edge-tab, .popover-panel, #moreMenu, .side-drawer, .nav-back-pill, .mag-controls-pill, .auto-playback-hud')) {
+    if (e.target.closest('#btnSound, .sticky-edge-tab, .fb-margin-note-pin, .ref-pin-card, .snip-result-card, .popover-panel, #moreMenu, .side-drawer, .nav-back-pill, .mag-controls-pill, .auto-playback-hud')) {
       return;
     }
     const pageEl = e.target.closest('.fb-page');
@@ -7038,7 +7880,43 @@ function wireEvents() {
     const p = rawIdx !== undefined && Number.isFinite(Number(rawIdx))
       ? Number(rawIdx) + 1
       : (getVisibleIndices()[0] ?? 0) + 1;
-    openPageContextMenu(e.clientX, e.clientY, p);
+    let coords = null;
+    if (pageEl) {
+      const pr = pageEl.getBoundingClientRect();
+      if (pr.width > 0 && pr.height > 0) {
+        coords = {
+          xPct: clamp(((e.clientX - pr.left) / pr.width) * 100, 3, 97),
+          yPct: clamp(((e.clientY - pr.top) / pr.height) * 100, 3, 97),
+        };
+      }
+    }
+    openPageContextMenu(e.clientX, e.clientY, p, coords);
+  });
+  els.ctxMarginNote?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const p = state.ctxTargetPage || (getVisibleIndices()[0] ?? 0) + 1;
+    const pos = state.ctxPos;
+    const coords = state.ctxPageCoords;
+    closePageContextMenu();
+    openMarginNotePopover({
+      page: p,
+      xPct: coords?.xPct ?? 8,
+      yPct: coords?.yPct ?? 14,
+      clientX: pos?.x,
+      clientY: pos?.y,
+    });
+  });
+  els.ctxPinPage?.addEventListener('click', () => {
+    const p = state.ctxTargetPage;
+    closePageContextMenu();
+    if (!p) return;
+    const existing = state.pinnedRefs.find((r) => !r.crop && r.page === p);
+    if (existing) removePinnedRef(existing.id);
+    else pinReferenceCard({ page: p });
+  });
+  els.ctxSnipTool?.addEventListener('click', () => {
+    closePageContextMenu();
+    setSnipToolActive(true);
   });
   els.ctxStickyTab?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -7113,6 +7991,37 @@ function wireEvents() {
     if (els.pageContextMenu && !els.pageContextMenu.hidden && !e.target.closest('#pageContextMenu')) {
       closePageContextMenu();
     }
+    if (
+      els.marginNotePopover &&
+      !els.marginNotePopover.hidden &&
+      !e.target.closest('#marginNotePopover') &&
+      !e.target.closest('.fb-margin-note-pin') &&
+      !e.target.closest('#ctxMarginNote') &&
+      !e.target.closest('#btnSnipAttachNote')
+    ) {
+      closeMarginNotePopover();
+    }
+
+    // Alt+Click directly drops a 3D Margin Sticky Note wherever you click on any page!
+    if (e.altKey && state.pdfDoc && !state.snipActive) {
+      const pageEl = e.target.closest('.fb-page');
+      if (pageEl && !e.target.closest('.fb-margin-note-pin, .popover-panel')) {
+        const idx = Number(pageEl.dataset.pageIndex);
+        const pr = pageEl.getBoundingClientRect();
+        if (Number.isFinite(idx) && pr.width > 0 && pr.height > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          openMarginNotePopover({
+            page: idx + 1,
+            xPct: clamp(((e.clientX - pr.left) / pr.width) * 100, 3, 97),
+            yPct: clamp(((e.clientY - pr.top) / pr.height) * 100, 3, 97),
+            clientX: e.clientX,
+            clientY: e.clientY,
+          });
+          return;
+        }
+      }
+    }
 
     const sel = window.getSelection();
     const hasSelection = !!(sel && !sel.isCollapsed && sel.toString().trim());
@@ -7137,6 +8046,138 @@ function wireEvents() {
     }
   });
 
+  // Margin Sticky Note Editor Popover handlers
+  els.marginNotePopover?.addEventListener('mousedown', (e) => e.stopPropagation());
+  els.marginNotePopover?.addEventListener('pointerdown', (e) => e.stopPropagation());
+  els.marginNoteColors?.querySelectorAll('.sticky-color-dot').forEach((dot) => {
+    dot.addEventListener('click', () => {
+      if (!state.marginEditDraft) return;
+      state.marginEditDraft.color = dot.dataset.color || 'yellow';
+      els.marginNoteColors.querySelectorAll('.sticky-color-dot').forEach((d) => {
+        d.classList.toggle('active', d.dataset.color === state.marginEditDraft.color);
+      });
+    });
+  });
+  els.btnMarginNoteSave?.addEventListener('click', saveMarginNoteFromPopover);
+  els.btnMarginNoteDelete?.addEventListener('click', () => {
+    if (state.marginEditDraft?.id) deleteMarginNoteById(state.marginEditDraft.id);
+    else closeMarginNotePopover();
+  });
+  els.btnMarginNoteDetachSnip?.addEventListener('click', () => {
+    if (!state.marginEditDraft) return;
+    state.marginEditDraft.snipRect = null;
+    if (els.marginNoteSnipPreviewWrap) els.marginNoteSnipPreviewWrap.hidden = true;
+  });
+  els.btnMarginNoteCopySnip?.addEventListener('click', async () => {
+    const d = state.marginEditDraft;
+    if (!d?.snipRect) return;
+    const c = await renderPdfRegionToCanvas(d.page, d.snipRect, 340, 3);
+    const ok = await copyCanvasPngToClipboard(c);
+    if (els.btnMarginNoteCopySnip) {
+      els.btnMarginNoteCopySnip.textContent = ok ? 'Copied 3×!' : 'Use Snip Save';
+      setTimeout(() => { els.btnMarginNoteCopySnip.textContent = 'Copy 3× PNG'; }, 1300);
+    }
+  });
+  els.marginNoteTextInput?.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      saveMarginNoteFromPopover();
+    }
+  });
+
+  // 3x HD Snip Overlay drag-to-capture + actions
+  let snipDrag = null;
+  els.snipOverlay?.addEventListener('pointerdown', (e) => {
+    if (!state.snipActive || e.button !== 0) return;
+    if (e.target.closest('#snipHintPill, #snipResultCard')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (els.snipResultCard) els.snipResultCard.hidden = true;
+    const pageEl = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.classList?.contains('fb-page'));
+    if (!pageEl) return;
+    const sr = els.stage.getBoundingClientRect();
+    snipDrag = {
+      pageEl,
+      startX: e.clientX - sr.left,
+      startY: e.clientY - sr.top,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      srLeft: sr.left,
+      srTop: sr.top,
+    };
+    els.snipOverlay.setPointerCapture?.(e.pointerId);
+  });
+  els.snipOverlay?.addEventListener('pointermove', (e) => {
+    if (!snipDrag || !els.snipSelectionBox) return;
+    const curX = e.clientX - snipDrag.srLeft;
+    const curY = e.clientY - snipDrag.srTop;
+    const x = Math.min(snipDrag.startX, curX);
+    const y = Math.min(snipDrag.startY, curY);
+    const w = Math.abs(curX - snipDrag.startX);
+    const h = Math.abs(curY - snipDrag.startY);
+    els.snipSelectionBox.hidden = w < 6 || h < 6;
+    els.snipSelectionBox.style.left = `${x}px`;
+    els.snipSelectionBox.style.top = `${y}px`;
+    els.snipSelectionBox.style.width = `${w}px`;
+    els.snipSelectionBox.style.height = `${h}px`;
+    if (els.snipSizeBadge) {
+      els.snipSizeBadge.textContent = `${Math.round(w * 3)} × ${Math.round(h * 3)} px · 3× HD`;
+    }
+  });
+  const endSnipDrag = async (e) => {
+    if (!snipDrag) return;
+    const drag = snipDrag;
+    snipDrag = null;
+    try { els.snipOverlay?.releasePointerCapture?.(e.pointerId); } catch {}
+    if (els.snipSelectionBox) els.snipSelectionBox.hidden = true;
+    const clientRect = {
+      left: Math.min(drag.startClientX, e.clientX),
+      top: Math.min(drag.startClientY, e.clientY),
+      right: Math.max(drag.startClientX, e.clientX),
+      bottom: Math.max(drag.startClientY, e.clientY),
+    };
+    if (clientRect.right - clientRect.left >= 12 && clientRect.bottom - clientRect.top >= 12) {
+      await executeSnipCapture(drag.pageEl, clientRect);
+    }
+  };
+  els.snipOverlay?.addEventListener('pointerup', endSnipDrag);
+  els.snipOverlay?.addEventListener('pointercancel', endSnipDrag);
+  els.btnSnipCancel?.addEventListener('click', () => setSnipToolActive(false));
+  els.btnSnipResultClose?.addEventListener('click', () => setSnipToolActive(false));
+  els.btnSnipAgain?.addEventListener('click', () => {
+    if (els.snipResultCard) els.snipResultCard.hidden = true;
+    state.snipCapture = null;
+  });
+  els.btnSnipCopy?.addEventListener('click', async () => {
+    if (!state.snipCapture?.canvas) return;
+    const ok = await copyCanvasPngToClipboard(state.snipCapture.canvas);
+    if (els.snipResultStatus) {
+      els.snipResultStatus.textContent = ok ? 'Copied 3× HD Image to Clipboard!' : 'Clipboard prompt blocked — use Save PNG';
+    }
+  });
+  els.btnSnipSave?.addEventListener('click', () => {
+    const cap = state.snipCapture;
+    if (!cap?.canvas) return;
+    const slug = (state.bookTitle || 'page').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32);
+    downloadCanvasPng(cap.canvas, `${slug}-p${cap.page}-3x.png`);
+  });
+  els.btnSnipPin?.addEventListener('click', () => {
+    const cap = state.snipCapture;
+    if (!cap) return;
+    pinReferenceCard({ page: cap.page, label: `Diagram p. ${cap.page}`, crop: cap.rect });
+    setSnipToolActive(false);
+  });
+  els.btnSnipAttachNote?.addEventListener('click', () => {
+    const cap = state.snipCapture;
+    if (!cap) return;
+    const page = cap.page;
+    const snipRect = { ...cap.rect };
+    const xPct = clamp(cap.rect.l + cap.rect.w > 88 ? Math.max(3, cap.rect.l - 3) : cap.rect.l + cap.rect.w + 2, 3, 96);
+    const yPct = clamp(cap.rect.t, 4, 95);
+    setSnipToolActive(false);
+    openMarginNotePopover({ page, xPct, yPct, color: 'yellow', snipRect });
+  });
+
   // Floating highlight color picker & clear button
   els.hlPopover.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -7158,13 +8199,25 @@ function wireEvents() {
     updateHighlightsUi();
   });
   els.btnCopyPageNotes?.addEventListener('click', async () => {
-    const txt = formatHighlightsAsNotesText(getFilteredSortedHighlights());
-    if (!txt) return;
+    const md = formatStudyNotesMarkdown(getFilteredSortedHighlights(), getFilteredSortedMarginNotes());
+    if (!md) return;
     try {
-      await navigator.clipboard.writeText(txt);
+      await navigator.clipboard.writeText(md);
       els.btnCopyPageNotes.textContent = 'Copied!';
-      setTimeout(() => { els.btnCopyPageNotes.textContent = 'Copy'; }, 1200);
+      setTimeout(() => { els.btnCopyPageNotes.textContent = 'Copy MD'; }, 1200);
     } catch {}
+  });
+  els.btnExportMarkdown?.addEventListener('click', () => {
+    const md = formatStudyNotesMarkdown(getFilteredSortedHighlights(), getFilteredSortedMarginNotes());
+    if (!md) return;
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const slug = (state.bookTitle || 'study-notes').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}-study-notes.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   els.hlPageSelect?.addEventListener('change', () => {
     const raw = els.hlPageSelect.value.trim();
@@ -7183,19 +8236,26 @@ function wireEvents() {
     }
   });
   els.btnClearPageHighlights?.addEventListener('click', () => {
-    const targets = new Set(getFilteredSortedHighlights().map((h) => h.id));
-    if (!targets.size) return;
-    state.highlights = state.highlights.filter((h) => !targets.has(h.id));
+    const hlTargets = new Set(getFilteredSortedHighlights().map((h) => h.id));
+    const noteTargets = new Set(getFilteredSortedMarginNotes().map((n) => n.id));
+    if (!hlTargets.size && !noteTargets.size) return;
+    state.highlights = state.highlights.filter((h) => !hlTargets.has(h.id));
+    state.marginNotes = state.marginNotes.filter((n) => !noteTargets.has(n.id));
     hideHighlightPopover();
+    closeMarginNotePopover();
     repaintRenderedHighlights();
+    repaintAllMarginNotes();
     updateHighlightsUi();
     schedulePersistState();
   });
   els.btnClearHighlights.addEventListener('click', () => {
-    if (!state.highlights.length) return;
+    if (!state.highlights.length && !state.marginNotes.length) return;
     state.highlights = [];
+    state.marginNotes = [];
     hideHighlightPopover();
+    closeMarginNotePopover();
     repaintRenderedHighlights();
+    repaintAllMarginNotes();
     updateHighlightsUi();
     schedulePersistState();
   });
@@ -7387,6 +8447,13 @@ function wireEvents() {
   };
   const guardPageFlipPointer = (e) => {
     if ((e.type === 'mousedown' || e.type === 'pointerdown') && e.button !== 0) return;
+    if (e.target?.closest?.('.fb-margin-note-pin, .popover-panel')) {
+      return;
+    }
+    if (e.altKey) {
+      e.stopPropagation();
+      return;
+    }
     if (state.zoom > 1.01) {
       return;
     }
@@ -7646,6 +8713,14 @@ function wireEvents() {
       case 'R':
         toggleFocusCurtain();
         break;
+      case 's':
+      case 'S':
+        toggleSnipTool();
+        break;
+      case 'p':
+      case 'P':
+        togglePinCurrentPage();
+        break;
       case 'l':
       case 'L':
         fetchLibrary();
@@ -7665,7 +8740,9 @@ function wireEvents() {
         showBar('header', true, 1400);
         break;
       case 'Escape':
-        if (els.pageContextMenu && !els.pageContextMenu.hidden) closePageContextMenu();
+        if (state.snipActive) setSnipToolActive(false);
+        else if (els.marginNotePopover && !els.marginNotePopover.hidden) closeMarginNotePopover();
+        else if (els.pageContextMenu && !els.pageContextMenu.hidden) closePageContextMenu();
         else if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
         else if (!els.hlPopover.hidden) hideHighlightPopover();
         else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;

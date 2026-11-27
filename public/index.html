@@ -33,6 +33,17 @@
             <rect x="3" y="16.5" width="18" height="4" rx="1.5" opacity="0.45"/>
           </svg>
         </button>
+        <button id="btnSnipTool" class="icon-chip" title="Snip Diagram / Equation at 3× HD (S)" aria-label="Toggle 3x HD diagram snip tool" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <path d="M5 3.5A1.5 1.5 0 0 0 3.5 5v3.2a1 1 0 0 0 2 0V5.5h2.7a1 1 0 1 0 0-2H5Zm10.8 0a1 1 0 1 0 0 2h2.7v2.7a1 1 0 1 0 2 0V5A1.5 1.5 0 0 0 19 3.5h-3.2Zm-10.3 12.3a1 1 0 1 0-2 0V19A1.5 1.5 0 0 0 5 20.5h3.2a1 1 0 1 0 0-2H5.5v-2.7Zm15 0a1 1 0 1 0-2 0v2.7h-2.7a1 1 0 1 0 0 2H19A1.5 1.5 0 0 0 20.5 19v-3.2Z"/>
+            <rect x="7.5" y="7.5" width="9" height="9" rx="2"/>
+          </svg>
+        </button>
+        <button id="btnPinRef" class="icon-chip" title="Pin Current Page as Reference Card (P)" aria-label="Pin current page as floating reference card" aria-pressed="false">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <path d="M15.1 2.7a1.1 1.1 0 0 1 1.55 0l4.65 4.65a1.1 1.1 0 0 1-.48 1.84l-2.66.76-3.7 3.7.72 3.1a1.1 1.1 0 0 1-1.85 1.03L9.9 14.35l-4.95 4.95a1 1 0 0 1-1.42-1.42l4.95-4.95-3.43-3.43a1.1 1.1 0 0 1 1.03-1.85l3.1.72 3.7-3.7.76-2.66a1.1 1.1 0 0 1 .76-.76Z"/>
+          </svg>
+        </button>
         <button id="btnDarkRead" class="icon-chip" title="Dark Mode Reading (D)" aria-label="Toggle dark reading mode">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
             <path d="M21.05 13.38a.85.85 0 0 0-1.05-.13A6.95 6.95 0 0 1 10.75 4a.85.85 0 0 0-.97-1.15A9.35 9.35 0 1 0 21.15 14.35a.85.85 0 0 0-.1-.97Z"/>
@@ -77,9 +88,58 @@
       </div>
     </div>
 
+    <!-- Margin Sticky Note Hover Preview & Editor Popover -->
+    <div id="marginNoteHoverCard" class="popover-panel margin-note-hover-card" hidden aria-hidden="true">
+      <div class="margin-hover-head">
+        <span id="marginHoverColorDot" class="margin-hover-dot"></span>
+        <span id="marginHoverTitle">Sticky Note</span>
+      </div>
+      <div id="marginHoverText" class="margin-hover-text"></div>
+      <canvas id="marginHoverThumb" class="margin-hover-thumb" hidden></canvas>
+    </div>
+
+    <div id="marginNotePopover" class="popover-panel margin-note-popover" hidden role="dialog" aria-label="Margin sticky note editor">
+      <div class="sticky-pop-head">
+        <span>Margin Sticky Note</span>
+        <span id="marginNotePageTag" class="sticky-pop-page">Page 1</span>
+      </div>
+      <textarea id="marginNoteTextInput" class="margin-note-textarea" rows="4" maxlength="2000" placeholder="Write key concept, trick, or formula…"></textarea>
+      <div id="marginNoteSnipPreviewWrap" class="margin-note-snip-wrap" hidden>
+        <canvas id="marginNoteSnipPreviewCanvas" class="margin-note-snip-canvas"></canvas>
+        <div class="margin-note-snip-actions">
+          <button type="button" id="btnMarginNoteCopySnip" class="btn-small">Copy 3× PNG</button>
+          <button type="button" id="btnMarginNoteDetachSnip" class="btn-small btn-danger-subtle">Remove Image</button>
+        </div>
+      </div>
+      <div class="sticky-color-swatches" id="marginNoteColors" role="group" aria-label="Post-it color">
+        <button type="button" class="sticky-color-dot color-amber active" data-color="yellow" title="Sunny Yellow"></button>
+        <button type="button" class="sticky-color-dot color-sky" data-color="blue" title="Sky Blue"></button>
+        <button type="button" class="sticky-color-dot color-mint" data-color="mint" title="Fresh Mint"></button>
+        <button type="button" class="sticky-color-dot color-coral" data-color="coral" title="Warm Coral"></button>
+        <button type="button" class="sticky-color-dot color-violet" data-color="violet" title="Soft Violet"></button>
+      </div>
+      <div class="sticky-pop-actions">
+        <button type="button" id="btnMarginNoteDelete" class="btn-small btn-danger-subtle" hidden>Delete</button>
+        <button type="button" id="btnMarginNoteSave" class="btn-small sticky-save-btn">Save Note</button>
+      </div>
+    </div>
+
     <!-- Page Right-Click Context Menu -->
     <div id="pageContextMenu" class="popover-panel page-context-menu" hidden role="menu" aria-label="Page actions">
       <div class="ctx-menu-head" id="ctxPageHeading">Page 1</div>
+      <button type="button" class="menu-item" id="ctxMarginNote" role="menuitem">
+        <span>Add Margin Sticky Note…</span>
+        <kbd>⌥Click</kbd>
+      </button>
+      <button type="button" class="menu-item" id="ctxPinPage" role="menuitem">
+        <span id="ctxPinPageLabel">Pin Page as Reference</span>
+        <kbd>P</kbd>
+      </button>
+      <button type="button" class="menu-item" id="ctxSnipTool" role="menuitem">
+        <span>Snip Diagram / Equation…</span>
+        <kbd>S</kbd>
+      </button>
+      <div class="menu-divider"></div>
       <button type="button" class="menu-item" id="ctxStickyTab" role="menuitem">
         <span id="ctxStickyTabLabel">Add Sticky Tab…</span>
         <kbd>⇧B</kbd>
@@ -200,7 +260,9 @@
       <!-- Focus Reading Line Curtain (Spotlight Ruler Mode) -->
       <div id="focusCurtainOverlay" class="focus-curtain-overlay" hidden>
         <div id="focusCurtainBookBox" class="focus-curtain-book-box" aria-hidden="true">
-          <div id="focusCurtainVeil" class="focus-curtain-veil"></div>
+          <svg id="focusCurtainSvg" class="focus-curtain-svg" preserveAspectRatio="none">
+            <path id="focusCurtainVeilPath" fill-rule="evenodd" />
+          </svg>
           <div id="focusCurtainBand" class="focus-curtain-band has-guides">
             <div class="curtain-resize-n" data-curtain-resize="n" title="Drag to adjust spotlight top edge / height" aria-hidden="true"></div>
             <div class="curtain-resize-s" data-curtain-resize="s" title="Drag to adjust spotlight bottom edge / height" aria-hidden="true"></div>
@@ -276,6 +338,38 @@
           </div>
           <div class="mag-resize-e" data-mag-resize="e" title="Drag to widen bar" aria-hidden="true"></div>
           <div class="mag-resize-s" data-mag-resize="s" title="Drag to resize bar height" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <!-- Pinned Floating Reference Cards Layer (Diagram Compare Mode) -->
+      <div id="refPinsLayer" class="ref-pins-layer"></div>
+
+      <!-- 3x HD Diagram / Equation Snip Tool Overlay -->
+      <div id="snipOverlay" class="snip-overlay" hidden>
+        <div id="snipHintPill" class="mag-controls-pill snip-hint-pill">
+          <span>Drag across any diagram, table, or equation (3× HD)</span>
+          <span class="mag-pill-sep"></span>
+          <span class="snip-shortcut-hint">Esc to cancel</span>
+          <button type="button" id="btnSnipCancel" class="hud-stop-btn" title="Exit Snip Mode (Esc)" aria-label="Exit snip tool">✕</button>
+        </div>
+        <div id="snipSelectionBox" class="snip-selection-box" hidden>
+          <span id="snipSizeBadge" class="snip-size-badge"></span>
+        </div>
+        <div id="snipResultCard" class="popover-panel snip-result-card" hidden role="dialog" aria-label="Snipped diagram preview">
+          <div class="snip-result-head">
+            <span id="snipResultStatus" class="snip-status-pill">Captured 3× HD</span>
+            <button type="button" id="btnSnipResultClose" class="drawer-close" aria-label="Close snip preview">✕</button>
+          </div>
+          <div class="snip-preview-frame">
+            <canvas id="snipPreviewCanvas" class="snip-preview-canvas"></canvas>
+          </div>
+          <div class="snip-result-actions">
+            <button type="button" id="btnSnipCopy" class="btn-small sticky-save-btn">Copy 3× PNG</button>
+            <button type="button" id="btnSnipSave" class="btn-small">Save PNG</button>
+            <button type="button" id="btnSnipPin" class="btn-small">📌 Pin Card</button>
+            <button type="button" id="btnSnipAttachNote" class="btn-small">📝 Attach Note</button>
+            <button type="button" id="btnSnipAgain" class="btn-small">Snip Again</button>
+          </div>
         </div>
       </div>
 
@@ -559,11 +653,12 @@
 
       <div id="paneHighlights" class="drawer-pane">
         <div class="bookmarks-actions hl-actions-head">
-          <span id="highlightsSummary">0 highlights</span>
+          <span id="highlightsSummary">0 notes</span>
           <div class="hl-header-btns">
-            <button id="btnToggleNotesView" class="btn-small" title="View highlighted text on page as notes">Notes View</button>
-            <button id="btnCopyPageNotes" class="btn-small" hidden title="Copy displayed notes">Copy</button>
-            <button id="btnClearPageHighlights" class="btn-small btn-danger-subtle" hidden title="Delete all highlights on this filtered page">Clear Page</button>
+            <button id="btnToggleNotesView" class="btn-small" title="View highlights and sticky notes as study notes">Notes View</button>
+            <button id="btnCopyPageNotes" class="btn-small" hidden title="Copy Markdown study notes to clipboard">Copy MD</button>
+            <button id="btnExportMarkdown" class="btn-small" hidden title="Download Markdown study export (.md)">Export .md</button>
+            <button id="btnClearPageHighlights" class="btn-small btn-danger-subtle" hidden title="Delete all highlights &amp; notes on this page">Clear Page</button>
             <button id="btnClearHighlights" class="btn-small btn-danger-subtle" hidden>Clear All</button>
           </div>
         </div>

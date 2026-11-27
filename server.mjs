@@ -95,6 +95,8 @@ function registerLocalPdf(filePath, initialPage = null) {
       bookmarks: [],
       stickyTabs: [],
       highlights: [],
+      marginNotes: [],
+      pinnedRefs: [],
       lastOpened: now,
     });
   }
@@ -356,6 +358,48 @@ const server = http.createServer(async (req, res) => {
                 };
               })
               .filter((h) => h.id && h.rects.length > 0);
+          }
+          if (Array.isArray(body.marginNotes)) {
+            const validNoteColors = new Set(['yellow', 'blue', 'mint', 'coral', 'violet']);
+            const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+            const sanitizeRect = (r) => (r && typeof r === 'object' && Number.isFinite(Number(r.l)) && Number.isFinite(Number(r.t)) && Number(r.w) > 0 && Number(r.h) > 0
+              ? { l: clampPct(r.l), t: clampPct(r.t), w: clampPct(r.w), h: clampPct(r.h) }
+              : null);
+            entry.marginNotes = body.marginNotes
+              .filter((n) => n && typeof n === 'object' && Number.isInteger(n.page) && n.page >= 1)
+              .slice(0, 500)
+              .map((n) => ({
+                id: String(n.id || `note-${n.page}-${Date.now().toString(36)}`).slice(0, 64),
+                page: Math.floor(n.page),
+                xPct: clampPct(Number.isFinite(Number(n.xPct)) ? n.xPct : 8),
+                yPct: clampPct(Number.isFinite(Number(n.yPct)) ? n.yPct : 14),
+                color: validNoteColors.has(n.color) ? n.color : 'yellow',
+                text: String(n.text || '').slice(0, 2000),
+                snipRect: sanitizeRect(n.snipRect),
+                createdAt: typeof n.createdAt === 'string' ? n.createdAt.slice(0, 40) : '',
+              }))
+              .filter((n) => n.id && (n.text.trim() || n.snipRect));
+          }
+          if (Array.isArray(body.pinnedRefs)) {
+            const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) * 1000) / 1000));
+            const sanitizeCrop = (r) => (r && typeof r === 'object' && Number.isFinite(Number(r.l)) && Number.isFinite(Number(r.t)) && Number(r.w) > 0 && Number(r.h) > 0
+              ? { l: clampPct(r.l), t: clampPct(r.t), w: clampPct(r.w), h: clampPct(r.h) }
+              : null);
+            entry.pinnedRefs = body.pinnedRefs
+              .filter((p) => p && typeof p === 'object' && Number.isInteger(p.page) && p.page >= 1)
+              .slice(0, 12)
+              .map((p) => ({
+                id: String(p.id || `pin-${p.page}`).slice(0, 64),
+                page: Math.floor(p.page),
+                label: String(p.label || `Page ${p.page}`).trim().slice(0, 48) || `Page ${p.page}`,
+                crop: sanitizeCrop(p.crop),
+                x: Math.round(Number(p.x) || 24),
+                y: Math.round(Number(p.y) || 64),
+                width: Math.max(220, Math.min(720, Math.round(Number(p.width) || 340))),
+                height: Math.max(180, Math.min(760, Math.round(Number(p.height) || 360))),
+                zoom: Math.max(0.75, Math.min(4.0, Math.round((Number(p.zoom) || 1) * 100) / 100)),
+                collapsed: Boolean(p.collapsed),
+              }));
           }
           entry.lastOpened = new Date().toISOString();
         }

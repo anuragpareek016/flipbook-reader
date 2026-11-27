@@ -141,6 +141,8 @@ body.header-hidden .top-bar-right {
 #btnHighlightsTop.active,
 #btnMagnifier.active,
 #btnFocusCurtain.active,
+#btnSnipTool.active,
+#btnPinRef.active,
 #btnDarkRead.active {
   background: #ffffff;
   color: #0e1015;
@@ -151,6 +153,8 @@ body.header-hidden .top-bar-right {
 #btnHighlightsTop.active:hover,
 #btnMagnifier.active:hover,
 #btnFocusCurtain.active:hover,
+#btnSnipTool.active:hover,
+#btnPinRef.active:hover,
 #btnDarkRead.active:hover {
   background: #f1f3f7;
   color: #0e1015;
@@ -354,6 +358,7 @@ body.is-flip-dragging .sticky-edge-tab,
 body.is-flip-dragging .nav-back-pill,
 body.is-flip-dragging .single-collected-stack,
 body.is-flip-dragging .scroll-tabs-rail,
+body.is-flip-dragging .fb-margin-notes,
 body.is-flip-dragging .fb-page .textLayer {
   pointer-events: none !important;
 }
@@ -3753,12 +3758,17 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   --curtain-veil-rgb: 2, 4, 8;
 }
 
-.focus-curtain-veil {
+.focus-curtain-svg {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
   pointer-events: none;
-  background: rgba(var(--curtain-veil-rgb), var(--curtain-dim));
-  will-change: clip-path;
+}
+
+.focus-curtain-svg path {
+  fill: rgba(var(--curtain-veil-rgb), var(--curtain-dim));
 }
 
 .focus-curtain-band {
@@ -3769,6 +3779,7 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
   will-change: transform, width, height;
   background: transparent;
   box-sizing: border-box;
+  border-radius: var(--curtain-radius, 8px);
   box-shadow: inset 0 0 8px 1px rgba(var(--curtain-veil-rgb), calc(var(--curtain-dim) * 0.35));
 }
 
@@ -3934,4 +3945,490 @@ body.read-dark .focus-curtain-band.has-guides {
   min-width: 32px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 4. Pin Page / Diagram Floating Reference Cards ---------- */
+.ref-pins-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 42;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ref-pin-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: none;
+  background: rgba(22, 24, 30, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.56),
+    0 4px 14px rgba(0, 0, 0, 0.30);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  contain: layout style;
+}
+
+.ref-pin-card.is-collapsed {
+  height: auto !important;
+  min-width: 196px;
+}
+
+.ref-pin-head {
+  height: 36px;
+  padding: 0 8px 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.ref-pin-head:active {
+  cursor: grabbing;
+}
+
+.ref-pin-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(138, 180, 248, 0.16);
+  color: #b7d2fc;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-pin-title-btn:hover {
+  background: rgba(138, 180, 248, 0.28);
+  color: #ffffff;
+}
+
+.ref-pin-ctrls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.ref-pin-mini-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.09);
+  color: #e2e6ef;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ref-pin-mini-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.ref-pin-close:hover {
+  background: #dc4455;
+  color: #ffffff;
+}
+
+.ref-pin-zoom-label {
+  min-width: 34px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #cfd6e3;
+  font-variant-numeric: tabular-nums;
+}
+
+.ref-pin-body {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  background: rgba(12, 14, 18, 0.72);
+}
+
+.ref-pin-card.is-collapsed .ref-pin-body,
+.ref-pin-card.is-collapsed .ref-pin-resize {
+  display: none;
+}
+
+.ref-pin-canvas-wrap {
+  margin: auto;
+  background: var(--paper-bg, #ffffff);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36);
+  flex-shrink: 0;
+}
+
+body.read-dark .ref-pin-canvas-wrap {
+  background: #17181c;
+}
+
+.ref-pin-canvas {
+  display: block;
+}
+
+body.has-warm-paper:not(.read-dark) .ref-pin-canvas {
+  mix-blend-mode: multiply;
+}
+
+body.read-dark .ref-pin-canvas {
+  filter: invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98);
+}
+
+.ref-pin-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0.55;
+  background:
+    linear-gradient(135deg, transparent 48%, rgba(255, 255, 255, 0.55) 52%, transparent 56%),
+    linear-gradient(135deg, transparent 70%, rgba(255, 255, 255, 0.55) 74%, transparent 78%);
+}
+
+.ref-pin-resize:hover {
+  opacity: 1;
+}
+
+/* ---------- 5. 3D Folded Post-It Margin Sticky Notes ---------- */
+.fb-margin-notes {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.fb-margin-note-pin {
+  --note-bg: #fde067;
+  --note-fold: #d8b525;
+  --note-fold-hi: #fff1a6;
+  --note-ink: rgba(52, 39, 6, 0.58);
+
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  outline: none;
+  pointer-events: auto;
+  cursor: pointer;
+  background: transparent;
+  transform: translate(-50%, -50%) rotate(-3deg);
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.36));
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), filter 0.16s ease;
+}
+
+.fb-margin-note-pin:hover {
+  transform: translate(-50%, calc(-50% - 2px)) rotate(-1deg) scale(1.14);
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.44));
+  z-index: 12;
+}
+
+.fb-margin-note-pin.color-yellow { --note-bg: #fde067; --note-fold: #cfa91b; --note-fold-hi: #fff2aa; --note-ink: rgba(58, 43, 6, 0.55); }
+.fb-margin-note-pin.color-blue   { --note-bg: #7ec4ff; --note-fold: #438fd4; --note-fold-hi: #bce2ff; --note-ink: rgba(11, 41, 74, 0.52); }
+.fb-margin-note-pin.color-mint   { --note-bg: #74dfb1; --note-fold: #3caa7b; --note-fold-hi: #b8f5da; --note-ink: rgba(9, 46, 30, 0.52); }
+.fb-margin-note-pin.color-coral  { --note-bg: #f49589; --note-fold: #ca5c50; --note-fold-hi: #ffc4bd; --note-ink: rgba(62, 16, 11, 0.52); }
+.fb-margin-note-pin.color-violet { --note-bg: #c2aef8; --note-fold: #8d72d6; --note-fold-hi: #e2d8ff; --note-ink: rgba(34, 18, 72, 0.52); }
+
+.margin-pin-sheet {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px 3px 1px 3px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.04) 28%, rgba(0, 0, 0, 0.05) 100%),
+    var(--note-bg);
+}
+
+.margin-pin-sheet::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 5px;
+  top: 7px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--note-ink);
+  box-shadow: 0 4px 0 var(--note-ink), 0 8px 0 var(--note-ink);
+}
+
+.margin-pin-fold {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  background: linear-gradient(135deg, var(--note-fold-hi) 0%, var(--note-fold) 100%);
+  pointer-events: none;
+}
+
+.fb-margin-note-pin.has-snip::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2d6cdf;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.margin-note-hover-card {
+  position: fixed;
+  width: 248px;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px;
+  z-index: 75;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.margin-hover-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #e4e8f0;
+}
+
+.margin-hover-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #fde067;
+}
+
+.margin-hover-dot.color-yellow { background: #fde067; }
+.margin-hover-dot.color-blue   { background: #7ec4ff; }
+.margin-hover-dot.color-mint   { background: #74dfb1; }
+.margin-hover-dot.color-coral  { background: #f49589; }
+.margin-hover-dot.color-violet { background: #c2aef8; }
+
+.margin-hover-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #d6dce6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 150px;
+  overflow: hidden;
+}
+
+.margin-hover-thumb {
+  width: 100%;
+  height: auto;
+  max-height: 140px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.margin-note-popover {
+  position: fixed;
+  width: 290px;
+  max-width: calc(100vw - 24px);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 76;
+}
+
+.margin-note-textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f3f5f8;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.margin-note-textarea:focus {
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.margin-note-snip-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.margin-note-snip-canvas {
+  max-width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #ffffff;
+  margin: 0 auto;
+}
+
+.margin-note-snip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* Drawer Margin Note badge inside Study Notes */
+.hl-note-item-badge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-right: 5px;
+  background: rgba(253, 224, 103, 0.18);
+  color: #fde067;
+}
+
+/* ---------- 6. 3x HD Diagram / Equation Snip Tool ---------- */
+.snip-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 64;
+  background: rgba(6, 8, 12, 0.24);
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.snip-hint-pill {
+  top: 12px;
+  color: #edf2fa;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.snip-shortcut-hint {
+  font-size: 11px;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.snip-selection-box {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 9999px rgba(6, 8, 12, 0.44),
+    inset 0 0 0 1.5px rgba(138, 180, 248, 0.92);
+}
+
+.snip-size-badge {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 22, 28, 0.92);
+  color: #d8e5ff;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.40);
+}
+
+.snip-result-card {
+  position: fixed;
+  width: 380px;
+  max-width: calc(100vw - 28px);
+  padding: 12px;
+  z-index: 78;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.snip-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.snip-status-pill {
+  font-size: 11px;
+  font-weight: 700;
+  color: #93c5fd;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(45, 108, 223, 0.24);
+}
+
+.snip-preview-frame {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 8px;
+  max-height: 240px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.14);
+}
+
+.snip-preview-canvas {
+  max-width: 100%;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  display: block;
+}
+
+.snip-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
