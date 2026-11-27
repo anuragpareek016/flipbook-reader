@@ -119,7 +119,6 @@ const els = {
   stage: document.getElementById('stage'),
   welcomeOverlay: document.getElementById('welcomeOverlay'),
   btnWelcomePick: document.getElementById('btnWelcomePick'),
-  btnBrowseWelcome: document.getElementById('btnBrowseWelcome'),
   welcomeRecentWrap: document.getElementById('welcomeRecentWrap'),
   welcomeRecentList: document.getElementById('welcomeRecentList'),
   loadingOverlay: document.getElementById('loadingOverlay'),
@@ -252,7 +251,6 @@ const els = {
   libraryModal: document.getElementById('libraryModal'),
   btnCloseLibrary: document.getElementById('btnCloseLibrary'),
   btnModalPickPdf: document.getElementById('btnModalPickPdf'),
-  btnModalBrowsePdf: document.getElementById('btnModalBrowsePdf'),
   libraryList: document.getElementById('libraryList'),
   btnAboutApp: document.getElementById('btnAboutApp'),
   menuAboutCard: document.getElementById('menuAboutCard'),
@@ -4129,11 +4127,14 @@ function createRefPinCardElement(pin) {
     }
   };
 
-  const setPinZoom = (nextZoom, anchorClient = null, immediatePaint = false) => {
+  const setPinZoom = (nextZoom, anchorClient = null, immediatePaint = false, { forceRepaint = false } = {}) => {
     const oldW = wrapEl?.offsetWidth || Math.round(Math.max(180, (pin.width || 340) - 20) * (pin.zoom || 1));
     const oldH = wrapEl?.offsetHeight || Math.round(oldW * (pin.aspectRatio || 1.35));
-    const clampedZoom = clamp(Math.round(nextZoom * 100) / 100, 0.75, 4.0);
-    if (Math.abs(clampedZoom - pin.zoom) < 0.001) return;
+    const clampedZoom = clamp(Math.round(nextZoom * 10000) / 10000, 0.75, 4.0);
+    if (Math.abs(clampedZoom - pin.zoom) < 0.0002) {
+      if (forceRepaint && immediatePaint) rerenderCard(true);
+      return;
+    }
     pin.zoom = clampedZoom;
 
     const bodyW = Math.max(180, (pin.width || 340) - 20);
@@ -4169,13 +4170,15 @@ function createRefPinCardElement(pin) {
   const pinController = {
     card,
     pin,
-    setZoom: (z, anchor, immediate = true) => setPinZoom(z, anchor, immediate),
-    resetZoom: () => setPinZoom(1, null, true),
+    setZoom: (z, anchor, immediate = true, opts = undefined) => setPinZoom(z, anchor, immediate, opts),
+    resetZoom: () => setPinZoom(1, null, true, { forceRepaint: true }),
   };
+  card.__pinCtrl = pinController;
 
-  card.addEventListener('pointerenter', () => {
-    activeHoveredPinCtrl = pinController;
-  });
+  const setHoveredPin = () => { activeHoveredPinCtrl = pinController; };
+  card.addEventListener('pointerenter', setHoveredPin);
+  card.addEventListener('pointermove', setHoveredPin, { passive: true });
+  card.addEventListener('pointerdown', setHoveredPin);
   card.addEventListener('pointerleave', () => {
     if (activeHoveredPinCtrl === pinController) activeHoveredPinCtrl = null;
   });
@@ -4212,6 +4215,9 @@ function createRefPinCardElement(pin) {
   });
 
   // Trackpad pinch/Ctrl+Wheel zoom + two-finger pan inside floating reference card
+  let remWheelX = 0;
+  let remWheelY = 0;
+  let wheelRepaintTimer = null;
   card.addEventListener('wheel', (e) => {
     e.stopPropagation();
     if (!bodyEl || pin.collapsed) return;
@@ -4220,14 +4226,30 @@ function createRefPinCardElement(pin) {
       if (!e.deltaY) return;
       const nextZoom = pin.zoom * Math.exp(-e.deltaY * 0.004);
       setPinZoom(nextZoom, { clientX: e.clientX, clientY: e.clientY }, false);
+      clearTimeout(wheelRepaintTimer);
+      wheelRepaintTimer = setTimeout(() => rerenderCard(true), 200);
+      return;
+    }
+    const canScrollX = bodyEl.scrollWidth > bodyEl.clientWidth + 1;
+    const canScrollY = bodyEl.scrollHeight > bodyEl.clientHeight + 1;
+    if (e.isTrusted && (canScrollX || canScrollY) && e.target?.closest?.('.ref-pin-body')) {
+      // Allow WebKit/Blink native compositor 120Hz trackpad momentum panning inside bodyEl
       return;
     }
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? Math.max(120, bodyEl.clientHeight * 0.85) : 1;
-    const dx = (e.deltaX || 0) * unit;
-    const dy = (e.deltaY || 0) * unit;
-    if (dx) bodyEl.scrollLeft += dx;
-    if (dy) bodyEl.scrollTop += dy;
+    remWheelX += (e.deltaX || 0) * unit;
+    remWheelY += (e.deltaY || 0) * unit;
+    const stepX = remWheelX > 0 ? Math.floor(remWheelX) : Math.ceil(remWheelX);
+    const stepY = remWheelY > 0 ? Math.floor(remWheelY) : Math.ceil(remWheelY);
+    if (stepX) {
+      bodyEl.scrollLeft += stepX;
+      remWheelX -= stepX;
+    }
+    if (stepY) {
+      bodyEl.scrollTop += stepY;
+      remWheelY -= stepY;
+    }
   }, { passive: false });
 
   // Two-finger double-click / Smart Zoom inside preview body (replaces single double-click)
@@ -5750,7 +5772,11 @@ async function pickFileViaHost() {
       });
     }
   } catch (err) {
-    showToast(`${err?.message || 'System file picker unavailable'} — click "Browse File" instead.`, { isError: true, durationMs: 4600 });
+    if (els.fileInputHidden) {
+      els.fileInputHidden.click();
+    } else {
+      showToast(`${err?.message || 'System file picker unavailable'}`, { isError: true, durationMs: 4600 });
+    }
   }
 }
 
@@ -9538,8 +9564,6 @@ function wireEvents() {
   // File Pickers & Drag-Drop
   els.btnWelcomePick.addEventListener('click', pickFileViaHost);
   els.btnModalPickPdf.addEventListener('click', pickFileViaHost);
-  els.btnBrowseWelcome?.addEventListener('click', () => els.fileInputHidden?.click());
-  els.btnModalBrowsePdf?.addEventListener('click', () => els.fileInputHidden?.click());
   els.fileInputHidden.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -10176,7 +10200,7 @@ function wireEvents() {
       ? document.elementFromPoint(clientX, clientY)
       : null;
     const pinCard = hitEl?.closest?.('.ref-pin-card');
-    if (pinCard && typeof pinCard.__pinZoomToggle === 'function') {
+    if (pinCard && !pinCard.classList.contains('is-collapsed') && typeof pinCard.__pinZoomToggle === 'function') {
       pinCard.__pinZoomToggle(clientX, clientY);
       return;
     }
@@ -10317,10 +10341,37 @@ function wireEvents() {
   let pinchRafId = null;
   let nativePinchAnchor = null;
   let nativePinchWatchdog = null;
+  let nativePinchPinCtrl = null;
+
+  const resolvePinchTargetPin = (anchor) => {
+    if (anchor && Number.isFinite(anchor.clientX) && Number.isFinite(anchor.clientY)) {
+      const hitEl = document.elementFromPoint(anchor.clientX, anchor.clientY);
+      const hitCard = hitEl?.closest?.('.ref-pin-card');
+      if (hitCard?.__pinCtrl && !hitCard.__pinCtrl.pin?.collapsed) {
+        return hitCard.__pinCtrl;
+      }
+    }
+    if (activeHoveredPinCtrl?.card?.isConnected && !activeHoveredPinCtrl.pin?.collapsed) {
+      return activeHoveredPinCtrl;
+    }
+    return null;
+  };
 
   const commitNativePinch = () => {
     clearTimeout(nativePinchWatchdog);
     nativePinchWatchdog = null;
+    if (nativePinchPinCtrl) {
+      const targetPin = nativePinchPinCtrl;
+      const anchor = nativePinchAnchor;
+      nativePinchPinCtrl = null;
+      nativePinchAnchor = null;
+      state.nativePinchActive = false;
+      state.pinchLockScrollUntil = performance.now() + 180;
+      if (targetPin.card?.isConnected && !targetPin.pin?.collapsed) {
+        targetPin.setZoom(targetPin.pin.zoom, anchor, true, { forceRepaint: true });
+      }
+      return;
+    }
     if (!state.nativePinchActive && !state.scrollPinchPreview) return;
     state.nativePinchActive = false;
     state.pinchLockScrollUntil = performance.now() + 260;
@@ -10344,8 +10395,8 @@ function wireEvents() {
 
     const wasActive = state.nativePinchActive;
     state.nativePinchActive = true;
-    state.pinchLockScrollUntil = performance.now() + 500;
-    if (!wasActive || !nativePinchAnchor) {
+    if (!wasActive) {
+      nativePinchPinCtrl = resolvePinchTargetPin(anchor);
       nativePinchAnchor = anchor;
     } else if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
       nativePinchAnchor = anchor;
@@ -10356,6 +10407,14 @@ function wireEvents() {
     nativePinchWatchdog = setTimeout(commitNativePinch, 850);
 
     const mag = Number.isFinite(magnification) ? clamp(magnification, -0.35, 0.35) : 0;
+    if (nativePinchPinCtrl && nativePinchPinCtrl.card?.isConnected && !nativePinchPinCtrl.pin?.collapsed) {
+      state.pinchLockScrollUntil = performance.now() + 220;
+      const nextPinZoom = nativePinchPinCtrl.pin.zoom * Math.exp(mag);
+      nativePinchPinCtrl.setZoom(nextPinZoom, nativePinchAnchor, false);
+      return;
+    }
+
+    state.pinchLockScrollUntil = performance.now() + 500;
     const nextZoom = clamp(state.zoom * Math.exp(mag), 1, MAX_PAGE_ZOOM);
     setZoom(nextZoom, false, nativePinchAnchor);
     if (state.nativePinchActive) {

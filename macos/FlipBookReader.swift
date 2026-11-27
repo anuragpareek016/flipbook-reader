@@ -402,15 +402,15 @@ final class FlipBookWebView: WKWebView {
         case .ended:
             phaseStr = "ended"
             isNativeMagnifying = false
-            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.14)
         case .cancelled:
             phaseStr = "cancelled"
             isNativeMagnifying = false
-            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.14)
         default:
             phaseStr = "changed"
             isNativeMagnifying = false
-            magnifyLockUntil = max(magnifyLockUntil, now + 0.28)
+            magnifyLockUntil = max(magnifyLockUntil, now + 0.14)
         }
 
         let loc = convert(event.locationInWindow, from: nil)
