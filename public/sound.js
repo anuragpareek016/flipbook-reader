@@ -510,8 +510,49 @@ class AmbientSoundscape {
     this.decodedBuffers = new Map();
     this.loadingPromises = new Map();
     this.activeScene = null;
+    this.htmlAudio = null;
     this.suspendTimer = null;
     this._sceneLoadSeq = 0;
+  }
+
+  _hasNativeBridge() {
+    return typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.flipbook);
+  }
+
+  _postNative(action, payload = {}) {
+    try {
+      const handler = window.webkit?.messageHandlers?.flipbook;
+      if (!handler) return false;
+      handler.postMessage({ action, ...payload });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  _stopHtmlFallback() {
+    if (!this.htmlAudio) return;
+    try {
+      this.htmlAudio.pause();
+      this.htmlAudio.removeAttribute('src');
+      this.htmlAudio.load();
+    } catch {}
+    this.htmlAudio = null;
+  }
+
+  _startHtmlFallback(presetId) {
+    this._stopHtmlFallback();
+    if (!presetId || presetId === 'off') return;
+    try {
+      const el = new Audio(`/api/ambient-sound/${encodeURIComponent(presetId)}.m4a`);
+      el.loop = true;
+      el.preload = 'auto';
+      el.volume = Math.max(0, Math.min(1, this._targetLinearGain()));
+      this.htmlAudio = el;
+      el.play().catch(() => {});
+    } catch {
+      this.htmlAudio = null;
+    }
   }
 
   getPresetInfo(id = this.presetId) {
@@ -659,6 +700,7 @@ class AmbientSoundscape {
   }
 
   _teardownScene(immediate = false) {
+    this._stopHtmlFallback();
     const scene = this.activeScene;
     this.activeScene = null;
     if (!scene) return;
@@ -694,12 +736,19 @@ class AmbientSoundscape {
     const loadSeq = ++this._sceneLoadSeq;
     this._teardownScene(false);
     if (normId === 'off') return;
+    if (this._hasNativeBridge()) {
+      this._postNative('setAmbient', { preset: normId, volume: this.volume });
+      return;
+    }
     const ctx = this._ensureContext();
-    if (!ctx || !this.masterGain) return;
+    if (!ctx || !this.masterGain) {
+      this._startHtmlFallback(normId);
+      return;
+    }
 
     clearTimeout(this.suspendTimer);
     if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+      try { await ctx.resume(); } catch {}
     }
 
     let comfortBuf = null;
@@ -709,6 +758,12 @@ class AmbientSoundscape {
       comfortBuf = null;
     }
     if (loadSeq !== this._sceneLoadSeq || this.presetId !== normId || this.ctx !== ctx) return;
+
+    if (!comfortBuf) {
+      // Fall back to direct HTMLAudioElement stream of the macOS .m4a asset before noise synth
+      this._startHtmlFallback(normId);
+      return;
+    }
 
     const now = ctx.currentTime;
     const sceneGain = ctx.createGain();
@@ -913,6 +968,11 @@ class AmbientSoundscape {
   }
 
   _applyMasterGain() {
+    if (this.htmlAudio) {
+      try {
+        this.htmlAudio.volume = Math.max(0, Math.min(1, this._targetLinearGain()));
+      } catch {}
+    }
     if (!this.ctx || !this.masterGain) return;
     try {
       const now = this.ctx.currentTime;
@@ -927,6 +987,11 @@ class AmbientSoundscape {
     const nextId = normalizeAmbientPresetId(id);
     const prevId = this.presetId;
     this.presetId = nextId;
+    if (this._hasNativeBridge()) {
+      this._teardownScene(true);
+      this._postNative('setAmbient', { preset: nextId, volume: this.volume });
+      return;
+    }
     if (nextId === 'off') {
       this._sceneLoadSeq++;
       this._applyMasterGain();
@@ -939,7 +1004,7 @@ class AmbientSoundscape {
       }, 220);
       return;
     }
-    if (!this.activeScene || prevId !== nextId) {
+    if (!this.activeScene && !this.htmlAudio || prevId !== nextId) {
       this._startScene(nextId);
     } else {
       this._applyMasterGain();
@@ -949,13 +1014,23 @@ class AmbientSoundscape {
   setVolume(vol) {
     const v = Math.max(0, Math.min(100, Math.round(Number(vol) || 0)));
     this.volume = v;
+    if (this._hasNativeBridge()) {
+      this._postNative('setAmbientVolume', { volume: v });
+      return;
+    }
     this._applyMasterGain();
   }
 
   unlock() {
     if (this.presetId === 'off') return;
-    if (!this.activeScene) {
+    if (this._hasNativeBridge()) {
+      this._postNative('setAmbient', { preset: this.presetId, volume: this.volume });
+      return;
+    }
+    if (!this.activeScene && !this.htmlAudio) {
       this._startScene(this.presetId);
+    } else if (this.htmlAudio && this.htmlAudio.paused) {
+      this.htmlAudio.play().catch(() => {});
     } else if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }

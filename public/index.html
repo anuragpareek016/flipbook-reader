@@ -502,8 +502,10 @@
           <span>Background Sounds (macOS)</span>
           <span class="menu-val" id="valAmbientSound">Off</span>
         </div>
-        <div class="sound-pills ambient-sound-pills" id="ambientPresetPills" role="radiogroup" aria-label="macOS Background Sounds">
-          <button type="button" class="sound-pill active" data-ambient="off">Off</button>
+        <div class="ambient-select-wrap">
+          <select id="ambientPresetSelect" class="ambient-sound-select" aria-label="macOS Background Sounds">
+            <option value="off">Off</option>
+          </select>
         </div>
         <div class="auto-control-row menu-paper-row menu-ambient-vol-row is-dimmed" id="ambientVolRow">
           <button type="button" class="auto-step-btn" id="btnAmbientVolDec" title="Quieter ambience (−)" aria-label="Decrease ambient volume">−</button>

@@ -799,13 +799,19 @@ body.is-flip-dragging .fb-page .textLayer {
   -webkit-user-select: none;
 }
 
-.fb-page canvas.fb-canvas {
+.fb-page canvas.fb-canvas,
+.fb-page canvas.fb-thumb-preview {
   position: absolute;
   inset: 0;
   width: 100% !important;
   height: 100% !important;
   display: block;
   pointer-events: none;
+}
+
+.fb-page canvas.fb-thumb-preview {
+  filter: blur(0.4px);
+  opacity: 0.94;
 }
 
 .fb-page-num-placeholder {
@@ -867,7 +873,7 @@ body.is-selecting-text .side-nav {
 
 .fb-hl-box {
   position: absolute;
-  border-radius: 2px;
+  border-radius: 5px;
 }
 
 .fb-hl-box.color-yellow { background: rgba(255, 224, 51, 0.56); }
@@ -886,7 +892,7 @@ body.is-selecting-text .side-nav {
 .fb-search-box {
   position: absolute;
   background: rgba(255, 224, 51, 0.48);
-  border-radius: 2px;
+  border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(255, 196, 0, 0.65);
 }
 
@@ -1143,6 +1149,10 @@ body.footer-hidden .bottom-bar {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.more-menu > * {
+  flex-shrink: 0;
 }
 
 .menu-item {
@@ -2681,7 +2691,13 @@ body.read-dark .fh-side-tabs {
   background: transparent;
 }
 
+body.read-dark .fb-page,
+body.read-dark .fb-page-inner {
+  background: #1b1c22;
+}
+
 body.read-dark .fb-page canvas.fb-canvas,
+body.read-dark .fb-page canvas.fb-thumb-preview,
 body.read-dark .fh-snap-canvas {
   filter: invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98);
 }
@@ -2793,7 +2809,7 @@ body.read-dark .fh-unfurl-sheen {
   position: absolute;
   top: 54px;
   left: 18px;
-  z-index: 36;
+  z-index: 38;
   padding: 0;
   border: none;
   background: transparent;
@@ -4196,17 +4212,42 @@ body.read-dark .focus-curtain-band.has-guides {
 }
 
 /* ---------- 9. macOS Background Sounds Controls ---------- */
-.ambient-sound-pills {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-height: 174px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  padding: 4px 5px 6px;
+.ambient-select-wrap {
+  position: relative;
+  width: 100%;
 }
 
-.ambient-sound-pills .sound-pill {
-  padding: 5px 8px;
-  font-size: 11px;
+.ambient-sound-select {
+  width: 100%;
+  height: 32px;
+  padding: 0 30px 0 12px;
+  border-radius: 999px;
+  border: none;
+  background-color: #13161f;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23bfc9ff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  box-shadow: var(--neu-inset);
+  color: #eef1f7;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.ambient-sound-select:hover,
+.ambient-sound-select:focus {
+  background-color: #171b27;
+  color: #ffffff;
+}
+
+.ambient-sound-select option {
+  background: #1b1e2b;
+  color: #eef1f7;
 }
 
 .menu-ambient-vol-row.is-dimmed {

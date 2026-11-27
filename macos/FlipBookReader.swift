@@ -200,6 +200,120 @@ final class NativeFlipSoundEngine {
     }
 }
 
+/// Native AVAudioPlayer ambient soundscape engine playing macOS ComfortSounds natively with seamless looping.
+final class NativeAmbientSoundEngine {
+    private let comfortDir = URL(fileURLWithPath: "/System/Library/PrivateFrameworks/HearingUtilities.framework/Resources", isDirectory: true)
+    private let allowedPresets: Set<String> = [
+        "Rain", "RainOnRoof", "Stream", "Ocean", "Fire", "Night", "QuietNight",
+        "Steam", "BrownNoise", "PinkNoise", "WhiteNoise", "Train", "Airplane",
+        "Boat", "Bus", "Babble"
+    ]
+    private let audioQueue = DispatchQueue(label: "dev.openfrontierlabs.flipbook.ambient", qos: .userInitiated)
+    private var currentPreset: String = "off"
+    private var targetVolume: Float = 0.0
+    private var player: AVAudioPlayer?
+
+    init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSystemWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        player?.stop()
+    }
+
+    @objc private func handleSystemWake(_ note: Notification) {
+        audioQueue.async { [weak self] in
+            guard let self, self.currentPreset != "off", let p = self.player else { return }
+            if !p.isPlaying {
+                p.prepareToPlay()
+                p.play()
+                p.volume = self.linearGain(self.targetVolume)
+            }
+        }
+    }
+
+    private func linearGain(_ volPercent: Float) -> Float {
+        let clamped = max(0.0, min(100.0, volPercent))
+        if clamped <= 0 { return 0 }
+        return pow(clamped / 100.0, 1.35) * 0.88
+    }
+
+    func setAmbient(preset: String, volume: Float) {
+        let norm = allowedPresets.contains(preset) ? preset : "off"
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            self.targetVolume = max(0.0, min(100.0, volume))
+            let gain = self.linearGain(self.targetVolume)
+
+            if norm == "off" {
+                self.currentPreset = "off"
+                if let existing = self.player {
+                    existing.setVolume(0, fadeDuration: 0.14)
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.16) { [weak self] in
+                        self?.audioQueue.async {
+                            guard let self, self.currentPreset == "off" else { return }
+                            self.player?.stop()
+                            self.player = nil
+                        }
+                    }
+                }
+                return
+            }
+
+            if self.currentPreset == norm, let existing = self.player {
+                if !existing.isPlaying {
+                    existing.prepareToPlay()
+                    existing.play()
+                }
+                existing.setVolume(gain, fadeDuration: 0.08)
+                return
+            }
+
+            self.currentPreset = norm
+            self.player?.stop()
+            self.player = nil
+
+            let url = self.comfortDir.appendingPathComponent("\(norm).m4a")
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let nextPlayer = try? AVAudioPlayer(contentsOf: url) else {
+                return
+            }
+            nextPlayer.numberOfLoops = -1
+            nextPlayer.volume = 0
+            nextPlayer.prepareToPlay()
+            if nextPlayer.play() {
+                nextPlayer.setVolume(gain, fadeDuration: 0.18)
+                self.player = nextPlayer
+            }
+        }
+    }
+
+    func setVolume(_ volume: Float) {
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            self.targetVolume = max(0.0, min(100.0, volume))
+            guard self.currentPreset != "off", let p = self.player else { return }
+            p.setVolume(self.linearGain(self.targetVolume), fadeDuration: 0.06)
+        }
+    }
+}
+
+/// Subclassed WKWebView forwarding macOS trackpad two-finger double-tap (Smart Zoom) cleanly into FlipBook JS.
+final class FlipBookWebView: WKWebView {
+    override func smartMagnify(with event: NSEvent) {
+        let loc = convert(event.locationInWindow, from: nil)
+        let y = isFlipped ? loc.y : (bounds.height - loc.y)
+        let js = "window.__flipbookHandleTwoFingerZoom && window.__flipbookHandleTwoFingerZoom(\(Double(loc.x)), \(Double(y)));"
+        evaluateJavaScript(js, completionHandler: nil)
+    }
+}
+
 final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -209,6 +323,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private var isWebLoaded = false
     private var appActivity: NSObjectProtocol?
     private var soundEngine: NativeFlipSoundEngine?
+    private var ambientEngine: NativeAmbientSoundEngine?
 
     private let devRoot = ProcessInfo.processInfo.environment["DEVELOPER_ROOT"] ?? "/Users/openfrontierlabs/Developer"
 
@@ -221,6 +336,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         soundEngine = NativeFlipSoundEngine(
             publicDir: URL(fileURLWithPath: "\(devRoot)/opt/flipbook-reader/public", isDirectory: true)
         )
+        ambientEngine = NativeAmbientSoundEngine()
         setupMainMenu()
         setupWindow()
         collectCliFiles()
@@ -288,7 +404,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         config.mediaTypesRequiringUserActionForPlayback = []
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
-        webView = WKWebView(frame: rect, configuration: config)
+        webView = FlipBookWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsBackForwardNavigationGestures = false
@@ -519,6 +635,13 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         } else if action == "prepareSound" {
             let preset = dict["preset"] as? String
             soundEngine?.prepare(presetId: preset)
+        } else if action == "setAmbient" {
+            let preset = (dict["preset"] as? String) ?? "off"
+            let volume = (dict["volume"] as? NSNumber)?.floatValue ?? 30.0
+            ambientEngine?.setAmbient(preset: preset, volume: volume)
+        } else if action == "setAmbientVolume" {
+            let volume = (dict["volume"] as? NSNumber)?.floatValue ?? 30.0
+            ambientEngine?.setVolume(volume)
         }
     }
 
