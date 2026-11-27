@@ -192,6 +192,19 @@ function canUseCanvasDarkFilter() {
   return canvasFilterDarkSupported;
 }
 
+export function isCanvasDarkFilterSupported() {
+  return canUseCanvasDarkFilter();
+}
+
+export function getCachedDarkCanvas(srcCanvas) {
+  if (!srcCanvas || srcCanvas.width <= 0 || srcCanvas.height <= 0) return null;
+  const cached = darkBakedCanvasCache.get(srcCanvas);
+  if (cached && cached.width === srcCanvas.width && cached.height === srcCanvas.height) {
+    return cached;
+  }
+  return null;
+}
+
 /** Apply CSS-equivalent dark inversion (invert 0.90 hue-rotate 180deg contrast 0.93 brightness 0.98) directly to pixels. */
 export function bakeDarkCanvasInPlace(canvas) {
   if (!canvas || canvas.width <= 0 || canvas.height <= 0) return canvas;
@@ -291,18 +304,20 @@ function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = fa
     const snapCtx = snap.getContext('2d', { alpha: false });
     if (snapCtx) {
       if (darkMode) {
-        const cachedDark = darkBakedCanvasCache.get(srcCanvas);
-        if (cachedDark && cachedDark.width === srcCanvas.width && cachedDark.height === srcCanvas.height) {
+        const cachedDark = getCachedDarkCanvas(srcCanvas);
+        if (cachedDark) {
           snapCtx.drawImage(cachedDark, 0, 0, snap.width, snap.height);
+          snap.dataset.darkBaked = '1';
         } else if (canUseCanvasDarkFilter()) {
           snapCtx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
           snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
           snapCtx.filter = 'none';
+          snap.dataset.darkBaked = '1';
         } else {
+          // On WebKit/WKWebView where CanvasRenderingContext2D.filter is unavailable, skip slow CPU
+          // getImageData/putImageData loops during flips and let CSS GPU filter style .fh-snap-canvas.
           snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
-          bakeDarkCanvasInPlace(snap);
         }
-        snap.dataset.darkBaked = '1';
       } else {
         snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
       }
@@ -1073,7 +1088,41 @@ export class FlipBookEngine {
     fromHasSpine = !this.single,
     toHasSpine = !this.single,
     singlePrev = false,
+    hiddenSheet = false,
   }) {
+    if (singlePrev && hiddenSheet) {
+      return {
+        isHard: false,
+        singlePrev: true,
+        hiddenSheet: true,
+        seq,
+        underEl: null,
+        underIdx,
+        fromIdx,
+        toIdx,
+        fromHasSpine: !!fromHasSpine,
+        toHasSpine: !!toHasSpine,
+        underSpine: false,
+        upSpine: null,
+        castBounds: null,
+        castMask: null,
+        castGradient: null,
+        flapDropBounds: null,
+        flapDropMask: null,
+        flapCaster: null,
+        downMask: null,
+        downSide: null,
+        downTabs: null,
+        upMask: null,
+        upSide: null,
+        upTabs: null,
+        underShadow: null,
+        frontHighlight: null,
+        backShade: null,
+        els: [],
+      };
+    }
+
     const els = [];
     let underEl = null;
 
@@ -1484,6 +1533,10 @@ export class FlipBookEngine {
   }
 
   _applySinglePrevFrame(f, coord) {
+    if (f.hiddenSheet || !f.downMask) {
+      f.frameGeom = { kind: 'singlePrevHidden', layerOpacity: 0, underShadowOpacity: 0 };
+      return;
+    }
     const cx = clamp(coord.x, 0, this.pageW);
     const t = clamp(cx / Math.max(1, this.pageW), 0, 1);
 
@@ -1707,11 +1760,11 @@ export class FlipBookEngine {
           clientY: f.lastClientY || 0,
         });
       } else if (f.mode === 'animate') {
-        if (!f.reversed && travel >= 0.34 && !f.singleNextLiftFired) {
+        if (!f.reversed && travel >= 0.28 && !f.singleNextLiftFired) {
           f.singleNextLiftFired = true;
           this._emit('nextLiftStart', { fromIdx: f.fromIdx, toIdx: f.toIdx });
         }
-        layerOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.34) / 0.08, 0, 1);
+        layerOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.28) / 0.09, 0, 1);
         f.downMask.style.opacity = String(layerOpacity);
         f.upMask.style.opacity = String(layerOpacity);
         if (f.downTabs) f.downTabs.style.opacity = String(layerOpacity);
@@ -2201,11 +2254,14 @@ export class FlipBookEngine {
       fromHasSpine,
       toHasSpine,
       singlePrev,
+      hiddenSheet: stackBackedPrev,
     });
 
     const baseDuration = stackBackedPrev
-      ? (isCascading ? 320 : 415)
-      : (isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime);
+      ? (isCascading ? 200 : 260)
+      : stackBackedNext
+        ? (isCascading ? 205 : 255)
+        : (isCascading ? Math.max(200, this.settings.flippingTime * 0.85) : this.settings.flippingTime);
     const baseRate = 1 / baseDuration;
 
     const flipObj = {
@@ -2276,8 +2332,9 @@ export class FlipBookEngine {
       fromHasSpine: false,
       toHasSpine: true,
       singlePrev: true,
+      hiddenSheet: true,
     });
-    const safeDur = Math.max(120, dur);
+    const safeDur = Math.max(120, Math.min(dur, 250));
     const flipObj = {
       ...dom,
       side: 'left',

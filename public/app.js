@@ -1,6 +1,6 @@
 import * as pdfjsLib from '/vendor/pdfjs/build/pdf.min.mjs';
 import { flipSound, ambientSound, DEFAULT_SOUND_PRESET, AMBIENT_PRESETS, normalizeAmbientPresetId } from '/assets/sound.js';
-import { FlipBookEngine, bakeDarkCanvasInPlace, getBakedDarkCanvas } from '/assets/flip-engine.js';
+import { FlipBookEngine, bakeDarkCanvasInPlace, getBakedDarkCanvas, getCachedDarkCanvas, isCanvasDarkFilterSupported } from '/assets/flip-engine.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
 
@@ -1130,7 +1130,7 @@ function initPageFlip(startIndex = 0) {
         clearSingleFlights();
       } else if (nextIdx > fromIdx && !e.data?.fromDragLift) {
         if (canShowSingleCollectedStack(fromIdx)) {
-          singleStackMeta.pendingNextFlight = { fromIdx, toIdx: nextIdx };
+          singleStackMeta.pendingNextFlights.set(fromIdx, { fromIdx, toIdx: nextIdx });
           skipSingleStackSwap = true;
         } else {
           clearSingleFlights();
@@ -1167,10 +1167,10 @@ function initPageFlip(startIndex = 0) {
   });
 
   pf.on('nextLiftStart', (e) => {
-    const p = singleStackMeta.pendingNextFlight;
+    const fIdx = e.data?.fromIdx;
+    const p = Number.isInteger(fIdx) ? singleStackMeta.pendingNextFlights.get(fIdx) : null;
     if (!p) return;
-    if (Number.isFinite(e.data?.fromIdx) && e.data.fromIdx !== p.fromIdx) return;
-    singleStackMeta.pendingNextFlight = null;
+    singleStackMeta.pendingNextFlights.delete(fIdx);
     spawnSingleCollectedFlight({ fromIdx: p.fromIdx, toIdx: p.toIdx, fromPeelRelay: true });
   });
 
@@ -1181,7 +1181,7 @@ function initPageFlip(startIndex = 0) {
   pf.on('flip', (e) => {
     const nextIdx = clamp(e.data, 0, state.totalPages - 1);
     state.currentIndex = nextIdx;
-    singleStackMeta.pendingNextFlight = null;
+    singleStackMeta.pendingNextFlights.clear();
     onSpreadChanged(true, 6, { skipSingleStackSwap: singleStackMeta.activeFlights > 0 });
   });
 
@@ -1206,7 +1206,9 @@ function initPageFlip(startIndex = 0) {
     if (e.data === 'read') {
       updateCenterShift();
       updateBookDepthChrome();
-      queueNearbyRenders(state.currentIndex, state.committedZoom > 1.05 ? 1 : 6);
+      if (singleStackMeta.activeFlights === 0) {
+        queueNearbyRenders(state.currentIndex, state.committedZoom > 1.05 ? 1 : 6);
+      }
     }
   });
 
@@ -1526,9 +1528,9 @@ async function renderPageNode(idx, { withText = true } = {}) {
       state.pageFlip?.refreshPendingSnapshots?.();
       if (state.magEnabled) scheduleMagnifierRedraw();
 
-      if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05) {
+      if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05 && isCanvasDarkFilterSupported()) {
         setTimeout(() => {
-          if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05 && canvas.width > 0) {
+          if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05 && canvas.width > 0 && !isFlipAnimationBusy()) {
             getBakedDarkCanvas(canvas);
           }
         }, 40);
@@ -1621,9 +1623,17 @@ function isPageCanvasReadyAtCurrentZoom(idx) {
   );
 }
 
+function isFlipAnimationBusy() {
+  return Boolean(
+    state.isFlipping ||
+    singleStackMeta.activeFlights > 0 ||
+    singleStackMeta.pendingNextFlights.size > 0
+  );
+}
+
 function pumpNearbyRenders() {
   nearbyPrefetchState.scheduled = false;
-  if (!state.pdfDoc || !state.totalPages) return;
+  if (!state.pdfDoc || !state.totalPages || isFlipAnimationBusy() || state.isScrollingActive) return;
   const centerIdx = state.currentIndex;
   const maxConc = state.committedZoom > 1.2 ? 1 : 2;
   if (nearbyPrefetchState.inFlight.size >= maxConc) return;
@@ -1646,15 +1656,15 @@ function pumpNearbyRenders() {
     nearbyPrefetchState.inFlight.add(idx);
     renderPageNode(idx, { withText: false }).finally(() => {
       nearbyPrefetchState.inFlight.delete(idx);
-      if (!nearbyPrefetchState.scheduled) {
+      if (!nearbyPrefetchState.scheduled && !isFlipAnimationBusy()) {
         nearbyPrefetchState.scheduled = true;
-        setTimeout(pumpNearbyRenders, 8);
+        setTimeout(pumpNearbyRenders, 12);
       }
     });
   }
 
   // After all lookahead canvases are warm and flip has settled, ensure TextLayer on immediate ±1 neighbors
-  if (nearbyPrefetchState.inFlight.size === 0 && !state.isFlipping) {
+  if (nearbyPrefetchState.inFlight.size === 0 && !isFlipAnimationBusy()) {
     for (const nIdx of [centerIdx + dir, centerIdx - dir]) {
       if (nIdx < 0 || nIdx >= state.totalPages) continue;
       const rec = state.renderedMap.get(nIdx);
@@ -1667,19 +1677,27 @@ function pumpNearbyRenders() {
 
 function queueNearbyRenders(centerIdx, radius = 8, { withText = true } = {}) {
   clearTimeout(state.nearbyRenderTimer);
+  const busyAnimating = isFlipAnimationBusy();
   const visible = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx);
   const immediate = [...visible];
   for (const flipIdx of getActiveFlipPageIndices()) {
     if (!immediate.includes(flipIdx)) immediate.push(flipIdx);
   }
-  const allowText = withText && !state.isFlipping && !state.isScrollingActive;
+  const allowText = withText && !busyAnimating && !state.isScrollingActive;
   const maxImmediate = state.isScrollingActive ? Math.min(3, immediate.length) : immediate.length;
   for (let k = 0; k < maxImmediate; k++) {
     const idx = immediate[k];
+    // Never interrupt an active flip with text-layer DOM hydration if the canvas is already warm
+    if (busyAnimating && isPageCanvasReadyAtCurrentZoom(idx)) continue;
     renderPageNode(idx, { withText: allowText && visible.includes(idx) });
   }
 
-  // Immediately pre-warm the very next page in flip direction without waiting so fast taps stay instant
+  if (busyAnimating) {
+    // Defer neighbor lookahead & text layers cleanly until flip + single-stack flight settle
+    return;
+  }
+
+  // Pre-warm immediate next pages once settled so rapid taps stay crisp
   if (state.committedZoom <= 1.25 && !state.isScrollingActive && !state.scrollPinchPreview) {
     const dir = state.lastNavDir >= 0 ? 1 : -1;
     for (const ahead of [centerIdx + dir, centerIdx + dir * 2]) {
@@ -1691,7 +1709,7 @@ function queueNearbyRenders(centerIdx, radius = 8, { withText = true } = {}) {
 
   if (radius > 0 && !state.isScrollingActive && !nearbyPrefetchState.scheduled) {
     nearbyPrefetchState.scheduled = true;
-    setTimeout(pumpNearbyRenders, state.committedZoom > 1.2 ? 28 : 12);
+    setTimeout(pumpNearbyRenders, state.committedZoom > 1.2 ? 28 : 16);
   }
 }
 
@@ -1846,7 +1864,7 @@ const singleStackMeta = {
   renderedIdx: null,
   renderToken: 0,
   activeFlights: 0,
-  pendingNextFlight: null,
+  pendingNextFlights: new Map(),
   dragCard: null,
   dragPose: null,
 };
@@ -1867,7 +1885,7 @@ function clearSingleDragCard() {
 function clearSingleFlights() {
   clearSingleDragCard();
   singleStackMeta.activeFlights = 0;
-  singleStackMeta.pendingNextFlight = null;
+  singleStackMeta.pendingNextFlights.clear();
   if (els.singleFlightLayer) {
     els.singleFlightLayer.innerHTML = '';
   }
@@ -1899,10 +1917,22 @@ function createFlightSnapshotCanvas(pageIdx, targetW, targetH, className) {
   mini.height = Math.max(2, Math.round(targetH));
   if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
     const ctx = mini.getContext('2d', { alpha: false });
-    ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
     if (state.readDark) {
-      bakeDarkCanvasInPlace(mini);
-      mini.dataset.darkBaked = '1';
+      const cachedDark = getCachedDarkCanvas(srcCanvas);
+      if (cachedDark) {
+        ctx.drawImage(cachedDark, 0, 0, mini.width, mini.height);
+        mini.dataset.darkBaked = '1';
+      } else if (isCanvasDarkFilterSupported()) {
+        ctx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+        ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
+        ctx.filter = 'none';
+        mini.dataset.darkBaked = '1';
+      } else {
+        // Avoid CPU pixel loops during active page flights; CSS GPU filter renders dark mode instantaneously
+        ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
+      }
+    } else {
+      ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
     }
     return mini;
   }
@@ -1975,7 +2005,7 @@ function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return pdfPage.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
       if (singleStackMeta.renderToken !== token || singleStackMeta.renderedIdx !== pageIdx) return;
-      if (state.readDark) {
+      if (state.readDark && isCanvasDarkFilterSupported()) {
         bakeDarkCanvasInPlace(canvas);
         canvas.dataset.darkBaked = '1';
       }
@@ -1990,7 +2020,7 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
   if (!els.singleCollectedStack) return;
   const collectedIdx = state.currentIndex - 1;
   if (!canShowSingleCollectedStack(collectedIdx)) {
-    if (!singleStackMeta.activeFlights && !singleStackMeta.pendingNextFlight) {
+    if (!singleStackMeta.activeFlights && !singleStackMeta.pendingNextFlights.size) {
       els.singleCollectedStack.hidden = true;
       els.singleCollectedStack.classList.remove('is-waiting');
     }
@@ -2001,7 +2031,7 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
   els.singleCollectedStack.style.width = `${w}px`;
   els.singleCollectedStack.style.height = `${h}px`;
   els.singleCollectedStack.hidden = false;
-  if (!skipSwap && singleStackMeta.activeFlights === 0 && !singleStackMeta.pendingNextFlight) {
+  if (!skipSwap && singleStackMeta.activeFlights === 0 && !singleStackMeta.pendingNextFlights.size) {
     els.singleCollectedStack.classList.remove('is-waiting');
     paintSingleStackTopCard(collectedIdx);
   }
@@ -2140,31 +2170,31 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   if (!canShowSingleCollectedStack(checkIdx)) return false;
 
   const { w, h } = getSingleStackMetrics();
+  els.singleCollectedStack.style.width = `${w}px`;
+  els.singleCollectedStack.style.height = `${h}px`;
+  els.singleCollectedStack.hidden = false;
+
+  // Read layout bounds BEFORE mutating stack contents to prevent forced synchronous reflows mid-flight
   const stageRect = els.stage.getBoundingClientRect();
   const bookRect = els.bookContainer.getBoundingClientRect();
   if (!stageRect.width || !bookRect.width || !bookRect.height) return false;
+  const { srcX, srcY, dstX, dstY, sx, sy, stackW, stackH } = getSingleStackCenterCoords(bookRect, stageRect);
+  if (!stackW || !stackH) return false;
 
-  // Ensure destination stack has layout rect without flashing empty on Page 1->2 before arrival
-  els.singleCollectedStack.style.width = `${w}px`;
-  els.singleCollectedStack.style.height = `${h}px`;
   if (goingNext) {
     if (fromIdx === 0) {
       els.singleCollectedStack.classList.add('is-waiting');
     } else {
       paintSingleStackTopCard(fromIdx - 1);
     }
-    els.singleCollectedStack.hidden = false;
   } else {
     // Lifting toIdx back off the top-left stack immediately reveals toIdx - 1 underneath
     if (toIdx - 1 >= 0) {
       paintSingleStackTopCard(toIdx - 1);
-      els.singleCollectedStack.hidden = false;
     } else {
       els.singleCollectedStack.classList.add('is-waiting');
     }
   }
-
-  if (!els.singleCollectedStack.offsetWidth || !els.singleCollectedStack.offsetHeight) return false;
 
   // Cap concurrent rapid flights so spamming arrows stays 60fps
   while (els.singleFlightLayer.children.length >= 3) {
@@ -2204,64 +2234,66 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   els.singleFlightLayer.appendChild(card);
   renderBookEdgeTabs();
 
-  const { srcX, srcY, dstX, dstY, sx, sy } = getSingleStackCenterCoords(bookRect, stageRect);
-  const midX = (srcX + dstX) / 2 - 22;
-  const midY = (srcY + dstY) * 0.5 - 12;
   const midScale = (1 + sx) * 0.52;
-
   singleStackMeta.activeFlights += 1;
 
   let keyframes;
   let duration;
+  let easing = 'cubic-bezier(0.22, 0.86, 0.36, 1)';
   if (goingNext && dragPose) {
     const mx = (dragPose.x + dstX) * 0.5 - 10;
     const my = (dragPose.y + dstY) * 0.5 - 8;
     const ms = (dragPose.scale + sx) * 0.5;
     keyframes = [
       { transform: dragPose.transform, opacity: Math.max(0.92, dragPose.opacity), offset: 0 },
-      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-12deg) rotateZ(-2.5deg) scale(${ms})`, opacity: 0.99, offset: 0.5 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-12deg) rotateZ(-2.5deg) scale(${ms})`, opacity: 0.99, offset: 0.48 },
       { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
     ];
-    duration = 270;
+    duration = 250;
   } else if (!goingNext && dragPose) {
     const mx = (dragPose.x + srcX) * 0.5 - 6;
     const my = (dragPose.y + srcY) * 0.5 - 8;
     const ms = (dragPose.scale + 1) * 0.5;
     keyframes = [
       { transform: dragPose.transform, opacity: 1, offset: 0 },
-      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(14deg) rotateX(2deg) rotateZ(1deg) scale(${ms})`, opacity: 1, offset: 0.52 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(12deg) rotateX(2deg) rotateZ(1deg) scale(${ms})`, opacity: 1, offset: 0.48 },
+      { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
+    ];
+    duration = 255;
+  } else if (goingNext && fromPeelRelay) {
+    const mx = srcX + (dstX - srcX) * 0.48 - 14;
+    const my = srcY + (dstY - srcY) * 0.44 - 10;
+    keyframes = [
+      { transform: `translate3d(${srcX - 10}px, ${srcY - 4}px, 0) rotateY(-12deg) rotateZ(-1.8deg) scale(0.94)`, opacity: 0.88, offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-18deg) rotateZ(-3.2deg) scale(${(0.94 + sx) * 0.52})`, opacity: 0.98, offset: 0.46 },
+      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+    ];
+    duration = 260;
+    easing = 'cubic-bezier(0.25, 0.72, 0.36, 1)';
+  } else if (goingNext) {
+    const mx = (srcX + dstX) * 0.5 - 16;
+    const my = (srcY + dstY) * 0.48 - 10;
+    keyframes = [
+      { transform: `translate3d(${srcX - 14}px, ${srcY - 4}px, 0) rotateY(-14deg) rotateZ(-2deg) scale(0.92)`, opacity: 0.94, offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-18deg) rotateZ(-3.5deg) scale(${midScale})`, opacity: 0.99, offset: 0.46 },
+      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+    ];
+    duration = 265;
+  } else {
+    // Single continuous glide from top-left stack cleanly back onto the reader (zero mid-air pause)
+    const mx = dstX + (srcX - dstX) * 0.52 - 8;
+    const my = dstY + (srcY - dstY) * 0.48 - 10;
+    keyframes = [
+      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(15deg) rotateX(3deg) rotateZ(1.5deg) scale(${midScale})`, opacity: 1, offset: 0.46 },
       { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
     ];
     duration = 285;
-  } else if (goingNext && fromPeelRelay) {
-    const mx = (srcX + dstX) * 0.46 - 20;
-    const my = (srcY + dstY) * 0.5 - 12;
-    keyframes = [
-      { transform: `translate3d(${srcX - 24}px, ${srcY - 6}px, 0) rotateY(-20deg) rotateZ(-2.5deg) scale(0.88)`, opacity: 0.18, offset: 0 },
-      { transform: `translate3d(${srcX - 42}px, ${srcY - 14}px, 0) rotateY(-22deg) rotateZ(-3.5deg) scale(0.81)`, opacity: 0.98, offset: 0.14 },
-      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.99, offset: 0.48 },
-      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
-    ];
-    duration = 310;
-  } else {
-    keyframes = goingNext
-      ? [
-          { transform: `translate3d(${srcX - 28}px, ${srcY - 6}px, 0) rotateY(-20deg) rotateZ(-3deg) scale(0.86)`, opacity: 0.94, offset: 0 },
-          { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.99, offset: 0.46 },
-          { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
-        ]
-      : [
-          { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
-          { transform: `translate3d(${(dstX + srcX) * 0.40}px, ${midY}px, 0) rotateY(24deg) rotateX(6deg) rotateZ(4deg) scale(${midScale})`, opacity: 1, offset: 0.34 },
-          { transform: `translate3d(${srcX - 10}px, ${srcY - 4}px, 0) rotateY(15deg) rotateX(2deg) rotateZ(1deg) scale(0.95)`, opacity: 1, offset: 0.72 },
-          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
-        ];
-    duration = goingNext ? 340 : 430;
   }
 
   const anim = card.animate(keyframes, {
     duration,
-    easing: 'cubic-bezier(0.25, 0.80, 0.35, 1)',
+    easing,
     fill: 'forwards',
   });
 
@@ -2270,8 +2302,13 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
     card.remove();
     if (singleStackMeta.activeFlights === 0) {
       updateSingleCollectedStack();
+      renderBookEdgeTabs();
+      if (!isFlipAnimationBusy() && state.pdfDoc && state.scrollMode === 'flip') {
+        queueNearbyRenders(state.currentIndex, state.committedZoom > 1.05 ? 1 : 6);
+      }
+    } else {
+      renderBookEdgeTabs();
     }
-    renderBookEdgeTabs();
     requestAnimationFrame(() => {
       if (state.magEnabled) scheduleMagnifierRedraw();
     });
@@ -8177,7 +8214,7 @@ function setReadDark(enabled, persist = true) {
   if (Number.isInteger(singleStackMeta.renderedIdx) && els.singleCollectedStack && !els.singleCollectedStack.hidden) {
     paintSingleStackTopCard(singleStackMeta.renderedIdx, { force: true });
   }
-  if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05) {
+  if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05 && isCanvasDarkFilterSupported()) {
     requestAnimationFrame(() => {
       for (const i of getVisibleIndices()) {
         const c = state.pageNodes[i]?.querySelector('canvas.fb-canvas');
