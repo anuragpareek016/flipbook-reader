@@ -5,7 +5,6 @@ import { FlipBookEngine } from '/assets/flip-engine.js';
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
 
 const MAX_CACHED_CANVASES = 18;
-const ZOOM_STEPS = [1, 1.25, 1.5, 2, 2.5, 3];
 const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 
 const els = {
@@ -133,7 +132,6 @@ const els = {
   libraryList: document.getElementById('libraryList'),
 
   btnMore: document.getElementById('btnMore'),
-  btnZoom: document.getElementById('btnZoom'),
   btnSearch: document.getElementById('btnSearch'),
   btnThumbs: document.getElementById('btnThumbs'),
   pageInput: document.getElementById('pageInput'),
@@ -144,9 +142,7 @@ const els = {
   iconSoundOff: document.getElementById('iconSoundOff'),
   valSoundPreset: document.getElementById('valSoundPreset'),
   soundPresetPills: document.getElementById('soundPresetPills'),
-  btnLibrary: document.getElementById('btnLibrary'),
   btnFullscreen: document.getElementById('btnFullscreen'),
-  btnDrawer: document.getElementById('btnDrawer'),
   fileInputHidden: document.getElementById('fileInputHidden'),
 };
 
@@ -1703,15 +1699,6 @@ function getStageZoomAnchor() {
   return p;
 }
 
-function cycleZoom() {
-  if (state.zoom >= 2) {
-    setZoom(1, true);
-  } else {
-    const next = ZOOM_STEPS.find((s) => s > state.zoom + 0.05) || 1.75;
-    setZoom(next, true);
-  }
-}
-
 /* ---------- Thumbnails Strip ---------- */
 function buildThumbnailsStrip() {
   els.thumbScroller.innerHTML = '';
@@ -3082,7 +3069,6 @@ function toggleAutoScrollPlay() {
 
 function openDrawerTab(tabName) {
   els.sideDrawer.hidden = false;
-  els.btnDrawer.classList.add('active');
   els.btnHighlightsTop?.classList.add('active');
   document.querySelectorAll('.drawer-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === tabName);
@@ -3216,7 +3202,6 @@ function wireEvents() {
     els.moreMenu.hidden = !els.moreMenu.hidden;
     els.btnMore.classList.toggle('active', !els.moreMenu.hidden);
   });
-  els.btnZoom.addEventListener('click', cycleZoom);
   els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom - 0.25, true));
   els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + 0.25, true));
   els.btnZoomReset.addEventListener('click', () => setZoom(1, true));
@@ -3224,7 +3209,6 @@ function wireEvents() {
   els.btnSearch.addEventListener('click', () => {
     if (!els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="search"]').classList.contains('active')) {
       els.sideDrawer.hidden = true;
-      els.btnDrawer.classList.remove('active');
       els.btnHighlightsTop?.classList.remove('active');
     } else {
       openDrawerTab('search');
@@ -3264,10 +3248,6 @@ function wireEvents() {
     els.btnMore.classList.toggle('active', true);
   });
 
-  els.btnLibrary.addEventListener('click', () => {
-    fetchLibrary();
-    els.libraryModal.hidden = false;
-  });
   els.btnOpenTop.addEventListener('click', () => {
     fetchLibrary();
     els.libraryModal.hidden = false;
@@ -3281,14 +3261,9 @@ function wireEvents() {
 
   els.btnFullscreen.addEventListener('click', toggleFullscreen);
 
-  els.btnDrawer.addEventListener('click', () => {
-    els.sideDrawer.hidden = !els.sideDrawer.hidden;
-    els.btnDrawer.classList.toggle('active', !els.sideDrawer.hidden);
-    updateHighlightsUi();
-  });
   els.btnCloseDrawer.addEventListener('click', () => {
     els.sideDrawer.hidden = true;
-    els.btnDrawer.classList.remove('active');
+    els.btnHighlightsTop?.classList.remove('active');
     updateHighlightsUi();
   });
 
@@ -3310,7 +3285,7 @@ function wireEvents() {
   els.btnHighlightsTop?.addEventListener('click', () => {
     if (!els.sideDrawer.hidden) {
       els.sideDrawer.hidden = true;
-      els.btnDrawer.classList.remove('active');
+      els.btnHighlightsTop?.classList.remove('active');
       updateHighlightsUi();
     } else {
       const activeTab = document.querySelector('.drawer-tab.active')?.dataset.tab || 'highlights';
@@ -3915,7 +3890,8 @@ function wireEvents() {
         break;
       case 'l':
       case 'L':
-        els.btnLibrary.click();
+        fetchLibrary();
+        els.libraryModal.hidden = false;
         break;
       case '+':
       case '=':
@@ -3936,7 +3912,6 @@ function wireEvents() {
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
         else if (!els.sideDrawer.hidden) {
           els.sideDrawer.hidden = true;
-          els.btnDrawer.classList.remove('active');
           els.btnHighlightsTop?.classList.remove('active');
         }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
