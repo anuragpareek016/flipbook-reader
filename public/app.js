@@ -16,8 +16,6 @@ const els = {
   bookTitleLabel: document.getElementById('bookTitleLabel'),
   btnDarkRead: document.getElementById('btnDarkRead'),
   btnMagnifier: document.getElementById('btnMagnifier'),
-  menuMagnifier: document.getElementById('menuMagnifier'),
-  valMagnifier: document.getElementById('valMagnifier'),
   magnifierOverlay: document.getElementById('magnifierOverlay'),
   magControlsPill: document.getElementById('magControlsPill'),
   btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
@@ -25,6 +23,9 @@ const els = {
   btnMagPowerDec: document.getElementById('btnMagPowerDec'),
   magPowerLabel: document.getElementById('magPowerLabel'),
   btnMagPowerInc: document.getElementById('btnMagPowerInc'),
+  btnMagSizeDec: document.getElementById('btnMagSizeDec'),
+  magSizeLabel: document.getElementById('magSizeLabel'),
+  btnMagSizeInc: document.getElementById('btnMagSizeInc'),
   btnMagFollow: document.getElementById('btnMagFollow'),
   btnMagClose: document.getElementById('btnMagClose'),
   magLens: document.getElementById('magLens'),
@@ -231,10 +232,14 @@ const state = {
   magEnabled: false,
   magStyle: 'circle', // 'circle' | 'bar'
   magPower: 2.4,
+  magCircleSize: 196,
+  magBarWidth: 420,
+  magBarHeight: 86,
   magFollow: false, // false = drag & place on book, true = follow cursor
   magX: null,
   magY: null,
   magDragging: false,
+  magResizing: null,
   magRedrawRaf: 0,
   magHiResCache: new Map(), // idx -> { targetW, canvas, renderTask }
 };
@@ -332,6 +337,15 @@ function applySavedSettings(settings) {
   if (Number.isFinite(Number(settings.magPower))) {
     state.magPower = clamp(Math.round(Number(settings.magPower) * 10) / 10, 1.4, 4.5);
   }
+  if (Number.isFinite(Number(settings.magCircleSize))) {
+    state.magCircleSize = clamp(Math.round(Number(settings.magCircleSize)), 110, 420);
+  }
+  if (Number.isFinite(Number(settings.magBarWidth))) {
+    state.magBarWidth = clamp(Math.round(Number(settings.magBarWidth)), 180, 780);
+  }
+  if (Number.isFinite(Number(settings.magBarHeight))) {
+    state.magBarHeight = clamp(Math.round(Number(settings.magBarHeight)), 48, 240);
+  }
   updateMenuValues();
   updateMagnifierUi();
 }
@@ -354,6 +368,9 @@ function schedulePersistState() {
         autoScrollSpeed: state.autoScrollSpeed,
         magStyle: state.magStyle,
         magPower: state.magPower,
+        magCircleSize: state.magCircleSize,
+        magBarWidth: state.magBarWidth,
+        magBarHeight: state.magBarHeight,
       },
     };
     if (state.bookId) {
@@ -2803,14 +2820,28 @@ function getDefaultMagnifierCenter() {
   return { x: sr.width * 0.5, y: sr.height * 0.48 };
 }
 
+function getMagnifierDimensions() {
+  const stageW = els.stage?.clientWidth || window.innerWidth || 1000;
+  const stageH = els.stage?.clientHeight || window.innerHeight || 700;
+  if (state.magStyle === 'bar') {
+    return {
+      w: clamp(Math.round(state.magBarWidth), 180, Math.max(180, stageW - 24)),
+      h: clamp(Math.round(state.magBarHeight), 48, Math.max(60, Math.min(240, stageH - 90))),
+    };
+  }
+  const sz = clamp(Math.round(state.magCircleSize), 110, Math.max(110, Math.min(420, Math.min(stageW, stageH) - 24)));
+  return { w: sz, h: sz };
+}
+
 function positionMagnifier(cx, cy) {
   if (!els.magLens || !els.stage) return;
   const sr = els.stage.getBoundingClientRect();
   if (!sr.width || !sr.height) return;
+  const { w: lw, h: lh } = getMagnifierDimensions();
+  els.magLens.style.width = `${lw}px`;
+  els.magLens.style.height = `${lh}px`;
   state.magX = clamp(cx, 32, Math.max(32, sr.width - 32));
   state.magY = clamp(cy, 48, Math.max(48, sr.height - 32));
-  const lw = els.magLens.offsetWidth || (state.magStyle === 'bar' ? 420 : 192);
-  const lh = els.magLens.offsetHeight || (state.magStyle === 'bar' ? 86 : 192);
   els.magLens.style.transform = `translate3d(${Math.round(state.magX - lw / 2)}px, ${Math.round(state.magY - lh / 2)}px, 0)`;
   scheduleMagnifierRedraw();
 }
@@ -2984,14 +3015,10 @@ function scheduleMagnifierRedraw() {
 function updateMagnifierUi() {
   const active = Boolean(state.pdfDoc && state.magEnabled);
   const powerStr = `${state.magPower.toFixed(1)}×`;
+  const { w, h } = getMagnifierDimensions();
 
   if (els.btnMagnifier) {
     els.btnMagnifier.classList.toggle('active', active);
-  }
-  if (els.valMagnifier) {
-    els.valMagnifier.textContent = active
-      ? `${state.magStyle === 'bar' ? 'Bar' : 'Circle'} • ${powerStr}`
-      : 'Off';
   }
   if (els.magnifierOverlay) {
     els.magnifierOverlay.hidden = !active;
@@ -3000,14 +3027,34 @@ function updateMagnifierUi() {
     els.magLens.classList.toggle('mag-shape-circle', state.magStyle === 'circle');
     els.magLens.classList.toggle('mag-shape-bar', state.magStyle === 'bar');
     els.magLens.classList.toggle('is-follow', state.magFollow);
+    els.magLens.style.width = `${w}px`;
+    els.magLens.style.height = `${h}px`;
   }
   if (els.btnMagShapeCircle) els.btnMagShapeCircle.classList.toggle('active', state.magStyle === 'circle');
   if (els.btnMagShapeBar) els.btnMagShapeBar.classList.toggle('active', state.magStyle === 'bar');
   if (els.magPowerLabel) els.magPowerLabel.textContent = powerStr;
+  if (els.magSizeLabel) {
+    els.magSizeLabel.textContent = state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`;
+  }
   if (els.btnMagFollow) {
     els.btnMagFollow.classList.toggle('active', state.magFollow);
     els.btnMagFollow.textContent = state.magFollow ? 'Following' : 'Drag & Place';
   }
+}
+
+function stepMagnifierSize(dir) {
+  if (state.magStyle === 'bar') {
+    state.magBarWidth = clamp(Math.round(state.magBarWidth + dir * 36), 180, 780);
+    state.magBarHeight = clamp(Math.round(state.magBarHeight + dir * 10), 48, 240);
+  } else {
+    state.magCircleSize = clamp(Math.round(state.magCircleSize + dir * 24), 110, 420);
+  }
+  updateMagnifierUi();
+  if (state.magEnabled) {
+    const sr = els.stage.getBoundingClientRect();
+    positionMagnifier(state.magX ?? sr.width * 0.5, state.magY ?? sr.height * 0.48);
+  }
+  schedulePersistState();
 }
 
 function setMagnifierEnabled(enabled, { persist = false } = {}) {
@@ -3609,13 +3656,12 @@ function wireEvents() {
     setMagnifierEnabled(!state.magEnabled);
     els.btnMagnifier.blur();
   });
-  els.menuMagnifier?.addEventListener('click', () => {
-    setMagnifierEnabled(!state.magEnabled);
-  });
   els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
   els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
   els.btnMagPowerDec?.addEventListener('click', () => setMagnifierPower(state.magPower - 0.2));
   els.btnMagPowerInc?.addEventListener('click', () => setMagnifierPower(state.magPower + 0.2));
+  els.btnMagSizeDec?.addEventListener('click', () => stepMagnifierSize(-1));
+  els.btnMagSizeInc?.addEventListener('click', () => stepMagnifierSize(1));
   els.btnMagFollow?.addEventListener('click', () => {
     state.magFollow = !state.magFollow;
     updateMagnifierUi();
@@ -3623,14 +3669,36 @@ function wireEvents() {
   });
   els.btnMagClose?.addEventListener('click', () => setMagnifierEnabled(false));
 
-  // Drag-and-Place on book + wheel magnification adjustment on lens/bar
+  // Drag-and-Place on book + direct edge/corner resizing + wheel zoom power
   let magDragOffset = null;
+  let magResizeStart = null;
   els.magLens?.addEventListener('pointerdown', (e) => {
     if (!state.magEnabled || state.magFollow) return;
     if (e.button !== 0) return;
+    const resizeKind = e.target?.closest?.('[data-mag-resize]')?.dataset?.magResize;
+    const sr = els.stage.getBoundingClientRect();
     e.preventDefault();
     e.stopPropagation();
-    const sr = els.stage.getBoundingClientRect();
+
+    if (resizeKind) {
+      const { w, h } = getMagnifierDimensions();
+      const curX = state.magX ?? sr.width * 0.5;
+      const curY = state.magY ?? sr.height * 0.48;
+      state.magResizing = resizeKind;
+      els.magLens.classList.add('is-resizing');
+      els.magLens.setPointerCapture?.(e.pointerId);
+      magResizeStart = {
+        kind: resizeKind,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startW: w,
+        startH: h,
+        leftEdge: curX - w / 2,
+        topEdge: curY - h / 2,
+      };
+      return;
+    }
+
     state.magDragging = true;
     els.magLens.classList.add('is-dragging');
     els.magLens.setPointerCapture?.(e.pointerId);
@@ -3639,19 +3707,51 @@ function wireEvents() {
     magDragOffset = { dx: curX - (e.clientX - sr.left), dy: curY - (e.clientY - sr.top) };
   });
   els.magLens?.addEventListener('pointermove', (e) => {
+    if (state.magResizing && magResizeStart) {
+      const dx = e.clientX - magResizeStart.startClientX;
+      const dy = e.clientY - magResizeStart.startClientY;
+      if (state.magStyle === 'circle') {
+        const delta = Math.max(dx, dy) === dx ? dx : dy;
+        const avgDelta = (dx + dy) * 0.65;
+        const newSize = clamp(Math.round(magResizeStart.startW + (Math.abs(dx) > Math.abs(dy) * 1.4 || Math.abs(dy) > Math.abs(dx) * 1.4 ? delta : avgDelta)), 110, 420);
+        state.magCircleSize = newSize;
+        updateMagnifierUi();
+        positionMagnifier(magResizeStart.leftEdge + newSize / 2, magResizeStart.topEdge + newSize / 2);
+      } else {
+        const newW = magResizeStart.kind === 's'
+          ? magResizeStart.startW
+          : clamp(Math.round(magResizeStart.startW + dx), 180, 780);
+        const newH = magResizeStart.kind === 'e'
+          ? magResizeStart.startH
+          : clamp(Math.round(magResizeStart.startH + dy), 48, 240);
+        state.magBarWidth = newW;
+        state.magBarHeight = newH;
+        updateMagnifierUi();
+        positionMagnifier(magResizeStart.leftEdge + newW / 2, magResizeStart.topEdge + newH / 2);
+      }
+      return;
+    }
     if (!state.magDragging || !magDragOffset) return;
     const sr = els.stage.getBoundingClientRect();
     positionMagnifier((e.clientX - sr.left) + magDragOffset.dx, (e.clientY - sr.top) + magDragOffset.dy);
   });
-  const endMagDrag = (e) => {
-    if (!state.magDragging) return;
-    state.magDragging = false;
-    magDragOffset = null;
-    els.magLens?.classList.remove('is-dragging');
-    try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+  const endMagPointer = (e) => {
+    if (state.magResizing) {
+      state.magResizing = null;
+      magResizeStart = null;
+      els.magLens?.classList.remove('is-resizing');
+      schedulePersistState();
+      try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+    }
+    if (state.magDragging) {
+      state.magDragging = false;
+      magDragOffset = null;
+      els.magLens?.classList.remove('is-dragging');
+      try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+    }
   };
-  els.magLens?.addEventListener('pointerup', endMagDrag);
-  els.magLens?.addEventListener('pointercancel', endMagDrag);
+  els.magLens?.addEventListener('pointerup', endMagPointer);
+  els.magLens?.addEventListener('pointercancel', endMagPointer);
   els.magLens?.addEventListener('wheel', (e) => {
     if (!state.magEnabled || state.magFollow) return;
     e.preventDefault();

@@ -182,26 +182,27 @@
             </button>
           </div>
           <span class="mag-pill-sep"></span>
-          <button type="button" id="btnMagPowerDec" class="hud-step-btn" title="Decrease magnification" aria-label="Decrease magnification">−</button>
+          <button type="button" id="btnMagPowerDec" class="hud-step-btn" title="Decrease zoom power" aria-label="Decrease zoom power">−</button>
           <span id="magPowerLabel" class="hud-readout">2.4×</span>
-          <button type="button" id="btnMagPowerInc" class="hud-step-btn" title="Increase magnification" aria-label="Increase magnification">+</button>
+          <button type="button" id="btnMagPowerInc" class="hud-step-btn" title="Increase zoom power" aria-label="Increase zoom power">+</button>
+          <span class="mag-pill-sep"></span>
+          <button type="button" id="btnMagSizeDec" class="hud-step-btn" title="Smaller lens / bar" aria-label="Decrease magnifier size">−</button>
+          <span id="magSizeLabel" class="mag-size-readout">196</span>
+          <button type="button" id="btnMagSizeInc" class="hud-step-btn" title="Larger lens / bar" aria-label="Increase magnifier size">+</button>
           <span class="mag-pill-sep"></span>
           <button type="button" id="btnMagFollow" class="mag-mode-btn" title="Place on book (drag) or Follow cursor" aria-label="Toggle Place or Follow cursor">Drag &amp; Place</button>
           <button type="button" id="btnMagClose" class="hud-stop-btn" title="Close Magnifying Glass (M)" aria-label="Close magnifying glass">✕</button>
         </div>
 
         <div id="magLens" class="mag-lens mag-shape-circle" role="application" aria-label="Magnifying glass lens">
-          <div class="mag-bar-cap mag-bar-cap-left" aria-hidden="true"></div>
           <div class="mag-glass-frame" id="magGlassFrame">
             <canvas id="magCanvas" class="mag-canvas"></canvas>
             <div class="mag-glass-glare" aria-hidden="true"></div>
             <div class="mag-bar-guide" aria-hidden="true"></div>
           </div>
-          <div class="mag-bar-cap mag-bar-cap-right" aria-hidden="true"></div>
-          <div class="mag-handle" aria-hidden="true">
-            <span class="mag-handle-collar"></span>
-            <span class="mag-handle-grip"></span>
-          </div>
+          <div class="mag-resize-e" data-mag-resize="e" title="Drag to widen bar" aria-hidden="true"></div>
+          <div class="mag-resize-s" data-mag-resize="s" title="Drag to resize bar height" aria-hidden="true"></div>
+          <button type="button" class="mag-resize-se" data-mag-resize="se" title="Drag to resize" aria-label="Resize magnifying glass"></button>
         </div>
       </div>
 
@@ -259,10 +260,6 @@
       <button class="menu-item" id="menuAutoHideBars">
         <span>Auto-Hide Toolbars</span>
         <span class="menu-val" id="valAutoHideBars">On</span>
-      </button>
-      <button class="menu-item" id="menuMagnifier">
-        <span>Magnifying Glass</span>
-        <span class="menu-val" id="valMagnifier">Off</span>
       </button>
       <div class="menu-divider"></div>
       <div class="menu-auto-block" id="menuAutoBlock">
