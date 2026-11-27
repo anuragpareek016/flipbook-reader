@@ -5296,11 +5296,18 @@ function setReadDark(enabled, persist = true) {
   if (persist) schedulePersistState();
 }
 
+/** Toggle visibility on SVG icons where HTML `.hidden` IDL property does not reflect the attribute. */
+function setSvgHidden(el, hidden) {
+  if (!el) return;
+  el.toggleAttribute('hidden', Boolean(hidden));
+  el.style.display = hidden ? 'none' : '';
+}
+
 function updateSoundUi() {
   flipSound.setPreset(state.soundPreset);
   flipSound.setEnabled(state.soundEnabled);
-  els.iconSoundOn.hidden = !state.soundEnabled;
-  els.iconSoundOff.hidden = state.soundEnabled;
+  setSvgHidden(els.iconSoundOn, !state.soundEnabled);
+  setSvgHidden(els.iconSoundOff, state.soundEnabled);
 
   const info = flipSound.getPresetInfo(state.soundPreset);
   state.soundPreset = info.id;
@@ -5400,8 +5407,8 @@ function updatePlaybackUi() {
     els.autoPlaybackHud.hidden = !showHud;
     if (showHud) {
       const playing = isScroll ? state.autoScrollPlaying : (state.autoFlipEnabled && !state.autoFlipPaused);
-      if (els.iconHudPlay) els.iconHudPlay.hidden = playing;
-      if (els.iconHudPause) els.iconHudPause.hidden = !playing;
+      setSvgHidden(els.iconHudPlay, playing);
+      setSvgHidden(els.iconHudPause, !playing);
       if (els.btnHudPlayPause) {
         els.btnHudPlayPause.title = isScroll
           ? (playing ? 'Pause Auto-Scroll (Space)' : 'Resume Auto-Scroll (Space)')
