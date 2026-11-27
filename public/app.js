@@ -1128,6 +1128,7 @@ function getBookMaxStackThickness(totalPages, single) {
 function setStackElementGeometry(stackEl, side, thicknessPx) {
   if (!stackEl) return;
   const visible = thicknessPx > 0;
+  stackEl.classList.toggle('is-empty', !visible);
   stackEl.style.opacity = visible ? '1' : '0';
   stackEl.style.width = `${thicknessPx}px`;
   if (side === 'left') {
@@ -1161,19 +1162,25 @@ function updateBookDepthChrome() {
     ? clamp(Math.round((rightRemain / denom) * maxStack), minLeaf, maxStack)
     : 0;
 
-  els.bookShell.classList.toggle('has-left-stack', leftThick > 0);
-
   if (single) {
-    setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
+    // In single-page mode, read pages collect onto the top-left preview stack; the left edge is the
+    // binding hinge, while the right stack represents remaining unread pages (0px once all pages end).
+    const atSingleEnd = rightRemain === 0;
+    els.bookShell.classList.toggle('has-left-stack', leftIdx > 0 && !atSingleEnd);
+    els.bookShell.classList.toggle('is-single-end', atSingleEnd);
+    setStackElementGeometry(els.bookStackLeft, 'left', 0);
     setStackElementGeometry(els.bookStackRight, 'right', rightThick);
 
     state.allowSpine = false;
     els.bookSpineShadow.style.opacity = '0';
-    els.bookDropShadow.style.left = `${-leftThick}px`;
+    els.bookDropShadow.style.left = '0px';
     els.bookDropShadow.style.right = `${-rightThick}px`;
-    els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round((rightThick - leftThick) * 0.25)}px`);
+    els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
     return;
   }
+
+  els.bookShell.classList.remove('is-single-end');
+  els.bookShell.classList.toggle('has-left-stack', leftThick > 0);
 
   // Landscape 2-page spread
   if (state.showCover && visible.length === 1) {
@@ -3773,6 +3780,7 @@ function updateMagnifierUi() {
 
   if (els.btnMagnifier) {
     els.btnMagnifier.classList.toggle('active', active);
+    els.btnMagnifier.setAttribute('aria-pressed', String(active));
   }
   if (els.magnifierOverlay) {
     els.magnifierOverlay.hidden = !active;
@@ -3784,14 +3792,23 @@ function updateMagnifierUi() {
     els.magLens.style.width = `${w}px`;
     els.magLens.style.height = `${h}px`;
   }
-  if (els.btnMagShapeCircle) els.btnMagShapeCircle.classList.toggle('active', state.magStyle === 'circle');
-  if (els.btnMagShapeBar) els.btnMagShapeBar.classList.toggle('active', state.magStyle === 'bar');
+  if (els.btnMagShapeCircle) {
+    const isCircle = state.magStyle === 'circle';
+    els.btnMagShapeCircle.classList.toggle('active', isCircle);
+    els.btnMagShapeCircle.setAttribute('aria-pressed', String(isCircle));
+  }
+  if (els.btnMagShapeBar) {
+    const isBar = state.magStyle === 'bar';
+    els.btnMagShapeBar.classList.toggle('active', isBar);
+    els.btnMagShapeBar.setAttribute('aria-pressed', String(isBar));
+  }
   if (els.magPowerLabel) els.magPowerLabel.textContent = powerStr;
   if (els.magSizeLabel) {
     els.magSizeLabel.textContent = state.magStyle === 'bar' ? `${w}×${h}` : `${w}px`;
   }
   if (els.btnMagFollow) {
     els.btnMagFollow.classList.toggle('active', state.magFollow);
+    els.btnMagFollow.setAttribute('aria-pressed', String(state.magFollow));
     els.btnMagFollow.textContent = state.magFollow ? 'Following' : 'Drag & Place';
   }
 }
@@ -3868,6 +3885,7 @@ function setReadDark(enabled, persist = true) {
   document.body.classList.toggle('read-dark', state.readDark);
   if (els.btnDarkRead) {
     els.btnDarkRead.classList.toggle('active', state.readDark);
+    els.btnDarkRead.setAttribute('aria-pressed', String(state.readDark));
   }
   if (state.magEnabled) scheduleMagnifierRedraw();
   if (persist) schedulePersistState();
@@ -3885,6 +3903,9 @@ function updateSoundUi() {
     els.valSoundPreset.textContent = state.soundEnabled ? info.label : 'Off';
   }
   if (els.btnSound) {
+    els.btnSound.classList.toggle('active', state.soundEnabled);
+    els.btnSound.classList.toggle('is-muted', !state.soundEnabled);
+    els.btnSound.setAttribute('aria-pressed', String(state.soundEnabled));
     els.btnSound.title = state.soundEnabled
       ? `Page Turn Sound: ${info.fullName} (Click to mute, Right-click for presets)`
       : 'Page Turn Sound: Off (Click to enable, Right-click for presets)';
@@ -3927,6 +3948,11 @@ function updatePlaybackUi() {
   if (els.menuAutoFlipGroup) els.menuAutoFlipGroup.hidden = isScroll;
   if (els.menuAutoScrollGroup) els.menuAutoScrollGroup.hidden = !isScroll;
 
+  if (els.menuAutoFlip) {
+    const autoFlipOn = Boolean(state.autoFlipEnabled);
+    els.menuAutoFlip.classList.toggle('is-on', autoFlipOn);
+    els.menuAutoFlip.setAttribute('aria-pressed', String(autoFlipOn));
+  }
   if (els.valAutoFlip) {
     els.valAutoFlip.textContent = !state.autoFlipEnabled
       ? `Off • ${secLabel}`
@@ -3948,6 +3974,11 @@ function updatePlaybackUi() {
     });
   }
 
+  if (els.menuAutoScrollToggle) {
+    const autoScrollOn = Boolean(state.autoScrollPlaying);
+    els.menuAutoScrollToggle.classList.toggle('is-on', autoScrollOn);
+    els.menuAutoScrollToggle.setAttribute('aria-pressed', String(autoScrollOn));
+  }
   if (els.valAutoScroll) {
     els.valAutoScroll.textContent = state.autoScrollPlaying
       ? `Playing • ${spdLabel}`
@@ -4002,19 +4033,33 @@ function updatePlaybackUi() {
 
 function updateMenuValues() {
   if (els.valScrollMode) {
-    els.valScrollMode.textContent = state.scrollMode === 'scroll' ? 'Smooth Auto-Scroll' : 'Book Flip';
+    const isScroll = state.scrollMode === 'scroll';
+    els.valScrollMode.textContent = isScroll ? 'Smooth Auto-Scroll' : 'Book Flip';
+    els.menuScrollMode?.classList.toggle('is-alt', isScroll);
   }
   els.valPageMode.textContent = state.pageMode === 'single' ? 'Single' : state.pageMode === 'double' ? 'Double' : 'Auto (Double)';
+  els.menuPageMode?.classList.toggle('is-alt', state.pageMode !== 'auto');
+
   els.valHardCover.textContent = state.showCover ? 'On' : 'Off';
+  els.menuHardCover?.classList.toggle('is-on', !!state.showCover);
+  els.menuHardCover?.setAttribute('aria-pressed', String(!!state.showCover));
+
   els.valClickMode.textContent = state.clickMode === 'smart' ? 'Corner + Select' : 'Click Anywhere';
+  els.menuClickMode?.classList.toggle('is-alt', state.clickMode !== 'smart');
+
   if (els.valAutoHideBars) {
     els.valAutoHideBars.textContent = state.autoHideBars ? 'On' : 'Off';
+    els.menuAutoHideBars?.classList.toggle('is-on', !!state.autoHideBars);
+    els.menuAutoHideBars?.setAttribute('aria-pressed', String(!!state.autoHideBars));
   }
   if (els.valTwoFingerPan) {
     els.valTwoFingerPan.textContent = state.twoFingerPan ? 'On' : 'Off';
+    els.menuTwoFingerPan?.classList.toggle('is-on', !!state.twoFingerPan);
+    els.menuTwoFingerPan?.setAttribute('aria-pressed', String(!!state.twoFingerPan));
   }
   if (els.btnZoomPanMode) {
     els.btnZoomPanMode.classList.toggle('active', state.twoFingerPan);
+    els.btnZoomPanMode.setAttribute('aria-pressed', String(!!state.twoFingerPan));
     els.btnZoomPanMode.title = state.twoFingerPan
       ? 'Two-Finger Pan: On (Click to disable)'
       : 'Two-Finger Pan: Off (Click to enable)';
@@ -4238,6 +4283,14 @@ function openDrawerTab(tabName) {
     updateBookmarkUi();
   } else if (tabName === 'highlights') {
     updateHighlightsUi();
+  }
+}
+
+function syncFullscreenUi() {
+  const isFull = Boolean(document.fullscreenElement || document.documentElement.classList.contains('mac-fullscreen'));
+  if (els.btnFullscreen) {
+    els.btnFullscreen.classList.toggle('active', isFull);
+    els.btnFullscreen.setAttribute('aria-pressed', String(isFull));
   }
 }
 
@@ -4948,7 +5001,20 @@ function wireEvents() {
   });
   els.bottomBar?.addEventListener('focusout', () => scheduleHideBar('footer', 420));
 
+  const syncOverlayButtons = () => {
+    if (els.btnMore) {
+      const moreOpen = !els.moreMenu?.hidden;
+      els.btnMore.classList.toggle('active', moreOpen);
+      els.btnMore.setAttribute('aria-pressed', String(moreOpen));
+    }
+    if (els.btnThumbs) {
+      const thumbsOpen = !els.thumbnailsStrip?.hidden;
+      els.btnThumbs.classList.toggle('active', thumbsOpen);
+      els.btnThumbs.setAttribute('aria-pressed', String(thumbsOpen));
+    }
+  };
   const overlayObserver = new MutationObserver(() => {
+    syncOverlayButtons();
     if (shouldKeepBarVisible('header')) showBar('header', false);
     else scheduleHideBar('header', 420);
     if (shouldKeepBarVisible('footer')) showBar('footer', false);
@@ -4957,6 +5023,14 @@ function wireEvents() {
   [els.moreMenu, els.thumbnailsStrip, els.libraryModal]
     .filter(Boolean)
     .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
+
+  document.addEventListener('fullscreenchange', syncFullscreenUi);
+  new MutationObserver(syncFullscreenUi).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  syncOverlayButtons();
+  syncFullscreenUi();
 
   // Track pointer position inside stage so keyboard +/- zoom anchors at cursor
   els.stage.addEventListener('mousemove', (e) => {

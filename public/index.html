@@ -243,34 +243,46 @@
       <div class="menu-divider"></div>
       <button class="menu-item" id="menuScrollMode">
         <span>Reading Mode</span>
-        <span class="menu-val" id="valScrollMode">Book Flip</span>
+        <span class="menu-val menu-mode-chip" id="valScrollMode">Book Flip</span>
       </button>
       <button class="menu-item" id="menuPageMode">
         <span>Page View</span>
-        <span class="menu-val" id="valPageMode">Double</span>
+        <span class="menu-val menu-mode-chip" id="valPageMode">Double</span>
       </button>
-      <button class="menu-item" id="menuHardCover">
+      <button class="menu-item is-on" id="menuHardCover" aria-pressed="true">
         <span>Hard Cover</span>
-        <span class="menu-val" id="valHardCover">On</span>
+        <span class="menu-toggle-end">
+          <span class="menu-val" id="valHardCover">On</span>
+          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </span>
       </button>
       <button class="menu-item" id="menuClickMode">
         <span>Page Interaction</span>
-        <span class="menu-val" id="valClickMode">Corner + Select</span>
+        <span class="menu-val menu-mode-chip" id="valClickMode">Corner + Select</span>
       </button>
-      <button class="menu-item" id="menuAutoHideBars">
+      <button class="menu-item is-on" id="menuAutoHideBars" aria-pressed="true">
         <span>Auto-Hide Toolbars</span>
-        <span class="menu-val" id="valAutoHideBars">On</span>
+        <span class="menu-toggle-end">
+          <span class="menu-val" id="valAutoHideBars">On</span>
+          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </span>
       </button>
-      <button class="menu-item" id="menuTwoFingerPan">
+      <button class="menu-item is-on" id="menuTwoFingerPan" aria-pressed="true">
         <span>Two-Finger Zoom Pan</span>
-        <span class="menu-val" id="valTwoFingerPan">On</span>
+        <span class="menu-toggle-end">
+          <span class="menu-val" id="valTwoFingerPan">On</span>
+          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+        </span>
       </button>
       <div class="menu-divider"></div>
       <div class="menu-auto-block" id="menuAutoBlock">
         <div id="menuAutoFlipGroup">
-          <button type="button" class="menu-auto-head" id="menuAutoFlip">
+          <button type="button" class="menu-auto-head" id="menuAutoFlip" aria-pressed="false">
             <span>Auto-Flip</span>
-            <span class="menu-val" id="valAutoFlip">Off • 4s</span>
+            <span class="menu-toggle-end">
+              <span class="menu-val" id="valAutoFlip">Off • 4s</span>
+              <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+            </span>
           </button>
           <div class="auto-control-row">
             <button type="button" class="auto-step-btn" id="btnFlipTimeDec" title="Faster flip (-)" aria-label="Decrease auto-flip interval">−</button>
@@ -290,9 +302,12 @@
           </div>
         </div>
         <div id="menuAutoScrollGroup" hidden>
-          <button type="button" class="menu-auto-head" id="menuAutoScrollToggle">
+          <button type="button" class="menu-auto-head" id="menuAutoScrollToggle" aria-pressed="false">
             <span>Smooth Auto-Scroll</span>
-            <span class="menu-val" id="valAutoScroll">Paused • 1.0×</span>
+            <span class="menu-toggle-end">
+              <span class="menu-val" id="valAutoScroll">Paused • 1.0×</span>
+              <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+            </span>
           </button>
           <div class="auto-control-row">
             <button type="button" class="auto-step-btn" id="btnScrollSpeedDec" title="Slower scroll (-)" aria-label="Decrease scroll speed">−</button>
