@@ -193,7 +193,8 @@ const state = {
   panStart: null,
   lastStagePointer: null,
   lastBarPointer: null,
-  barsHideTimer: null,
+  headerHideTimer: null,
+  footerHideTimer: null,
 
   pageNodes: [],
   renderedMap: new Map(), // pageIdx -> { scale, renderTask, textPromise }
@@ -2668,54 +2669,68 @@ function renderLibraryLists() {
 }
 
 /* ---------- Toolbar Auto-Hide ---------- */
-function shouldKeepBarsVisible() {
-  if (!state.pdfDoc || !state.autoHideBars) return true;
-  if (!els.moreMenu.hidden || !els.sideDrawer.hidden || !els.thumbnailsStrip.hidden ||
-      !els.libraryModal.hidden || !els.hlPopover.hidden) {
-    return true;
-  }
+const HEADER_WAKE_PX = 56;
+const FOOTER_WAKE_PX = 60;
+
+function isBarInputFocused(barEl) {
   const active = document.activeElement;
-  if (active && (els.topBar.contains(active) || els.bottomBar?.contains(active)) &&
-      (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) {
-    return true;
-  }
-  if (els.topBar.matches(':hover') || els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
-    return true;
-  }
+  if (!active || !barEl?.contains(active)) return false;
+  return active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA';
+}
+
+function shouldKeepBarVisible(zone) {
+  if (!state.pdfDoc || !state.autoHideBars) return true;
+  if (!els.libraryModal.hidden) return false;
   const p = state.lastBarPointer;
-  if (p && (p.clientY <= 58 || p.clientY >= window.innerHeight - 64)) {
-    return true;
+  if (zone === 'header') {
+    if (isBarInputFocused(els.topBar)) return true;
+    if (els.topBar?.matches(':hover')) return true;
+    return Boolean(p && p.clientY <= HEADER_WAKE_PX);
   }
-  return false;
+  if (!els.moreMenu.hidden || !els.thumbnailsStrip.hidden) return true;
+  if (isBarInputFocused(els.bottomBar)) return true;
+  if (els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) return true;
+  return Boolean(p && p.clientY >= window.innerHeight - FOOTER_WAKE_PX);
 }
 
-function showBars(scheduleAutoHide = true) {
-  document.body.classList.remove('bars-hidden');
-  clearTimeout(state.barsHideTimer);
-  state.barsHideTimer = null;
+function showBar(zone, scheduleAutoHide = true, delayMs = 2200) {
+  const cls = zone === 'header' ? 'header-hidden' : 'footer-hidden';
+  const timerKey = zone === 'header' ? 'headerHideTimer' : 'footerHideTimer';
+  document.body.classList.remove(cls);
+  clearTimeout(state[timerKey]);
+  state[timerKey] = null;
   if (scheduleAutoHide) {
-    scheduleHideBars();
+    scheduleHideBar(zone, delayMs);
   }
 }
 
-function hideBars() {
-  clearTimeout(state.barsHideTimer);
-  state.barsHideTimer = null;
-  if (shouldKeepBarsVisible()) {
-    scheduleHideBars();
+function hideBar(zone) {
+  const cls = zone === 'header' ? 'header-hidden' : 'footer-hidden';
+  const timerKey = zone === 'header' ? 'headerHideTimer' : 'footerHideTimer';
+  clearTimeout(state[timerKey]);
+  state[timerKey] = null;
+  if (shouldKeepBarVisible(zone)) {
+    scheduleHideBar(zone, 420);
     return;
   }
-  document.body.classList.add('bars-hidden');
+  document.body.classList.add(cls);
 }
 
-function scheduleHideBars(delayMs = 2200) {
-  clearTimeout(state.barsHideTimer);
-  state.barsHideTimer = null;
-  if (shouldKeepBarsVisible()) {
-    document.body.classList.remove('bars-hidden');
+function scheduleHideBar(zone, delayMs = 420) {
+  const cls = zone === 'header' ? 'header-hidden' : 'footer-hidden';
+  const timerKey = zone === 'header' ? 'headerHideTimer' : 'footerHideTimer';
+  clearTimeout(state[timerKey]);
+  state[timerKey] = null;
+  if (shouldKeepBarVisible(zone)) {
+    document.body.classList.remove(cls);
     return;
   }
-  state.barsHideTimer = setTimeout(hideBars, delayMs);
+  state[timerKey] = setTimeout(() => hideBar(zone), delayMs);
+}
+
+function showBars(scheduleAutoHide = true, delayMs = 1800) {
+  showBar('header', scheduleAutoHide, delayMs);
+  showBar('footer', scheduleAutoHide, delayMs);
 }
 
 /* ---------- UI Modes & Theme ---------- */
@@ -3445,7 +3460,12 @@ function wireEvents() {
     state.autoHideBars = !state.autoHideBars;
     updateMenuValues();
     schedulePersistState();
-    showBars(state.autoHideBars);
+    if (state.autoHideBars) {
+      scheduleHideBar('header', 420);
+      scheduleHideBar('footer', 420);
+    } else {
+      showBars(false);
+    }
   });
 
   if (els.soundPresetPills) {
@@ -3649,41 +3669,66 @@ function wireEvents() {
     });
   });
 
-  // Auto-hide header & footer bars on idle pointer and wake on movement / edge hover
-  let lastWakePos = { x: -1, y: -1 };
+  // Independent edge-triggered auto-hide for header (top) & footer (bottom)
   window.addEventListener('mousemove', (e) => {
     state.lastBarPointer = { clientX: e.clientX, clientY: e.clientY };
-    const inHotZone = e.clientY <= 58 || e.clientY >= window.innerHeight - 64;
-    const moved = Math.hypot(e.clientX - lastWakePos.x, e.clientY - lastWakePos.y) >= 2;
-    if (moved || inHotZone) {
-      lastWakePos = { x: e.clientX, y: e.clientY };
-      showBars(!inHotZone);
+    const inHeaderZone = e.clientY <= HEADER_WAKE_PX;
+    const inFooterZone = e.clientY >= window.innerHeight - FOOTER_WAKE_PX;
+
+    if (inHeaderZone || els.topBar?.matches(':hover')) {
+      showBar('header', false);
+    } else if (!state.headerHideTimer && !document.body.classList.contains('header-hidden')) {
+      scheduleHideBar('header', 420);
+    }
+
+    if (inFooterZone || els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
+      showBar('footer', false);
+    } else if (!state.footerHideTimer && !document.body.classList.contains('footer-hidden')) {
+      scheduleHideBar('footer', 420);
     }
   }, { passive: true });
   window.addEventListener('touchstart', (e) => {
     const t = e.touches?.[0];
     if (!t) return;
-    if (t.clientY <= 58 || t.clientY >= window.innerHeight - 64) {
+    const inHeaderZone = t.clientY <= HEADER_WAKE_PX;
+    const inFooterZone = t.clientY >= window.innerHeight - FOOTER_WAKE_PX;
+    if (inHeaderZone || inFooterZone) {
       state.lastBarPointer = { clientX: t.clientX, clientY: t.clientY };
-      showBars(true);
+      if (inHeaderZone) showBar('header', true, 2200);
+      if (inFooterZone) showBar('footer', true, 2200);
     }
   }, { passive: true });
   document.addEventListener('mouseleave', () => {
     state.lastBarPointer = null;
-    if (state.pdfDoc) scheduleHideBars(600);
+    if (state.pdfDoc) {
+      scheduleHideBar('header', 420);
+      scheduleHideBar('footer', 420);
+    }
   });
-  [els.topBar, els.bottomBar, els.autoPlaybackHud].forEach((bar) => {
+  els.topBar?.addEventListener('mouseenter', () => showBar('header', false));
+  els.topBar?.addEventListener('mouseleave', () => scheduleHideBar('header', 420));
+  els.topBar?.addEventListener('focusin', () => {
+    if (isBarInputFocused(els.topBar)) showBar('header', false);
+  });
+  els.topBar?.addEventListener('focusout', () => scheduleHideBar('header', 420));
+
+  [els.bottomBar, els.autoPlaybackHud].forEach((bar) => {
     if (!bar) return;
-    bar.addEventListener('mouseenter', () => showBars(false));
-    bar.addEventListener('mouseleave', () => scheduleHideBars());
-    bar.addEventListener('focusin', () => showBars(false));
-    bar.addEventListener('focusout', () => scheduleHideBars());
+    bar.addEventListener('mouseenter', () => showBar('footer', false));
+    bar.addEventListener('mouseleave', () => scheduleHideBar('footer', 420));
+    bar.addEventListener('focusin', () => {
+      if (isBarInputFocused(els.bottomBar)) showBar('footer', false);
+    });
+    bar.addEventListener('focusout', () => scheduleHideBar('footer', 420));
   });
+
   const overlayObserver = new MutationObserver(() => {
-    if (shouldKeepBarsVisible()) showBars(false);
-    else scheduleHideBars();
+    if (shouldKeepBarVisible('header')) showBar('header', false);
+    else scheduleHideBar('header', 420);
+    if (shouldKeepBarVisible('footer')) showBar('footer', false);
+    else scheduleHideBar('footer', 420);
   });
-  [els.moreMenu, els.sideDrawer, els.thumbnailsStrip, els.libraryModal, els.hlPopover]
+  [els.moreMenu, els.thumbnailsStrip, els.libraryModal]
     .filter(Boolean)
     .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
 
@@ -3849,7 +3894,7 @@ function wireEvents() {
       case 'd':
       case 'D':
         setReadDark(!state.readDark, true);
-        showBars(true);
+        showBar('header', true, 1400);
         break;
       case 'h':
       case 'H':
@@ -3866,7 +3911,7 @@ function wireEvents() {
       case 'b':
       case 'B':
         toggleBookmarkCurrent();
-        showBars(true);
+        showBar('header', true, 1400);
         break;
       case 'l':
       case 'L':
@@ -3875,15 +3920,15 @@ function wireEvents() {
       case '+':
       case '=':
         setZoom(state.zoom + 0.25, true, getStageZoomAnchor());
-        showBars(true);
+        showBar('header', true, 1400);
         break;
       case '-':
         setZoom(state.zoom - 0.25, true, getStageZoomAnchor());
-        showBars(true);
+        showBar('header', true, 1400);
         break;
       case '0':
         setZoom(1, true);
-        showBars(true);
+        showBar('header', true, 1400);
         break;
       case 'Escape':
         if (!els.hlPopover.hidden) hideHighlightPopover();
