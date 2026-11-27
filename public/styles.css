@@ -235,6 +235,10 @@ body.header-hidden .top-bar-right {
   will-change: transform;
 }
 
+.book-center-shift.is-zoomed {
+  will-change: auto;
+}
+
 .book-shell {
   position: relative;
   display: flex;

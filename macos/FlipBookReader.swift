@@ -1,6 +1,204 @@
 import AppKit
 import WebKit
+import AVFoundation
 import Foundation
+
+/// Native AVAudioPlayer pool with sleep/wake recovery so WKWebView process throttling never silences page turns.
+final class NativeFlipSoundEngine {
+    private let publicDir: URL
+    private let audioQueue = DispatchQueue(label: "dev.openfrontierlabs.flipbook.audio", qos: .userInteractive)
+    private var voicesByPreset: [String: [AVAudioPlayer]] = [:]
+    private var voiceCursors: [String: Int] = [:]
+    private var synthWavData: Data?
+    private let poolSize = 3
+
+    init(publicDir: URL) {
+        self.publicDir = publicDir
+        self.synthWavData = Self.makePaperSynthWavData()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSystemWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+        audioQueue.async { [weak self] in
+            self?.warmupAllPresets()
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleSystemWake(_ note: Notification) {
+        audioQueue.async { [weak self] in
+            self?.reloadAllPresets()
+        }
+    }
+
+    func prepare(presetId: String? = nil) {
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            if let id = presetId {
+                _ = self.ensureVoices(for: id)
+            } else {
+                self.warmupAllPresets()
+            }
+        }
+    }
+
+    func play(presetId: String, volume: Float) {
+        let clampedVol = max(0.0, min(1.0, volume))
+        audioQueue.async { [weak self] in
+            guard let self else { return }
+            var pool = self.ensureVoices(for: presetId)
+            if pool.isEmpty { return }
+
+            let cursor = self.voiceCursors[presetId] ?? 0
+            let chosenIdx = pool.firstIndex(where: { !$0.isPlaying }) ?? (cursor % pool.count)
+            self.voiceCursors[presetId] = (chosenIdx + 1) % pool.count
+
+            var player = pool[chosenIdx]
+            Self.configureAndStart(player: player, volume: clampedVol)
+
+            // If macOS audio hardware re-routed or suspended this player, rebuild the pool seamlessly and retry.
+            if !player.isPlaying {
+                pool = self.rebuildVoices(for: presetId)
+                if let fresh = pool.first {
+                    player = fresh
+                    Self.configureAndStart(player: player, volume: clampedVol)
+                }
+            }
+        }
+    }
+
+    private static func configureAndStart(player: AVAudioPlayer, volume: Float) {
+        if player.isPlaying {
+            player.stop()
+        }
+        player.currentTime = 0
+        player.volume = volume
+        player.enableRate = true
+        player.rate = Float.random(in: 0.98...1.02)
+        player.prepareToPlay()
+        player.play()
+    }
+
+    private func warmupAllPresets() {
+        for id in ["uppbeat-book", "small-page", "classic-synth"] {
+            _ = ensureVoices(for: id)
+        }
+    }
+
+    private func reloadAllPresets() {
+        for id in ["uppbeat-book", "small-page", "classic-synth"] {
+            _ = rebuildVoices(for: id)
+        }
+    }
+
+    private func ensureVoices(for presetId: String) -> [AVAudioPlayer] {
+        if let existing = voicesByPreset[presetId], !existing.isEmpty {
+            return existing
+        }
+        return rebuildVoices(for: presetId)
+    }
+
+    private func rebuildVoices(for presetId: String) -> [AVAudioPlayer] {
+        var created: [AVAudioPlayer] = []
+        for _ in 0..<poolSize {
+            if let player = makePlayer(for: presetId) {
+                player.enableRate = true
+                player.prepareToPlay()
+                created.append(player)
+            }
+        }
+        voicesByPreset[presetId] = created
+        return created
+    }
+
+    private func makePlayer(for presetId: String) -> AVAudioPlayer? {
+        if presetId == "classic-synth" {
+            guard let data = synthWavData else { return nil }
+            return try? AVAudioPlayer(data: data)
+        }
+        let filename = presetId == "small-page" ? "flipsound.mp3" : "flipsound-uppbeat.mp3"
+        let url = publicDir.appendingPathComponent(filename)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return synthWavData.flatMap { try? AVAudioPlayer(data: $0) }
+        }
+        return try? AVAudioPlayer(contentsOf: url)
+    }
+
+    private static func makePaperSynthWavData() -> Data? {
+        let sampleRate = 44100.0
+        let dur = 0.78
+        let len = Int(sampleRate * dur)
+        var samples = [Int16](repeating: 0, count: len)
+
+        var seed: UInt64 = 0x9E3779B97F4A7C15
+        var pink = 0.0
+        var lp1 = 0.0
+        var bp1 = 0.0
+        var lp2 = 0.0
+        var bp2 = 0.0
+
+        for i in 0..<len {
+            seed = seed &* 6364136223846793005 &+ 1442695040888963407
+            let u = Double((seed >> 11) & 0x1FFFFF) / Double(0x1FFFFF)
+            let w = u * 2.0 - 1.0
+            pink = (pink + 0.15 * w) / 1.15
+            let raw = w * 0.65 + pink * 0.85
+
+            let t = Double(i) / sampleRate
+            var env = 0.0
+            if t < 0.24 {
+                env = 0.03 + 0.08 * (t / 0.24)
+            } else if t < 0.31 {
+                let dt = (t - 0.275) / 0.016
+                env = 0.06 + 0.42 * exp(-dt * dt)
+            } else if t < 0.54 {
+                let p = (t - 0.31) / 0.23
+                env = 0.20 * sin(Double.pi * p) + 0.03
+            } else if t < 0.78 {
+                let dt = (t - 0.66) / 0.045
+                let tailFade = max(0.0, 1.0 - (t - 0.54) / 0.24)
+                env = (0.09 * exp(-dt * dt) + 0.025) * tailFade
+            }
+
+            let fc1 = t < 0.33 ? 5400.0 - 1800.0 * (t / 0.33) : max(2200.0, 4800.0 - 2400.0 * ((t - 0.33) / 0.40))
+            let f1 = 2.0 * sin((Double.pi * min(fc1, sampleRate * 0.42)) / sampleRate)
+            let hp1 = raw - lp1 - 0.62 * bp1
+            bp1 += f1 * hp1
+            lp1 += f1 * bp1
+
+            let f2 = 2.0 * sin((Double.pi * min(6800.0, sampleRate * 0.42)) / sampleRate)
+            let hp2 = raw - lp2 - 0.8 * bp2
+            bp2 += f2 * hp2
+            lp2 += f2 * bp2
+
+            let val = max(-0.95, min(0.95, (bp1 * 0.85 + bp2 * 0.35) * env))
+            samples[i] = Int16(val * 32767.0)
+        }
+
+        let dataSize = UInt32(len * 2)
+        let riffSize = UInt32(36) + dataSize
+        var data = Data()
+        data.append(contentsOf: "RIFF".utf8)
+        withUnsafeBytes(of: riffSize.littleEndian) { data.append(contentsOf: $0) }
+        data.append(contentsOf: "WAVEfmt ".utf8)
+        withUnsafeBytes(of: UInt32(16).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt16(1).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt16(1).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt32(44100).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt32(88200).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt16(2).littleEndian) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: UInt16(16).littleEndian) { data.append(contentsOf: $0) }
+        data.append(contentsOf: "data".utf8)
+        withUnsafeBytes(of: dataSize.littleEndian) { data.append(contentsOf: $0) }
+        samples.withUnsafeBytes { data.append(contentsOf: $0) }
+        return data
+    }
+}
 
 final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate {
     private var window: NSWindow!
@@ -9,10 +207,20 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private var serverPort: Int = 0
     private var pendingFilePaths: [String] = []
     private var isWebLoaded = false
+    private var appActivity: NSObjectProtocol?
+    private var soundEngine: NativeFlipSoundEngine?
 
     private let devRoot = ProcessInfo.processInfo.environment["DEVELOPER_ROOT"] ?? "/Users/openfrontierlabs/Developer"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Keep timers & audio responsive even after idle reading intervals (prevent macOS App Nap suspension).
+        appActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Interactive FlipBook reading and sound effects"
+        )
+        soundEngine = NativeFlipSoundEngine(
+            publicDir: URL(fileURLWithPath: "\(devRoot)/opt/flipbook-reader/public", isDirectory: true)
+        )
         setupMainMenu()
         setupWindow()
         collectCliFiles()
@@ -304,6 +512,13 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             DispatchQueue.main.async { [weak self] in
                 self?.window?.toggleFullScreen(nil)
             }
+        } else if action == "playSound" {
+            let preset = (dict["preset"] as? String) ?? "uppbeat-book"
+            let volume = (dict["volume"] as? NSNumber)?.floatValue ?? 0.84
+            soundEngine?.play(presetId: preset, volume: volume)
+        } else if action == "prepareSound" {
+            let preset = dict["preset"] as? String
+            soundEngine?.prepare(presetId: preset)
         }
     }
 

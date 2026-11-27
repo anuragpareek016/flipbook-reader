@@ -277,6 +277,29 @@ function isEffectiveSingleMode() {
   return els.stage.clientWidth < 760;
 }
 
+function getVisibleScrollIndices() {
+  if (!state.totalPages || state.scrollMode !== 'scroll' || !els.scrollViewport || !els.scrollPages) {
+    return [];
+  }
+  const svRect = els.scrollViewport.getBoundingClientRect();
+  if (!svRect.height) return getVisibleIndices(state.currentIndex);
+  const hits = [];
+  for (let i = 0; i < els.scrollPages.children.length; i++) {
+    const r = els.scrollPages.children[i].getBoundingClientRect();
+    if (r.width > 10 && r.height > 10 && r.bottom >= svRect.top - 120 && r.top <= svRect.bottom + 120) {
+      hits.push(i);
+    }
+  }
+  return hits.length ? hits : getVisibleIndices(state.currentIndex);
+}
+
+const MAX_PAGE_ZOOM = 5.0;
+
+function getZoomStepDelta(dir) {
+  const step = state.zoom >= 2.5 && (dir > 0 || state.zoom > 2.5) ? 0.5 : 0.25;
+  return dir * step;
+}
+
 function getVisibleIndices(idx = state.currentIndex) {
   if (!state.totalPages) return [];
   const i = clamp(idx, 0, state.totalPages - 1);
@@ -935,11 +958,15 @@ async function renderPageNode(idx) {
 
   const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
   const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-  const maxDim = 4096;
+  // Keep text razor-sharp (4K+/8K backing pixels) even at maximum zoom or on 1x displays
+  const devDpr = window.devicePixelRatio || 1;
+  const desiredDpr = Math.min(3.0, Math.max(devDpr, state.committedZoom > 1.05 ? 2.5 : 2.0));
+  const maxDim = 8192;
+  const maxArea = 52_000_000;
   const maxScaleByDim = Math.min(maxDim / sw, maxDim / sh);
-  const pixelScale = Math.max(1, Math.min(dpr, maxScaleByDim));
-  const renderKey = `${sw}x${sh}@${pixelScale.toFixed(2)}`;
+  const maxScaleByArea = Math.sqrt(maxArea / Math.max(1, sw * sh));
+  const pixelScale = Math.max(1, Math.min(desiredDpr, maxScaleByDim, maxScaleByArea));
+  const renderKey = `${sw}x${sh}@${pixelScale.toFixed(3)}`;
 
   const existing = state.renderedMap.get(idx);
   if (existing && existing.renderKey === renderKey && inner.querySelector('canvas.fb-canvas')) {
@@ -965,8 +992,8 @@ async function renderPageNode(idx) {
 
     const canvas = document.createElement('canvas');
     canvas.className = 'fb-canvas';
-    canvas.width = Math.max(1, Math.floor(renderVp.width));
-    canvas.height = Math.max(1, Math.floor(renderVp.height));
+    canvas.width = Math.max(1, Math.round(renderVp.width));
+    canvas.height = Math.max(1, Math.round(renderVp.height));
 
     const ctx = canvas.getContext('2d', { alpha: false });
     ctx.fillStyle = '#ffffff';
@@ -1015,14 +1042,18 @@ async function renderPageNode(idx) {
 }
 
 function evictDistantPages(centerIdx) {
-  const maxKeep = state.committedZoom > 1.2 ? 6 : Math.max(MAX_CACHED_CANVASES, 24);
+  const activeIndices = new Set(state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx));
+  const maxKeep = state.committedZoom >= 2.0
+    ? Math.max(2, activeIndices.size)
+    : (state.committedZoom > 1.2 ? Math.max(4, activeIndices.size + 2) : Math.max(MAX_CACHED_CANVASES, 24));
+  const keepRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 10);
   if (state.renderedMap.size <= maxKeep) return;
   const entries = Array.from(state.renderedMap.keys())
     .sort((a, b) => Math.abs(b - centerIdx) - Math.abs(a - centerIdx));
 
   while (state.renderedMap.size > maxKeep && entries.length) {
     const farIdx = entries.shift();
-    if (Math.abs(farIdx - centerIdx) <= (state.committedZoom > 1.2 ? 1 : 10)) break;
+    if (activeIndices.has(farIdx) || Math.abs(farIdx - centerIdx) <= keepRadius) continue;
     const rec = state.renderedMap.get(farIdx);
     try { rec?.renderTask?.cancel(); } catch {}
     state.renderedMap.delete(farIdx);
@@ -1040,8 +1071,8 @@ function evictDistantPages(centerIdx) {
 }
 
 function queueNearbyRenders(centerIdx, radius = 5) {
-  const effectiveRadius = state.committedZoom > 1.2 ? 1 : radius;
-  const visible = getVisibleIndices(centerIdx);
+  const effectiveRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : radius);
+  const visible = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx);
   const priority = [...visible];
   for (let d = 1; d <= effectiveRadius; d++) {
     const next = centerIdx + d;
@@ -1071,10 +1102,11 @@ function updateCenterShift() {
 
   let shiftX = 0;
   if (!single && state.showCover && visible.length === 1) {
-    // Center single front cover or single back cover smoothly
-    shiftX = visible[0] === 0 ? -sw / 2 : sw / 2;
+    // Center single front cover or single back cover smoothly on exact integer pixels
+    shiftX = visible[0] === 0 ? -Math.round(sw / 2) : Math.round(sw / 2);
   }
   const nextTransform = `translate3d(${shiftX}px, 0, 0)`;
+  els.bookCenterShift.classList.toggle('is-zoomed', state.zoom > 1.01);
   if (els.bookCenterShift.style.transform !== nextTransform) {
     els.bookCenterShift.style.transform = nextTransform;
     if (state.magEnabled) {
@@ -1641,6 +1673,14 @@ function jumpToPage(oneBasedPage, animate = false) {
 }
 
 /* ---------- Zoom & Pan (True 1:1 Retina Layout Re-Render, Zero GPU Scale Blur) ---------- */
+function getSnappedPanCoords() {
+  const devDpr = window.devicePixelRatio || 1;
+  return {
+    x: Math.round(state.panX * devDpr) / devDpr,
+    y: Math.round(state.panY * devDpr) / devDpr,
+  };
+}
+
 function commitZoomLayout() {
   if (!state.pdfDoc) return;
   state.committedZoom = state.zoom;
@@ -1655,8 +1695,9 @@ function commitZoomLayout() {
   els.bookContainer.style.height = `${sh}px`;
   state.pageFlip?.resize?.(sw, sh);
 
-  // Reset CSS scale to exact 1 so WebKit/Blink paints native Retina pixels without upscaling blur
-  els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0)`;
+  // Reset CSS scale to exact 1 and snap pan to device pixels so WebKit/Blink paints native 4K+ Retina text cleanly
+  const { x: px, y: py } = getSnappedPanCoords();
+  els.zoomViewport.style.transform = `translate3d(${px}px, ${py}px, 0)`;
   updateCenterShift();
   updateBookDepthChrome();
   if (state.zoom > 1.05) clearSingleFlights();
@@ -1669,13 +1710,15 @@ function commitZoomLayout() {
 
 function applyZoomTransform(rerender = true, immediate = false) {
   const previewScale = state.committedZoom ? state.zoom / state.committedZoom : state.zoom;
+  const { x: px, y: py } = getSnappedPanCoords();
   if (Math.abs(previewScale - 1) < 0.002) {
-    els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0)`;
+    els.zoomViewport.style.transform = `translate3d(${px}px, ${py}px, 0)`;
   } else {
-    els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0) scale(${previewScale})`;
+    els.zoomViewport.style.transform = `translate3d(${px}px, ${py}px, 0) scale(${previewScale})`;
   }
   const zoomed = state.zoom > 1.01;
   els.zoomViewport.classList.toggle('is-zoomed', zoomed);
+  els.bookCenterShift?.classList?.toggle('is-zoomed', zoomed);
   els.zoomPill.hidden = !zoomed;
   els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   state.pageFlip?.setInteractionDisabled?.(zoomed);
@@ -1715,7 +1758,7 @@ function panZoomBy(dx, dy) {
 
 function setZoom(nextZoom, immediate = false, anchor = null) {
   const prevZoom = state.zoom || 1;
-  const z = clamp(Number(nextZoom) || 1, 1, 3.5);
+  const z = clamp(Number(nextZoom) || 1, 1, MAX_PAGE_ZOOM);
   state.zoom = z <= 1.01 ? 1 : z;
 
   if (state.scrollMode === 'scroll') {
@@ -1765,7 +1808,9 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
       clearTimeout(state.zoomRerenderTimer);
       const commitScroll = () => {
         state.committedZoom = state.zoom;
-        queueNearbyRenders(state.currentIndex, 3);
+        const visScroll = getVisibleScrollIndices();
+        for (const i of visScroll) renderPageNode(i);
+        queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 3));
       };
       if (immediate) commitScroll();
       else state.zoomRerenderTimer = setTimeout(commitScroll, 85);
@@ -3041,7 +3086,7 @@ function getMagnifierVisibleIndices(frameRect) {
 
 function ensureMagHiResPage(idx, desiredW) {
   if (!state.pdfDoc || idx < 0 || idx >= state.totalPages) return null;
-  const clampedW = clamp(Math.round(desiredW), 800, 2600);
+  const clampedW = clamp(Math.round(desiredW), 800, 6144);
   const existing = state.magHiResCache.get(idx);
   if (existing && existing.targetW >= clampedW * 0.85) {
     // Refresh LRU order cleanly
@@ -3610,7 +3655,7 @@ function drawMagnifierFrame() {
   const frameRect = els.magGlassFrame.getBoundingClientRect();
   if (!frameRect.width || !frameRect.height) return;
 
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
   const fw = frameRect.width;
   const fh = frameRect.height;
   const targetPxW = Math.max(1, Math.round(fw * dpr));
@@ -4297,8 +4342,8 @@ function wireEvents() {
     els.moreMenu.hidden = !els.moreMenu.hidden;
     els.btnMore.classList.toggle('active', !els.moreMenu.hidden);
   });
-  els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom - 0.25, true));
-  els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + 0.25, true));
+  els.btnZoomOut.addEventListener('click', () => setZoom(state.zoom + getZoomStepDelta(-1), true));
+  els.btnZoomInPill.addEventListener('click', () => setZoom(state.zoom + getZoomStepDelta(1), true));
   els.btnZoomReset.addEventListener('click', () => setZoom(1, true));
 
   els.btnThumbs.addEventListener('click', () => {
@@ -5014,7 +5059,7 @@ function wireEvents() {
       e.preventDefault();
       if (!e.deltaY) return;
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
-      const nextZoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.003), 1, 3.5);
+      const nextZoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.003), 1, MAX_PAGE_ZOOM);
       setZoom(nextZoom, false, { clientX: e.clientX, clientY: e.clientY });
       return;
     }
@@ -5149,11 +5194,11 @@ function wireEvents() {
         break;
       case '+':
       case '=':
-        setZoom(state.zoom + 0.25, true, getStageZoomAnchor());
+        setZoom(state.zoom + getZoomStepDelta(1), true, getStageZoomAnchor());
         showBar('header', true, 1400);
         break;
       case '-':
-        setZoom(state.zoom - 0.25, true, getStageZoomAnchor());
+        setZoom(state.zoom + getZoomStepDelta(-1), true, getStageZoomAnchor());
         showBar('header', true, 1400);
         break;
       case '0':

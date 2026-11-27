@@ -17,12 +17,29 @@ class FlipSound {
     this.rawBytesCache = new Map();
     this.rawFetchPromises = new Map();
     this.loadingPromises = new Map();
-    this.htmlAudioCache = new Map();
+    this.htmlAudioPool = new Map();
+    this.htmlAudioCursors = new Map();
+    this.blobUrlCache = new Map();
     this.unlocked = false;
     this.lastPlayedMs = 0;
     this.lastPlayWallMs = 0;
     this.lastPlayCtxTime = 0;
     this.ctxResetCooldownUntil = 0;
+  }
+
+  _hasNativeBridge() {
+    return typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.flipbook);
+  }
+
+  _postNative(action, payload = {}) {
+    try {
+      const handler = window.webkit?.messageHandlers?.flipbook;
+      if (!handler) return false;
+      handler.postMessage({ action, ...payload });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   getPresets() {
@@ -48,24 +65,51 @@ class FlipSound {
 
   prefetch(id = this.presetId) {
     const preset = this.getPresetInfo(id);
+    if (this._hasNativeBridge()) {
+      this._postNative('prepareSound', { preset: preset.id });
+      return;
+    }
     if (preset.url) {
-      this._fetchRawPreset(preset);
-      this._ensureHtmlAudio(preset);
+      this._fetchRawPreset(preset).then((bytes) => {
+        if (bytes) this._ensureHtmlAudioPool(preset, bytes);
+      });
+      this._ensureHtmlAudioPool(preset, this.rawBytesCache.get(preset.id) || null);
     }
     if (this.ctx && this.ctx.state !== 'closed') {
       this._ensurePresetLoaded(preset.id);
     }
   }
 
-  _ensureHtmlAudio(preset) {
-    if (!preset.url) return null;
-    let el = this.htmlAudioCache.get(preset.id);
-    if (!el) {
-      el = new Audio(preset.url);
-      el.preload = 'auto';
-      this.htmlAudioCache.set(preset.id, el);
+  _ensureHtmlAudioPool(preset, bytes = null) {
+    if (!preset.url) return [];
+    let srcUrl = this.blobUrlCache.get(preset.id);
+    if (!srcUrl && bytes) {
+      try {
+        srcUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+        this.blobUrlCache.set(preset.id, srcUrl);
+      } catch {
+        srcUrl = preset.url;
+      }
     }
-    return el;
+    const effectiveUrl = srcUrl || preset.url;
+    let pool = this.htmlAudioPool.get(preset.id);
+    if (!pool) {
+      pool = [];
+      for (let i = 0; i < 3; i++) {
+        const el = new Audio(effectiveUrl);
+        el.preload = 'auto';
+        pool.push(el);
+      }
+      this.htmlAudioPool.set(preset.id, pool);
+    } else if (srcUrl) {
+      for (const el of pool) {
+        if (!el.src.startsWith('blob:')) {
+          el.src = srcUrl;
+          el.load();
+        }
+      }
+    }
+    return pool;
   }
 
   _fetchRawPreset(preset) {
@@ -124,6 +168,11 @@ class FlipSound {
 
   unlock() {
     this.prefetch();
+    if (this._hasNativeBridge()) {
+      this._postNative('prepareSound', { preset: this.presetId });
+      this.unlocked = true;
+      return;
+    }
     if (this.ctx && this.ctx.state === 'running') {
       this.unlocked = true;
       return;
@@ -289,7 +338,11 @@ class FlipSound {
   _playHtmlFallback(preset) {
     if (!preset.url) return false;
     try {
-      const el = this._ensureHtmlAudio(preset) || new Audio(preset.url);
+      const pool = this._ensureHtmlAudioPool(preset, this.rawBytesCache.get(preset.id) || null);
+      if (!pool.length) return false;
+      const idx = this.htmlAudioCursors.get(preset.id) || 0;
+      const el = pool[idx % pool.length];
+      this.htmlAudioCursors.set(preset.id, (idx + 1) % pool.length);
       el.volume = preset.gain ?? 0.84;
       try {
         el.currentTime = 0;
@@ -298,7 +351,8 @@ class FlipSound {
       }
       el.play().catch(() => {
         try {
-          const fresh = new Audio(preset.url);
+          const fallbackUrl = this.blobUrlCache.get(preset.id) || preset.url;
+          const fresh = new Audio(fallbackUrl);
           fresh.volume = preset.gain ?? 0.84;
           fresh.play().catch(() => {
             this._playSynthFallback(this.ctx, preset);
@@ -320,6 +374,12 @@ class FlipSound {
     this.lastPlayedMs = nowMs;
 
     const preset = this.getPresetInfo(this.presetId);
+
+    // Native macOS app bridge plays via AppKit AVAudioPlayer pool (immune to WKWebView audio sleep/suspend)
+    if (this._postNative('playSound', { preset: preset.id, volume: preset.gain ?? 0.84 })) {
+      return;
+    }
+
     let ctx = this.ensureContext();
 
     // Recover automatically if CoreAudio hardware clock froze after sleep/route switch
