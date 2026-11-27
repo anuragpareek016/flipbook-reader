@@ -30,9 +30,30 @@ const MIME_TYPES = {
   '.pfb': 'application/octet-stream',
   '.ttf': 'font/ttf',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
   '.properties': 'text/plain; charset=utf-8',
   '.pdf': 'application/pdf',
 };
+
+const COMFORT_SOUNDS_DIR = '/System/Library/PrivateFrameworks/HearingUtilities.framework/Resources';
+const COMFORT_SOUND_FILES = new Map([
+  ['Rain', 'Rain.m4a'],
+  ['RainOnRoof', 'RainOnRoof.m4a'],
+  ['Stream', 'Stream.m4a'],
+  ['Ocean', 'Ocean.m4a'],
+  ['Fire', 'Fire.m4a'],
+  ['Night', 'Night.m4a'],
+  ['QuietNight', 'QuietNight.m4a'],
+  ['Steam', 'Steam.m4a'],
+  ['BrownNoise', 'BrownNoise.m4a'],
+  ['PinkNoise', 'PinkNoise.m4a'],
+  ['WhiteNoise', 'WhiteNoise.m4a'],
+  ['Train', 'Train.m4a'],
+  ['Airplane', 'Airplane.m4a'],
+  ['Boat', 'Boat.m4a'],
+  ['Bus', 'Bus.m4a'],
+  ['Babble', 'Babble.m4a'],
+]);
 
 function loadLibrary() {
   try {
@@ -163,18 +184,36 @@ function sendStaticFile(res, rootDir, relPath) {
   });
 }
 
-function streamPdfWithRanges(req, res, filePath) {
+function streamFileWithRanges(
+  req,
+  res,
+  filePath,
+  contentType = 'application/pdf',
+  cacheControl = 'no-cache',
+  notFoundMessage = 'File not found on disk'
+) {
   let stat;
   try {
     stat = fs.statSync(filePath);
     if (!stat.isFile()) throw new Error('Not a file');
   } catch {
     res.writeHead(404);
-    res.end('PDF not found on disk');
+    res.end(notFoundMessage);
     return;
   }
 
   const total = stat.size;
+  if (req.method === 'HEAD') {
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': total,
+      'Cache-Control': cacheControl,
+    });
+    res.end();
+    return;
+  }
+
   const range = req.headers.range;
   if (range) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
@@ -191,19 +230,19 @@ function streamPdfWithRanges(req, res, filePath) {
       return;
     }
     res.writeHead(206, {
-      'Content-Type': 'application/pdf',
+      'Content-Type': contentType,
       'Accept-Ranges': 'bytes',
       'Content-Range': `bytes ${start}-${end}/${total}`,
       'Content-Length': end - start + 1,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cacheControl,
     });
     fs.createReadStream(filePath, { start, end }).pipe(res);
   } else {
     res.writeHead(200, {
-      'Content-Type': 'application/pdf',
+      'Content-Type': contentType,
       'Accept-Ranges': 'bytes',
       'Content-Length': total,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cacheControl,
     });
     fs.createReadStream(filePath).pipe(res);
   }
@@ -450,6 +489,25 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  const ambientMatch = /^\/api\/ambient-sound\/([A-Za-z0-9]+)\.m4a$/.exec(pathname);
+  if (ambientMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+    const filename = COMFORT_SOUND_FILES.get(ambientMatch[1]);
+    if (!filename) {
+      res.writeHead(404);
+      res.end('Unknown ambient sound');
+      return;
+    }
+    streamFileWithRanges(
+      req,
+      res,
+      path.join(COMFORT_SOUNDS_DIR, filename),
+      'audio/mp4',
+      'public, max-age=86400',
+      'Ambient sound not found on system'
+    );
+    return;
+  }
+
   const bookMatch = /^\/api\/book\/([a-f0-9]{16})\.pdf$/.exec(pathname);
   if (bookMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     const lib = loadLibrary();
@@ -459,22 +517,7 @@ const server = http.createServer(async (req, res) => {
       res.end('Unknown book');
       return;
     }
-    if (req.method === 'HEAD') {
-      try {
-        const stat = fs.statSync(entry.path);
-        res.writeHead(200, {
-          'Content-Type': 'application/pdf',
-          'Accept-Ranges': 'bytes',
-          'Content-Length': stat.size,
-        });
-        res.end();
-      } catch {
-        res.writeHead(404);
-        res.end();
-      }
-      return;
-    }
-    streamPdfWithRanges(req, res, entry.path);
+    streamFileWithRanges(req, res, entry.path, 'application/pdf', 'no-cache', 'PDF not found on disk');
     return;
   }
 

@@ -458,13 +458,47 @@ class FlipSound {
 
 export const flipSound = new FlipSound();
 
-/* ---------- 100% Offline Procedural Web Audio Ambient Focus Soundscape ---------- */
+/* ---------- macOS Built-In Background Sounds (ComfortSounds) + Offline Fallback ---------- */
 export const AMBIENT_PRESETS = [
   { id: 'off', label: 'Off' },
-  { id: 'rain', label: 'Soft Rain' },
-  { id: 'fireplace', label: 'Fireplace' },
-  { id: 'library', label: 'Quiet Library' },
+  { id: 'Rain', label: 'Rain' },
+  { id: 'RainOnRoof', label: 'Rain On Roof' },
+  { id: 'Stream', label: 'Stream' },
+  { id: 'Ocean', label: 'Ocean' },
+  { id: 'Fire', label: 'Fire' },
+  { id: 'Night', label: 'Night' },
+  { id: 'QuietNight', label: 'Quiet Night' },
+  { id: 'Steam', label: 'Steam' },
+  { id: 'BrownNoise', label: 'Dark Noise' },
+  { id: 'PinkNoise', label: 'Balanced Noise' },
+  { id: 'WhiteNoise', label: 'Bright Noise' },
+  { id: 'Train', label: 'Train' },
+  { id: 'Airplane', label: 'Airplane' },
+  { id: 'Boat', label: 'Boat' },
+  { id: 'Bus', label: 'Bus' },
+  { id: 'Babble', label: 'Babble' },
 ];
+
+const AMBIENT_LEGACY_ALIASES = new Map([
+  ['rain', 'Rain'],
+  ['fireplace', 'Fire'],
+  ['library', 'QuietNight'],
+  ['darknoise', 'BrownNoise'],
+  ['balancednoise', 'PinkNoise'],
+  ['brightnoise', 'WhiteNoise'],
+]);
+
+export function normalizeAmbientPresetId(id) {
+  if (typeof id !== 'string') return 'off';
+  const trimmed = id.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'off') return 'off';
+  const exact = AMBIENT_PRESETS.find((p) => p.id === trimmed);
+  if (exact) return exact.id;
+  const lower = trimmed.toLowerCase();
+  if (AMBIENT_LEGACY_ALIASES.has(lower)) return AMBIENT_LEGACY_ALIASES.get(lower);
+  const ci = AMBIENT_PRESETS.find((p) => p.id.toLowerCase() === lower);
+  return ci ? ci.id : 'off';
+}
 
 class AmbientSoundscape {
   constructor() {
@@ -473,18 +507,22 @@ class AmbientSoundscape {
     this.volume = 30; // 0..100
     this.masterGain = null;
     this.buffers = null;
+    this.decodedBuffers = new Map();
+    this.loadingPromises = new Map();
     this.activeScene = null;
     this.suspendTimer = null;
+    this._sceneLoadSeq = 0;
   }
 
   getPresetInfo(id = this.presetId) {
-    return AMBIENT_PRESETS.find((p) => p.id === id) || AMBIENT_PRESETS[0];
+    const norm = normalizeAmbientPresetId(id);
+    return AMBIENT_PRESETS.find((p) => p.id === norm) || AMBIENT_PRESETS[0];
   }
 
   _targetLinearGain() {
     const v = Math.max(0, Math.min(100, Number(this.volume) || 0));
     if (this.presetId === 'off' || v <= 0) return 0;
-    return Math.pow(v / 100, 1.45) * 0.44;
+    return Math.pow(v / 100, 1.35) * 0.88;
   }
 
   _ensureContext() {
@@ -493,6 +531,8 @@ class AmbientSoundscape {
       this.ctx = null;
       this.masterGain = null;
       this.buffers = null;
+      this.decodedBuffers.clear();
+      this.loadingPromises.clear();
     }
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -502,10 +542,58 @@ class AmbientSoundscape {
       this.masterGain.gain.value = 0;
       this.masterGain.connect(this.ctx.destination);
     }
-    if (!this.buffers) {
-      this.buffers = this._buildNoiseBuffers(this.ctx);
-    }
     return this.ctx;
+  }
+
+  _buildSeamlessLoopBuffer(ctx, srcBuf) {
+    const channels = Math.max(1, srcBuf.numberOfChannels);
+    const sr = srcBuf.sampleRate || ctx.sampleRate || 48000;
+    const xf = Math.min(Math.floor(sr * 0.08), Math.floor(srcBuf.length * 0.12));
+    if (xf < 64 || srcBuf.length <= xf * 2) return srcBuf;
+
+    const len = srcBuf.length - xf;
+    const outBuf = ctx.createBuffer(channels, len, sr);
+    for (let ch = 0; ch < channels; ch++) {
+      const src = srcBuf.getChannelData(ch);
+      const dst = outBuf.getChannelData(ch);
+      for (let i = 0; i < xf; i++) {
+        const t = i / xf;
+        const wIn = Math.sin(t * Math.PI * 0.5);
+        const wOut = Math.cos(t * Math.PI * 0.5);
+        dst[i] = src[i] * wIn + src[len + i] * wOut;
+      }
+      dst.set(src.subarray(xf, len), xf);
+    }
+    return outBuf;
+  }
+
+  async _loadComfortSoundBuffer(ctx, presetId) {
+    const cached = this.decodedBuffers.get(presetId);
+    if (cached) return cached;
+    if (this.loadingPromises.has(presetId)) {
+      return this.loadingPromises.get(presetId);
+    }
+
+    const promise = (async () => {
+      const resp = await fetch(`/api/ambient-sound/${encodeURIComponent(presetId)}.m4a`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const arrayBuf = await resp.arrayBuffer();
+      const decoded = await ctx.decodeAudioData(arrayBuf);
+      const loopBuf = this._buildSeamlessLoopBuffer(ctx, decoded);
+      if (this.ctx === ctx) {
+        this.decodedBuffers.set(presetId, loopBuf);
+      }
+      return loopBuf;
+    })();
+
+    this.loadingPromises.set(presetId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.loadingPromises.get(presetId) === promise) {
+        this.loadingPromises.delete(presetId);
+      }
+    }
   }
 
   _buildNoiseBuffers(ctx) {
@@ -601,25 +689,35 @@ class AmbientSoundscape {
     cleanNodes();
   }
 
-  _startScene(presetId) {
+  async _startScene(presetId) {
+    const normId = normalizeAmbientPresetId(presetId);
+    const loadSeq = ++this._sceneLoadSeq;
     this._teardownScene(false);
-    if (presetId === 'off') return;
+    if (normId === 'off') return;
     const ctx = this._ensureContext();
-    if (!ctx || !this.masterGain || !this.buffers) return;
+    if (!ctx || !this.masterGain) return;
 
     clearTimeout(this.suspendTimer);
     if (ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
 
+    let comfortBuf = null;
+    try {
+      comfortBuf = await this._loadComfortSoundBuffer(ctx, normId);
+    } catch {
+      comfortBuf = null;
+    }
+    if (loadSeq !== this._sceneLoadSeq || this.presetId !== normId || this.ctx !== ctx) return;
+
     const now = ctx.currentTime;
     const sceneGain = ctx.createGain();
     sceneGain.gain.setValueAtTime(0.0001, now);
-    sceneGain.gain.setTargetAtTime(1.0, now, 0.14);
+    sceneGain.gain.setTargetAtTime(1.0, now, 0.16);
     sceneGain.connect(this.masterGain);
 
     const scene = {
-      id: presetId,
+      id: normId,
       alive: true,
       gain: sceneGain,
       nodes: [sceneGain],
@@ -627,6 +725,23 @@ class AmbientSoundscape {
       timers: [],
     };
     this.activeScene = scene;
+
+    if (comfortBuf) {
+      const src = ctx.createBufferSource();
+      src.buffer = comfortBuf;
+      src.loop = true;
+      src.connect(sceneGain);
+      src.start(now);
+      scene.stopNodes.push(src);
+      scene.nodes.push(src);
+      this._applyMasterGain();
+      return;
+    }
+
+    if (!this.buffers) {
+      this.buffers = this._buildNoiseBuffers(ctx);
+    }
+    const fallbackKind = normId === 'Fire' ? 'fireplace' : (normId === 'Night' || normId === 'QuietNight') ? 'library' : 'rain';
 
     const scheduleRand = (minMs, maxMs, fn) => {
       const tick = () => {
@@ -664,7 +779,7 @@ class AmbientSoundscape {
       return { src, flt, g };
     };
 
-    if (presetId === 'rain') {
+    if (fallbackKind === 'rain') {
       const body = addNoiseLoop(this.buffers.pink, 'lowpass', 1250, 0.55, 0.62);
       const wash = addNoiseLoop(this.buffers.brown, 'bandpass', 420, 0.6, 0.55);
 
@@ -709,7 +824,7 @@ class AmbientSoundscape {
         };
         drop.start(t);
       });
-    } else if (presetId === 'fireplace') {
+    } else if (fallbackKind === 'fireplace') {
       const rumble = addNoiseLoop(this.buffers.brown, 'lowpass', 195, 0.9, 0.85);
       const glow = addNoiseLoop(this.buffers.pink, 'bandpass', 520, 0.75, 0.16);
 
@@ -758,7 +873,7 @@ class AmbientSoundscape {
           pop.start(t);
         }
       });
-    } else if (presetId === 'library') {
+    } else if (fallbackKind === 'library') {
       addNoiseLoop(this.buffers.brown, 'lowpass', 250, 0.5, 0.52);
       addNoiseLoop(this.buffers.pink, 'bandpass', 430, 0.9, 0.12);
 
@@ -809,10 +924,11 @@ class AmbientSoundscape {
   }
 
   setPreset(id) {
-    const nextId = AMBIENT_PRESETS.some((p) => p.id === id) ? id : 'off';
+    const nextId = normalizeAmbientPresetId(id);
     const prevId = this.presetId;
     this.presetId = nextId;
     if (nextId === 'off') {
+      this._sceneLoadSeq++;
       this._applyMasterGain();
       this._teardownScene(false);
       clearTimeout(this.suspendTimer);

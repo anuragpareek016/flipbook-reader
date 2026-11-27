@@ -1,5 +1,5 @@
 import * as pdfjsLib from '/vendor/pdfjs/build/pdf.min.mjs';
-import { flipSound, ambientSound, DEFAULT_SOUND_PRESET, AMBIENT_PRESETS } from '/assets/sound.js';
+import { flipSound, ambientSound, DEFAULT_SOUND_PRESET, AMBIENT_PRESETS, normalizeAmbientPresetId } from '/assets/sound.js';
 import { FlipBookEngine, bakeDarkCanvasInPlace, getBakedDarkCanvas } from '/assets/flip-engine.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
@@ -20,8 +20,6 @@ const els = {
   btnDarkRead: document.getElementById('btnDarkRead'),
   btnMagnifier: document.getElementById('btnMagnifier'),
   btnFocusCurtain: document.getElementById('btnFocusCurtain'),
-  btnSnipTool: document.getElementById('btnSnipTool'),
-  btnPinRef: document.getElementById('btnPinRef'),
   magnifierOverlay: document.getElementById('magnifierOverlay'),
   magControlsPill: document.getElementById('magControlsPill'),
   btnMagShapeCircle: document.getElementById('btnMagShapeCircle'),
@@ -304,6 +302,7 @@ const state = {
   autoFlipSeconds: 4,
   autoFlipLastTickAt: 0,
   autoScrollSpeed: 1.0,
+  autoScrollEnabled: false,
   autoScrollPlaying: false,
   autoScrollRafId: 0,
   autoScrollLastTs: 0,
@@ -382,7 +381,7 @@ const state = {
   curtainFollow: true, // follow cursor Y (and X when length < 100%)
   curtainResizing: null,
   curtainDragging: false,
-  ambientPreset: 'off', // 'off' | 'rain' | 'fireplace' | 'library'
+  ambientPreset: 'off', // 'off' | macOS ComfortSounds asset id
   ambientVolume: 30, // 0..100
   lastCurtainPointerX: null,
   lastCurtainPointerY: null,
@@ -513,8 +512,8 @@ function applySavedSettings(settings) {
     state.soundEnabled = settings.soundEnabled;
   }
   updateSoundUi();
-  if (typeof settings.ambientPreset === 'string' && AMBIENT_PRESETS.some((p) => p.id === settings.ambientPreset)) {
-    state.ambientPreset = settings.ambientPreset;
+  if (typeof settings.ambientPreset === 'string') {
+    state.ambientPreset = normalizeAmbientPresetId(settings.ambientPreset);
   }
   if (Number.isFinite(Number(settings.ambientVolume))) {
     state.ambientVolume = clamp(Math.round(Number(settings.ambientVolume)), 0, 100);
@@ -1951,7 +1950,6 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
   updateBookmarkUi();
   updateHighlightsUi();
-  updatePinRefHeaderButtons();
   highlightActiveThumbnail(visible);
   queueNearbyRenders(state.currentIndex, renderRadius);
 
@@ -3143,15 +3141,6 @@ function normalizePinnedRefs(list) {
   return [...byId.values()].slice(0, 12);
 }
 
-function updatePinRefHeaderButtons() {
-  if (!els.btnPinRef) return;
-  const visible = new Set(getVisibleIndices().map((i) => i + 1));
-  const hasCurPin = Boolean(state.pdfDoc && state.pinnedRefs.some((r) => !r.crop && visible.has(r.page)));
-  const hasAnyPin = Boolean(state.pdfDoc && state.pinnedRefs.length > 0);
-  els.btnPinRef.classList.toggle('active', hasCurPin || hasAnyPin);
-  els.btnPinRef.setAttribute('aria-pressed', String(hasCurPin || hasAnyPin));
-}
-
 async function paintRefPinCanvas(pin, canvasEl, wrapEl) {
   if (!pin || !canvasEl || !state.pdfDoc) return;
   const bodyW = Math.max(180, (pin.width || 340) - 20);
@@ -3328,7 +3317,6 @@ function renderRefPinsLayer() {
   for (const pin of state.pinnedRefs) {
     els.refPinsLayer.appendChild(createRefPinCardElement(pin));
   }
-  updatePinRefHeaderButtons();
 }
 
 function pinReferenceCard({ page, label = null, crop = null }) {
@@ -3627,10 +3615,6 @@ function deleteMarginNoteById(id) {
 function setSnipToolActive(active) {
   const next = Boolean(active && state.pdfDoc);
   state.snipActive = next;
-  if (els.btnSnipTool) {
-    els.btnSnipTool.classList.toggle('active', next);
-    els.btnSnipTool.setAttribute('aria-pressed', String(next));
-  }
   if (els.snipOverlay) els.snipOverlay.hidden = !next;
   if (els.snipSelectionBox) els.snipSelectionBox.hidden = true;
   if (!next && els.snipResultCard) {
@@ -6716,6 +6700,22 @@ function setReadDark(enabled, persist = true) {
   if (persist) schedulePersistState();
 }
 
+function populateAmbientPresetPills() {
+  if (!els.ambientPresetPills) return;
+  els.ambientPresetPills.innerHTML = '';
+  for (const preset of AMBIENT_PRESETS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sound-pill';
+    btn.dataset.ambient = preset.id;
+    btn.textContent = preset.label;
+    btn.title = preset.id === 'off' ? 'Turn off background sounds' : `macOS Background Sound: ${preset.label}`;
+    btn.addEventListener('click', () => setAmbientSoundPreset(preset.id));
+    els.ambientPresetPills.appendChild(btn);
+  }
+  updateAmbientSoundUi();
+}
+
 function updateAmbientSoundUi() {
   const info = ambientSound.getPresetInfo(state.ambientPreset);
   state.ambientPreset = info.id;
@@ -6737,13 +6737,15 @@ function updateAmbientSoundUi() {
   }
   if (els.ambientPresetPills) {
     els.ambientPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.ambient === state.ambientPreset);
+      const isSelected = btn.dataset.ambient === state.ambientPreset;
+      btn.classList.toggle('active', isSelected);
+      btn.setAttribute('aria-checked', String(isSelected));
     });
   }
 }
 
 function setAmbientSoundPreset(presetId, persist = true) {
-  state.ambientPreset = AMBIENT_PRESETS.some((p) => p.id === presetId) ? presetId : 'off';
+  state.ambientPreset = normalizeAmbientPresetId(presetId);
   updateAmbientSoundUi();
   if (state.ambientPreset !== 'off') ambientSound.unlock();
   if (persist) schedulePersistState();
@@ -6844,7 +6846,7 @@ function updatePlaybackUi() {
   }
 
   if (els.menuAutoScrollToggle) {
-    const autoScrollOn = Boolean(state.autoScrollPlaying);
+    const autoScrollOn = Boolean(state.autoScrollEnabled);
     els.menuAutoScrollToggle.classList.toggle('is-on', autoScrollOn);
     els.menuAutoScrollToggle.setAttribute('aria-pressed', String(autoScrollOn));
   }
@@ -6864,7 +6866,7 @@ function updatePlaybackUi() {
   }
 
   if (els.autoPlaybackHud) {
-    const showHud = Boolean(state.pdfDoc && (isScroll || state.autoFlipEnabled));
+    const showHud = Boolean(state.pdfDoc && ((isScroll && state.autoScrollEnabled) || (!isScroll && state.autoFlipEnabled)));
     els.autoPlaybackHud.hidden = !showHud;
     if (showHud) {
       const playing = isScroll ? state.autoScrollPlaying : (state.autoFlipEnabled && !state.autoFlipPaused);
@@ -6891,7 +6893,7 @@ function updatePlaybackUi() {
       }
       if (els.hudReadout) els.hudReadout.textContent = isScroll ? spdLabel : secLabel;
       if (els.btnHudStop) {
-        els.btnHudStop.title = isScroll ? 'Back to Book Flip' : 'Stop Auto-Flip';
+        els.btnHudStop.title = isScroll ? 'Stop Auto-Scroll' : 'Stop Auto-Flip';
         els.btnHudStop.setAttribute('aria-label', els.btnHudStop.title);
       }
     }
@@ -6901,7 +6903,7 @@ function updatePlaybackUi() {
 function updateMenuValues() {
   if (els.valScrollMode) {
     const isScroll = state.scrollMode === 'scroll';
-    els.valScrollMode.textContent = isScroll ? 'Smooth Auto-Scroll' : 'Book Flip';
+    els.valScrollMode.textContent = isScroll ? 'Scroll' : 'Book Flip';
     els.menuScrollMode?.classList.toggle('is-alt', isScroll);
   }
   els.valPageMode.textContent = state.pageMode === 'single' ? 'Single' : state.pageMode === 'double' ? 'Double' : 'Auto (Double)';
@@ -7045,6 +7047,7 @@ function stopAutoScroll({ resetPlaying = false } = {}) {
   state.autoScrollLastTs = 0;
   if (resetPlaying) {
     state.autoScrollPlaying = false;
+    state.autoScrollEnabled = false;
   }
   updatePlaybackUi();
 }
@@ -7090,6 +7093,7 @@ function startAutoScrollLoop() {
       sv.scrollTop = state.autoScrollPosY;
       if (state.autoScrollPosY >= maxScroll - 0.5) {
         state.autoScrollPlaying = false;
+        state.autoScrollEnabled = false;
         state.autoScrollRafId = 0;
         updatePlaybackUi();
         return;
@@ -7106,6 +7110,7 @@ function setAutoScrollPlaying(playing) {
   if (state.scrollMode !== 'scroll' || !state.pdfDoc) return;
   state.autoScrollPlaying = !!playing;
   if (state.autoScrollPlaying) {
+    state.autoScrollEnabled = true;
     startAutoScrollLoop();
   } else {
     stopAutoScroll({ resetPlaying: false });
@@ -7114,6 +7119,15 @@ function setAutoScrollPlaying(playing) {
 
 function toggleAutoScrollPlay() {
   setAutoScrollPlaying(!state.autoScrollPlaying);
+}
+
+function toggleAutoScrollEnabled() {
+  if (state.scrollMode !== 'scroll' || !state.pdfDoc) return;
+  if (state.autoScrollEnabled) {
+    stopAutoScroll({ resetPlaying: true });
+  } else {
+    setAutoScrollPlaying(true);
+  }
 }
 
 function openDrawerTab(tabName) {
@@ -7336,14 +7350,6 @@ function wireEvents() {
   els.btnFocusCurtain?.addEventListener('click', () => {
     toggleFocusCurtain();
     els.btnFocusCurtain.blur();
-  });
-  els.btnSnipTool?.addEventListener('click', () => {
-    toggleSnipTool();
-    els.btnSnipTool.blur();
-  });
-  els.btnPinRef?.addEventListener('click', () => {
-    togglePinCurrentPage();
-    els.btnPinRef.blur();
   });
   [els.btnCurtain1L, els.btnCurtain2L, els.btnCurtain3L, els.btnCurtain4L].forEach((btn) => {
     btn?.addEventListener('click', () => {
@@ -7665,7 +7671,8 @@ function wireEvents() {
     } else {
       stopAutoFlip();
       state.scrollMode = 'scroll';
-      state.autoScrollPlaying = true;
+      state.autoScrollEnabled = false;
+      state.autoScrollPlaying = false;
     }
     updateMenuValues();
     schedulePersistState();
@@ -7712,7 +7719,7 @@ function wireEvents() {
     btn.addEventListener('click', () => setAutoFlipSeconds(Number(btn.dataset.sec)));
   });
 
-  els.menuAutoScrollToggle?.addEventListener('click', toggleAutoScrollPlay);
+  els.menuAutoScrollToggle?.addEventListener('click', toggleAutoScrollEnabled);
   els.btnScrollSpeedDec?.addEventListener('click', () => setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, -1)));
   els.btnScrollSpeedInc?.addEventListener('click', () => setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, 1)));
   els.autoScrollRange?.addEventListener('input', () => setAutoScrollSpeed(els.autoScrollRange.value));
@@ -7759,10 +7766,6 @@ function wireEvents() {
   els.btnHudStop?.addEventListener('click', () => {
     if (state.scrollMode === 'scroll') {
       stopAutoScroll({ resetPlaying: true });
-      state.scrollMode = 'flip';
-      updateMenuValues();
-      schedulePersistState();
-      if (state.pdfDoc) initReaderView(state.currentIndex);
     } else {
       stopAutoFlip();
     }
@@ -7801,13 +7804,7 @@ function wireEvents() {
     });
   }
 
-  if (els.ambientPresetPills) {
-    els.ambientPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        setAmbientSoundPreset(btn.dataset.ambient);
-      });
-    });
-  }
+  populateAmbientPresetPills();
   els.btnAmbientVolDec?.addEventListener('click', () => setAmbientSoundVolume(state.ambientVolume - 5));
   els.btnAmbientVolInc?.addEventListener('click', () => setAmbientSoundVolume(state.ambientVolume + 5));
   els.ambientVolRange?.addEventListener('input', () => setAmbientSoundVolume(els.ambientVolRange.value));

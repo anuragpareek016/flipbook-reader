@@ -33,17 +33,6 @@
             <rect x="3" y="16.5" width="18" height="4" rx="1.5" opacity="0.45"/>
           </svg>
         </button>
-        <button id="btnSnipTool" class="icon-chip" title="Snip Diagram / Equation at 3× HD (S)" aria-label="Toggle 3x HD diagram snip tool" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-            <path d="M5 3.5A1.5 1.5 0 0 0 3.5 5v3.2a1 1 0 0 0 2 0V5.5h2.7a1 1 0 1 0 0-2H5Zm10.8 0a1 1 0 1 0 0 2h2.7v2.7a1 1 0 1 0 2 0V5A1.5 1.5 0 0 0 19 3.5h-3.2Zm-10.3 12.3a1 1 0 1 0-2 0V19A1.5 1.5 0 0 0 5 20.5h3.2a1 1 0 1 0 0-2H5.5v-2.7Zm15 0a1 1 0 1 0-2 0v2.7h-2.7a1 1 0 1 0 0 2H19A1.5 1.5 0 0 0 20.5 19v-3.2Z"/>
-            <rect x="7.5" y="7.5" width="9" height="9" rx="2"/>
-          </svg>
-        </button>
-        <button id="btnPinRef" class="icon-chip" title="Pin Current Page as Reference Card (P)" aria-label="Pin current page as floating reference card" aria-pressed="false">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-            <path d="M15.1 2.7a1.1 1.1 0 0 1 1.55 0l4.65 4.65a1.1 1.1 0 0 1-.48 1.84l-2.66.76-3.7 3.7.72 3.1a1.1 1.1 0 0 1-1.85 1.03L9.9 14.35l-4.95 4.95a1 1 0 0 1-1.42-1.42l4.95-4.95-3.43-3.43a1.1 1.1 0 0 1 1.03-1.85l3.1.72 3.7-3.7.76-2.66a1.1 1.1 0 0 1 .76-.76Z"/>
-          </svg>
-        </button>
         <button id="btnDarkRead" class="icon-chip" title="Dark Mode Reading (D)" aria-label="Toggle dark reading mode">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
             <path d="M21.05 13.38a.85.85 0 0 0-1.05-.13A6.95 6.95 0 0 1 10.75 4a.85.85 0 0 0-.97-1.15A9.35 9.35 0 1 0 21.15 14.35a.85.85 0 0 0-.1-.97Z"/>
@@ -513,14 +502,11 @@
       <div class="menu-divider"></div>
       <div class="menu-sound-block menu-ambient-block">
         <div class="menu-sound-head">
-          <span>Ambient Focus Sound</span>
+          <span>Background Sounds (macOS)</span>
           <span class="menu-val" id="valAmbientSound">Off</span>
         </div>
-        <div class="sound-pills" id="ambientPresetPills" role="radiogroup" aria-label="Ambient focus soundscape">
+        <div class="sound-pills ambient-sound-pills" id="ambientPresetPills" role="radiogroup" aria-label="macOS Background Sounds">
           <button type="button" class="sound-pill active" data-ambient="off">Off</button>
-          <button type="button" class="sound-pill" data-ambient="rain">Soft Rain</button>
-          <button type="button" class="sound-pill" data-ambient="fireplace">Fireplace</button>
-          <button type="button" class="sound-pill" data-ambient="library">Quiet Library</button>
         </div>
         <div class="auto-control-row menu-paper-row menu-ambient-vol-row is-dimmed" id="ambientVolRow">
           <button type="button" class="auto-step-btn" id="btnAmbientVolDec" title="Quieter ambience (−)" aria-label="Decrease ambient volume">−</button>

@@ -528,13 +528,18 @@ export class FlipBookEngine {
 
   _setSlotPage(slotEl, pageIdx) {
     if (!slotEl) return;
-    slotEl.innerHTML = '';
     if (pageIdx !== null && pageIdx !== undefined && this.pageNodes[pageIdx]) {
       const node = this.pageNodes[pageIdx];
+      if (node.parentElement === slotEl && slotEl.childElementCount === 1) {
+        slotEl.style.visibility = 'visible';
+        return;
+      }
+      slotEl.innerHTML = '';
       node.style.cssText = 'display:block;position:relative;width:100%;height:100%;';
       slotEl.appendChild(node);
       slotEl.style.visibility = 'visible';
     } else {
+      if (slotEl.childElementCount > 0) slotEl.innerHTML = '';
       slotEl.style.visibility = 'hidden';
     }
   }
@@ -749,6 +754,9 @@ export class FlipBookEngine {
     if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
       // Grabbed already-curled hover/fallback corner cleanly without sudden angle jump
       this.interactiveFlip.mode = 'drag';
+      this.interactiveFlip.fromDragFallback = false;
+      this.interactiveFlip.fallbackDur = 0;
+      this.interactiveFlip.fallbackElapsed = 0;
       this.interactiveFlip.wasDragged = true;
       this.interactiveFlip.downMask?.classList.remove('is-hover-curl');
       this.interactiveFlip.upMask?.classList.remove('is-hover-curl');
@@ -827,9 +835,7 @@ export class FlipBookEngine {
     if (this.flyingFlips.length > 0) return;
     if (e.target && e.target !== this.stage && e.target.closest?.('.more-menu, .side-drawer, .bottom-bar, .top-bar, .sticky-edge-tab, .popover-panel, .thumbnails-strip, .modal-backdrop, .nav-back-pill, .auto-playback-hud, .mag-controls-pill')) {
       if (this.interactiveFlip && this.interactiveFlip.mode === 'hover') {
-        this.interactiveFlip.mode = 'fallback';
-        this.interactiveFlip.target = { ...this.interactiveFlip.from };
-        this._ensureRaf();
+        this._beginFallback(this.interactiveFlip, false);
       }
       return;
     }
@@ -845,22 +851,24 @@ export class FlipBookEngine {
       if (!this.interactiveFlip) {
         this._beginInteractiveTurn(side, bp, 'hover');
         if (this.interactiveFlip) this.interactiveFlip.target = { x: peekX, y: peekY };
-      } else if (this.interactiveFlip.mode === 'hover' || this.interactiveFlip.mode === 'fallback') {
+      } else if (
+        this.interactiveFlip.mode === 'hover' ||
+        (this.interactiveFlip.mode === 'fallback' && !this.interactiveFlip.fromDragFallback)
+      ) {
         if (this.interactiveFlip.side !== side) {
           this._cancelInteractiveFlipImmediate();
           this._beginInteractiveTurn(side, bp, 'hover');
           if (this.interactiveFlip) this.interactiveFlip.target = { x: peekX, y: peekY };
         } else {
           this.interactiveFlip.mode = 'hover';
+          this.interactiveFlip.fromDragFallback = false;
           this.interactiveFlip.target = { x: peekX, y: peekY };
           this._ensureRaf();
         }
       }
     } else if (this.interactiveFlip && this.interactiveFlip.mode === 'hover') {
       // Smoothly spring back to flat when cursor leaves the corner tip
-      this.interactiveFlip.mode = 'fallback';
-      this.interactiveFlip.target = { ...this.interactiveFlip.from };
-      this._ensureRaf();
+      this._beginFallback(this.interactiveFlip, false);
     }
   }
 
@@ -927,10 +935,8 @@ export class FlipBookEngine {
     if (shouldTurn) {
       this._finishTurnAnimated();
     } else {
-      // Release early -> smoothly spring back!
-      this.interactiveFlip.mode = 'fallback';
-      this.interactiveFlip.target = { ...this.interactiveFlip.from };
-      this._ensureRaf();
+      // Release early -> crisp dt-eased return with no creeping asymptotic tail
+      this._beginFallback(this.interactiveFlip, true);
     }
   }
 
@@ -1719,6 +1725,29 @@ export class FlipBookEngine {
     this._lastLoopTime = null;
   }
 
+  _beginFallback(f, fromDrag = false) {
+    if (!f) return;
+    const dx = f.from.x - f.coord.x;
+    const dy = f.from.y - f.coord.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.25) {
+      this._cancelInteractiveFlipImmediate();
+      return;
+    }
+    const span = f.singlePrev ? this.pageW : this.pageW * 2;
+    const pullFrac = clamp(dist / Math.max(1, span), 0, 1);
+    f.mode = 'fallback';
+    f.fromDragFallback = Boolean(fromDrag);
+    f.target = { ...f.from };
+    f.fallbackStartX = f.coord.x;
+    f.fallbackStartY = f.coord.y;
+    f.fallbackDur = fromDrag
+      ? Math.round(clamp(165 + pullFrac * 145, 165, 290))
+      : Math.round(clamp(135 + pullFrac * 110, 135, 220));
+    f.fallbackElapsed = 0;
+    this._ensureRaf();
+  }
+
   refreshPendingSnapshots() {
     this._refreshPendingSnapshots();
   }
@@ -1831,22 +1860,34 @@ export class FlipBookEngine {
       }
     }
 
-    // Step interactive corner hover / drag / release fallback spring (0.22 lerp)
+    // Step interactive drag/hover follow (dt-normalized) & timed ease-out fallback return
     let keepInteractive = false;
     const activeI = this.interactiveFlip;
     if (activeI) {
       didAnimateFrame = true;
-      const lerp = 0.22;
-      const dx = activeI.target.x - activeI.coord.x;
-      const dy = activeI.target.y - activeI.coord.y;
-      const nx = activeI.coord.x + dx * lerp;
-      const ny = activeI.coord.y + dy * lerp;
-
-      if (activeI.mode === 'fallback' && Math.hypot(dx, dy) < 1.5) {
-        this._cancelInteractiveFlipImmediate();
+      if (activeI.mode === 'fallback') {
+        activeI.fallbackElapsed = (activeI.fallbackElapsed || 0) + dt;
+        const dur = Math.max(1, activeI.fallbackDur || 200);
+        const t = clamp(activeI.fallbackElapsed / dur, 0, 1);
+        const ease = 1 - Math.pow(1 - t, 3);
+        const sx = activeI.fallbackStartX ?? activeI.coord.x;
+        const sy = activeI.fallbackStartY ?? activeI.coord.y;
+        const nx = sx + (activeI.from.x - sx) * ease;
+        const ny = sy + (activeI.from.y - sy) * ease;
+        if (t >= 1 || Math.hypot(activeI.from.x - nx, activeI.from.y - ny) < 0.25) {
+          this._cancelInteractiveFlipImmediate();
+        } else {
+          this._applyFlipFrame(activeI, { x: nx, y: ny });
+          keepInteractive = true;
+        }
       } else {
+        const followLerp = 1 - Math.pow(1 - 0.24, dt / 16.67);
+        const dx = activeI.target.x - activeI.coord.x;
+        const dy = activeI.target.y - activeI.coord.y;
+        const nx = activeI.coord.x + dx * followLerp;
+        const ny = activeI.coord.y + dy * followLerp;
         this._applyFlipFrame(activeI, { x: nx, y: ny });
-        keepInteractive = activeI.mode === 'fallback' || Math.hypot(dx, dy) >= 0.15;
+        keepInteractive = Math.hypot(dx, dy) >= 0.15;
       }
     }
 
