@@ -536,7 +536,7 @@ function initPageFlip(startIndex = 0) {
     flippingTime: 300,
     showCover: state.showCover,
     showPageCorners: true,
-    disableFlipByClick: state.clickMode === 'smart',
+    disableFlipByClick: !single && state.clickMode === 'smart',
   });
 
   pf.setInteractionDisabled(state.zoom > 1.01);
@@ -566,7 +566,7 @@ function initPageFlip(startIndex = 0) {
       const handledByFlight =
         !e.data?.reversed &&
         fromIdx !== nextIdx &&
-        spawnSingleCollectedFlight({ fromIdx, toIdx: nextIdx });
+        spawnSingleCollectedFlight({ fromIdx, toIdx: nextIdx, fromDragLift: !!e.data?.fromDragLift });
       if (!handledByFlight) {
         clearSingleFlights();
       }
@@ -582,6 +582,10 @@ function initPageFlip(startIndex = 0) {
         els.bookSpineShadow.style.opacity = '0';
       }
     }
+  });
+
+  pf.on('dragLift', (e) => {
+    updateSingleDragPickup(e.data);
   });
 
   pf.on('flip', (e) => {
@@ -1014,14 +1018,26 @@ const singleStackMeta = {
   renderedIdx: null,
   renderToken: 0,
   activeFlights: 0,
+  dragCard: null,
+  dragPose: null,
 };
 
+function clearSingleDragCard() {
+  if (singleStackMeta.dragCard) {
+    singleStackMeta.dragCard.remove();
+    singleStackMeta.dragCard = null;
+  }
+  singleStackMeta.dragPose = null;
+  els.singleCollectedStack?.classList.remove('is-drop-ready');
+}
+
 function clearSingleFlights() {
+  clearSingleDragCard();
   singleStackMeta.activeFlights = 0;
   if (els.singleFlightLayer) {
     els.singleFlightLayer.innerHTML = '';
   }
-  els.singleCollectedStack?.classList.remove('is-waiting', 'is-landing');
+  els.singleCollectedStack?.classList.remove('is-waiting', 'is-landing', 'is-drop-ready');
 }
 
 function getSingleStackMetrics() {
@@ -1121,10 +1137,87 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
   }
 }
 
-function spawnSingleCollectedFlight({ fromIdx, toIdx }) {
+function updateSingleDragPickup(data) {
+  if (!data || !data.active || !canShowSingleCollectedStack(data.fromIdx)) {
+    const hadDrag = !!singleStackMeta.dragCard;
+    clearSingleDragCard();
+    if (hadDrag) updateSingleCollectedStack();
+    return;
+  }
+  if (!els.singleFlightLayer || !els.singleCollectedStack || !els.stage || !els.bookContainer) return;
+
+  const { w, h } = getSingleStackMetrics();
+  els.singleCollectedStack.style.width = `${w}px`;
+  els.singleCollectedStack.style.height = `${h}px`;
+  if (data.fromIdx === 0) {
+    els.singleCollectedStack.classList.add('is-waiting');
+  } else {
+    els.singleCollectedStack.classList.remove('is-waiting');
+    paintSingleStackTopCard(data.fromIdx - 1);
+  }
+  els.singleCollectedStack.hidden = false;
+
+  const stageRect = els.stage.getBoundingClientRect();
+  const bookRect = els.bookContainer.getBoundingClientRect();
+  const destRect = els.singleCollectedStack.getBoundingClientRect();
+  if (!stageRect.width || !bookRect.width || !destRect.width) return;
+
+  let card = singleStackMeta.dragCard;
+  if (!card || Number(card.dataset.pageIdx) !== data.fromIdx) {
+    clearSingleDragCard();
+    card = document.createElement('div');
+    card.id = 'singleDragCard';
+    card.className = 'scs-flying-card';
+    card.dataset.pageIdx = String(data.fromIdx);
+    card.style.width = `${bookRect.width}px`;
+    card.style.height = `${bookRect.height}px`;
+    const snap = createFlightSnapshotCanvas(
+      data.fromIdx,
+      Math.min(bookRect.width * 1.5, 640),
+      Math.min(bookRect.height * 1.5, 900),
+      'scs-flying-canvas'
+    );
+    if (snap) card.appendChild(snap);
+    else card.innerHTML = `<div class="fb-page-num-placeholder">${data.fromIdx + 1}</div>`;
+    const shade = document.createElement('div');
+    shade.className = 'scs-flying-shade';
+    card.appendChild(shade);
+    els.singleFlightLayer.appendChild(card);
+    singleStackMeta.dragCard = card;
+  }
+
+  const r = clamp(data.liftRatio || 0, 0, 1);
+  const srcX = bookRect.left - stageRect.left;
+  const srcY = bookRect.top - stageRect.top;
+  const dstX = destRect.left - stageRect.left;
+  const dstY = destRect.top - stageRect.top;
+  const minScale = destRect.width / bookRect.width;
+  const scale = 0.88 - r * (0.88 - Math.max(minScale * 1.12, 0.36));
+
+  const ptrX = (data.clientX ? data.clientX - stageRect.left : srcX) - (bookRect.width * scale) / 2;
+  const ptrY = (data.clientY ? data.clientY - stageRect.top : srcY) - (bookRect.height * scale) / 2;
+  const follow = clamp(r * 1.2, 0, 1);
+  const x = (srcX - 24) + (ptrX - (srcX - 24)) * follow * 0.72 + (dstX - (srcX - 24)) * Math.max(0, r - 0.35) * 0.45;
+  const y = (srcY - 8) + (ptrY - (srcY - 8)) * follow * 0.72 + (dstY - (srcY - 8)) * Math.max(0, r - 0.35) * 0.45;
+  const rotY = -18 - r * 8;
+  const rotZ = -3 - r * 2.5;
+  const op = clamp(r * 4.5, 0, 0.98);
+  const transformStr = `translate3d(${x}px, ${y}px, 0) rotateY(${rotY}deg) rotateZ(${rotZ}deg) scale(${scale})`;
+
+  card.style.opacity = String(op);
+  card.style.transform = transformStr;
+  singleStackMeta.dragPose = { transform: transformStr, opacity: op, x, y, scale, rotY, rotZ };
+  els.singleCollectedStack.classList.toggle('is-drop-ready', r > 0.25);
+}
+
+function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
   if (!els.singleCollectedStack || !els.singleFlightLayer || !els.stage || !els.bookContainer) {
+    clearSingleDragCard();
     return false;
   }
+  const dragPose = fromDragLift ? singleStackMeta.dragPose : null;
+  clearSingleDragCard();
+
   const goingNext = toIdx > fromIdx;
   const checkIdx = goingNext ? fromIdx : toIdx;
   if (!canShowSingleCollectedStack(checkIdx)) return false;
@@ -1196,23 +1289,38 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx }) {
 
   singleStackMeta.activeFlights += 1;
 
-  const keyframes = goingNext
-    ? [
-        { transform: `translate3d(${srcX - 24}px, ${srcY}px, 0) rotateY(-14deg) rotateZ(-2deg) scale(0.94)`, opacity: 0, offset: 0 },
-        { transform: `translate3d(${srcX - 36}px, ${srcY - 8}px, 0) rotateY(-22deg) rotateZ(-4deg) scale(0.84)`, opacity: 0.96, offset: 0.22 },
-        { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.98, offset: 0.56 },
-        { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
-      ]
-    : [
-        { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
-        { transform: `translate3d(${(dstX + srcX) * 0.36}px, ${midY}px, 0) rotateY(22deg) rotateZ(2deg) scale(${midScale})`, opacity: 0.96, offset: 0.36 },
-        { transform: `translate3d(${srcX - 18}px, ${srcY + 6}px, 0) rotateY(10deg) rotateZ(0.5deg) scale(0.82)`, opacity: 0.22, offset: 0.65 },
-        { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 0.80 },
-        { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 1 },
-      ];
+  let keyframes;
+  let duration;
+  if (goingNext && dragPose) {
+    const mx = (dragPose.x + dstX) * 0.5 - 12;
+    const my = Math.min(dragPose.y, dstY) - 14;
+    const ms = (dragPose.scale + sx) * 0.5;
+    keyframes = [
+      { transform: dragPose.transform, opacity: Math.max(0.9, dragPose.opacity), offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-14deg) rotateZ(-3deg) scale(${ms})`, opacity: 0.98, offset: 0.5 },
+      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+    ];
+    duration = 280;
+  } else {
+    keyframes = goingNext
+      ? [
+          { transform: `translate3d(${srcX - 24}px, ${srcY}px, 0) rotateY(-14deg) rotateZ(-2deg) scale(0.94)`, opacity: 0, offset: 0 },
+          { transform: `translate3d(${srcX - 36}px, ${srcY - 8}px, 0) rotateY(-22deg) rotateZ(-4deg) scale(0.84)`, opacity: 0.96, offset: 0.22 },
+          { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.98, offset: 0.56 },
+          { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+        ]
+      : [
+          { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
+          { transform: `translate3d(${(dstX + srcX) * 0.36}px, ${midY}px, 0) rotateY(22deg) rotateZ(2deg) scale(${midScale})`, opacity: 0.96, offset: 0.36 },
+          { transform: `translate3d(${srcX - 18}px, ${srcY + 6}px, 0) rotateY(10deg) rotateZ(0.5deg) scale(0.82)`, opacity: 0.22, offset: 0.65 },
+          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 0.80 },
+          { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 1 },
+        ];
+    duration = goingNext ? 440 : 380;
+  }
 
   const anim = card.animate(keyframes, {
-    duration: goingNext ? 440 : 380,
+    duration,
     easing: 'cubic-bezier(0.25, 0.80, 0.35, 1)',
     fill: 'forwards',
   });

@@ -498,10 +498,14 @@ export class FlipBookEngine {
     }
   }
 
-  _clampDragTarget(bp, fromPoint, side) {
+  _clampDragTarget(bp, fromPoint, side, grabStartPos = null) {
     const sp = this._bookToSpine(bp);
     if (this.single && side === 'left') {
-      const tx = clamp(sp.x, 0, this.pageW);
+      let tx = clamp(sp.x, 0, this.pageW);
+      if (grabStartPos && grabStartPos.x > 32) {
+        const dx = bp.x - grabStartPos.x;
+        tx = clamp(22 + Math.max(0, dx) * 1.45, 0, this.pageW);
+      }
       let ty = clamp(sp.y, 0, this.pageH);
       const edgeGuardSpan = Math.min(48, this.pageW * 0.14);
       if (tx < edgeGuardSpan) {
@@ -513,13 +517,24 @@ export class FlipBookEngine {
     }
 
     let tx = clamp(sp.x, -this.pageW, this.pageW);
+    let ty = sp.y;
+    if (this.single && side === 'right' && grabStartPos) {
+      const dx = bp.x - grabStartPos.x;
+      const dy = bp.y - grabStartPos.y;
+      if (grabStartPos.x < this.pageW - 32) {
+        const pullDist = Math.max(0, -dx) * 1.45 + (dx <= 16 ? Math.max(0, -dy) * 0.55 : 0);
+        tx = clamp(this.pageW - 22 - pullDist + Math.max(0, dx) * 0.35, -this.pageW, this.pageW - 4);
+      } else if (dx <= 8 && dy < -14) {
+        const upBoost = Math.max(0, -dy) * 0.42;
+        tx = clamp(tx - upBoost, -this.pageW, this.pageW);
+      }
+    }
     if (side === 'right' && tx > fromPoint.x) tx = fromPoint.x;
     if (side === 'left' && tx < fromPoint.x) tx = fromPoint.x;
 
     // Near the outer edge (before dragging deeply into the page), bound vertical tilt proportionally
     // to horizontal pull so clicking or resting at the outer edge never slices the page horizontally.
     const pull = Math.abs(tx - fromPoint.x);
-    let ty = sp.y;
     const edgeGuardSpan = Math.min(48, this.pageW * 0.14);
     if (pull < edgeGuardSpan) {
       const safeSlope = Math.min(0.65, (this.pageW * 0.72) / Math.max(1, this.pageH));
@@ -540,30 +555,45 @@ export class FlipBookEngine {
     if (this.settings.disableFlipByClick && !side) return;
     if (bp.y < 0 || bp.y > this.pageH || bp.x < 0 || bp.x > (this.single ? this.pageW : this.pageW * 2)) return;
 
+    let chosenSide = side;
+    if (!chosenSide) {
+      if (this.single) {
+        if (bp.x < this.pageW * 0.25 && this.currentSpreadIndex > 0) chosenSide = 'left';
+        else if (this.currentSpreadIndex < this.spreads.length - 1) chosenSide = 'right';
+        else if (this.currentSpreadIndex > 0) chosenSide = 'left';
+        else return;
+      } else {
+        chosenSide = bp.x < this.pageW ? 'left' : 'right';
+      }
+    }
+
     e.preventDefault();
     this.isPointerDown = true;
     this.pointerMoved = false;
     this.pointerDownPos = bp;
     this.lastMovePos = bp;
+    this.lastClientPos = { x: e.clientX, y: e.clientY };
     this.moveVelX = 0;
 
-    const chosenSide = side || (this.single ? (bp.x < this.pageW / 2 ? 'left' : 'right') : bp.x < this.pageW ? 'left' : 'right');
     if (this.flyingFlips.length) {
       this._settleAllFlyingFlips();
     }
     if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
       // Grabbed already-curled hover/fallback corner cleanly without sudden angle jump
       this.interactiveFlip.mode = 'drag';
+      this.interactiveFlip.grabStartPos = { ...bp };
+      this.interactiveFlip.lastClientX = e.clientX;
+      this.interactiveFlip.lastClientY = e.clientY;
       if (!this.interactiveFlip.singlePrev) {
         this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
       }
-      this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, chosenSide);
+      this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, chosenSide, this.interactiveFlip.grabStartPos);
       const coordAsBook = this.single ? { ...this.interactiveFlip.coord } : { x: this.interactiveFlip.coord.x + this.pageW, y: this.interactiveFlip.coord.y };
       this.interactiveFlip.coord = this._clampDragTarget(coordAsBook, this.interactiveFlip.from, chosenSide);
       this._setState('user_fold');
     } else {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
-      this._beginInteractiveTurn(chosenSide, bp, 'drag');
+      this._beginInteractiveTurn(chosenSide, bp, 'drag', { x: e.clientX, y: e.clientY });
     }
   }
 
@@ -580,7 +610,15 @@ export class FlipBookEngine {
         this.moveVelX = bp.x - this.lastMovePos.x;
       }
       this.lastMovePos = bp;
-      this.interactiveFlip.target = this._clampDragTarget(bp, this.interactiveFlip.from, this.interactiveFlip.side);
+      this.lastClientPos = { x: e.clientX, y: e.clientY };
+      this.interactiveFlip.lastClientX = e.clientX;
+      this.interactiveFlip.lastClientY = e.clientY;
+      this.interactiveFlip.target = this._clampDragTarget(
+        bp,
+        this.interactiveFlip.from,
+        this.interactiveFlip.side,
+        this.interactiveFlip.grabStartPos
+      );
       this._ensureRaf();
       return;
     }
@@ -627,18 +665,42 @@ export class FlipBookEngine {
     if (!this.interactiveFlip) return;
 
     if (!this.pointerMoved) {
-      // Simple click on edge -> trigger full animated page turn!
+      // Simple click anywhere -> trigger full animated page turn!
       this._finishTurnAnimated();
       return;
     }
 
     const sp = this._bookToSpine(bp);
-    const dir = this.interactiveFlip.side === 'right' ? 1 : -1; // +1 forward, -1 back
+    const f = this.interactiveFlip;
+    const dir = f.side === 'right' ? 1 : -1; // +1 forward, -1 back
     const midX = this.single ? this.pageW / 2 : 0;
-    const crossedCenter = dir === 1 ? sp.x < midX : sp.x > midX;
-    const flicked = dir === 1 ? this.moveVelX < -4 && sp.x < this.pageW * 0.72 : this.moveVelX > 4 && sp.x > (this.single ? this.pageW * 0.22 : -this.pageW * 0.65);
+    let shouldTurn = false;
+    if (this.single) {
+      const grabX = f.grabStartPos?.x ?? (dir === 1 ? this.pageW : 0);
+      const grabY = f.grabStartPos?.y ?? bp.y;
+      if (dir === 1) {
+        const dragTravel = (f.from.x - f.coord.x) / (2 * this.pageW);
+        shouldTurn =
+          dragTravel > 0.24 ||
+          sp.x < midX ||
+          (this.moveVelX < -3.5 && sp.x < this.pageW * 0.85) ||
+          bp.x < grabX - 45 ||
+          (bp.y < grabY - 52 && bp.x <= grabX + 18);
+      } else {
+        const dragTravel = f.coord.x / Math.max(1, this.pageW);
+        shouldTurn =
+          dragTravel > 0.28 ||
+          sp.x > midX ||
+          (this.moveVelX > 3.5 && sp.x > this.pageW * 0.15) ||
+          bp.x > grabX + 45;
+      }
+    } else {
+      const crossedCenter = dir === 1 ? sp.x < midX : sp.x > midX;
+      const flicked = dir === 1 ? this.moveVelX < -4 && sp.x < this.pageW * 0.72 : this.moveVelX > 4 && sp.x > -this.pageW * 0.65;
+      shouldTurn = crossedCenter || flicked;
+    }
 
-    if (crossedCenter || flicked) {
+    if (shouldTurn) {
       this._finishTurnAnimated();
     } else {
       // Release early -> smoothly spring back!
@@ -944,7 +1006,7 @@ export class FlipBookEngine {
     return { fromIdx, toIdx, underIdx };
   }
 
-  _beginInteractiveTurn(side, bookPos, mode) {
+  _beginInteractiveTurn(side, bookPos, mode, clientPos = null) {
     const dir = side === 'right' ? 1 : -1;
     const prevSpread = this.currentSpreadIndex;
     const nextSpread = prevSpread + dir;
@@ -960,7 +1022,7 @@ export class FlipBookEngine {
         ? bookPos.y > this.pageH / 2
           ? this.pageH - 4
           : 4
-        : clamp(bookPos.y, 0, this.pageH);
+        : clamp(bookPos.y, 4, Math.max(4, this.pageH - 4));
     const fromPoint = { x: startX, y: clampedY };
 
     const seq = ++this.flipSeq;
@@ -982,6 +1044,7 @@ export class FlipBookEngine {
     if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
     else this.leftSlot.style.visibility = 'hidden';
 
+    const grabStartPos = mode === 'drag' ? { x: bookPos.x, y: bookPos.y } : null;
     this.interactiveFlip = {
       ...dom,
       side,
@@ -989,9 +1052,13 @@ export class FlipBookEngine {
       prevSpread,
       nextSpread,
       mode,
+      grabStartPos,
+      lastClientX: clientPos?.x ?? 0,
+      lastClientY: clientPos?.y ?? 0,
+      singleDragLifting: false,
       from: fromPoint,
       coord: { ...fromPoint },
-      target: this._clampDragTarget(bookPos, fromPoint, side),
+      target: this._clampDragTarget(bookPos, fromPoint, side, grabStartPos),
     };
 
     this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
@@ -1114,6 +1181,32 @@ export class FlipBookEngine {
       const spineAppear = travel > 0.78 ? clamp((travel - 0.78) / 0.18, 0, 1) : 0;
       f.upSpine.style.opacity = String(spineAppear);
     }
+
+    if (this.single && f.side === 'right') {
+      if (f.mode === 'drag' || f.mode === 'fallback') {
+        const liftRatio = travel <= 0.22 ? 0 : clamp((travel - 0.22) / 0.44, 0, 1);
+        const peelOpacity = 1 - clamp((travel - 0.24) / 0.30, 0, 1);
+        f.downMask.style.opacity = String(peelOpacity);
+        f.upMask.style.opacity = String(peelOpacity);
+        f.castBounds.style.opacity = String(peelOpacity);
+        f.flapDropBounds.style.opacity = String(peelOpacity);
+        f.singleDragLifting = liftRatio > 0.01;
+        this._emit('dragLift', {
+          active: f.singleDragLifting,
+          fromIdx: f.fromIdx,
+          toIdx: f.toIdx,
+          liftRatio,
+          clientX: f.lastClientX || 0,
+          clientY: f.lastClientY || 0,
+        });
+      } else if (f.mode === 'animate') {
+        const handOffOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.42) / 0.28, 0, 1);
+        f.downMask.style.opacity = String(handOffOpacity);
+        f.upMask.style.opacity = String(handOffOpacity);
+        f.castBounds.style.opacity = String(handOffOpacity);
+        f.flapDropBounds.style.opacity = String(handOffOpacity);
+      }
+    }
   }
 
   _finishTurnAnimated() {
@@ -1129,6 +1222,7 @@ export class FlipBookEngine {
     }
 
     const fromPage = this.currentPageIndex;
+    const fromDragLift = !!(this.single && f.singleDragLifting);
     this.currentSpreadIndex = f.nextSpread;
     this.currentPageIndex = (this.spreads[f.nextSpread] || [0])[0];
 
@@ -1152,9 +1246,10 @@ export class FlipBookEngine {
     f.baseRate = f.rate;
     f.arcMode = f.singlePrev;
     f.reversed = false;
+    f.singleDragLifting = false;
 
     this.flyingFlips.push(f);
-    this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: f.side });
+    this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: f.side, fromDragLift });
     this._setState('flipping');
     this._ensureRaf();
   }
@@ -1318,6 +1413,9 @@ export class FlipBookEngine {
 
   _cancelInteractiveFlipImmediate() {
     if (!this.interactiveFlip) return;
+    if (this.interactiveFlip.singleDragLifting) {
+      this._emit('dragLift', { active: false });
+    }
     this._removeFlipDom(this.interactiveFlip);
     this.interactiveFlip = null;
     this._updateLandingSpineBlend();
@@ -1329,6 +1427,7 @@ export class FlipBookEngine {
 
   _cancelAllFlipsImmediate() {
     this._stopRaf();
+    this._emit('dragLift', { active: false });
     this.flipLayer.innerHTML = '';
     this.interactiveFlip = null;
     this.flyingFlips = [];

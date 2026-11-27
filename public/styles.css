@@ -2161,6 +2161,16 @@ body.bars-hidden .single-collected-stack {
   transform: translateY(-2px) rotate(0deg) scale(1.04);
 }
 
+.single-collected-stack.is-drop-ready {
+  opacity: 1;
+  transform: translateY(-2px) rotate(0deg) scale(1.08);
+  filter: drop-shadow(0 0 12px rgba(138, 180, 248, 0.52));
+}
+
+.single-collected-stack.is-drop-ready .scs-top-card {
+  border-color: #8ab4f8;
+}
+
 .single-collected-stack.is-waiting {
   opacity: 0;
   pointer-events: none;
