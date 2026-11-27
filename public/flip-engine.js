@@ -255,7 +255,16 @@ export function getBakedDarkCanvas(srcCanvas) {
   return dc;
 }
 
+function releaseCanvasesIn(root) {
+  if (!root?.querySelectorAll) return;
+  for (const c of root.querySelectorAll('canvas')) {
+    c.width = 0;
+    c.height = 0;
+  }
+}
+
 function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = false, pageW = 0, pageH = 0) {
+  releaseCanvasesIn(wrap);
   wrap.innerHTML = '';
   const rawIdx = pageNode ? Number(pageNode.dataset.pageIndex) : NaN;
   if (Number.isFinite(rawIdx)) {
@@ -358,6 +367,7 @@ export class FlipBookEngine {
     this.isPointerDown = false;
     this.activePointerId = null;
     this.pointerMoved = false;
+    this._pointerMovedResetTimer = null;
     this.pointerDownPos = null;
     this.lastMovePos = null;
     this.lastClientPos = null;
@@ -438,9 +448,18 @@ export class FlipBookEngine {
   destroy() {
     this._stopRaf();
     this._detachEvents();
+    clearTimeout(this._pointerMovedResetTimer);
+    this._pointerMovedResetTimer = null;
+    this.pointerMoved = false;
+    this._releaseActivePointer();
+    releaseCanvasesIn(this.flipLayer);
     this.interactiveFlip = null;
     this.flyingFlips = [];
     this.host.innerHTML = '';
+    this.stage = null;
+    this.leftSlot = null;
+    this.rightSlot = null;
+    this.flipLayer = null;
     this.events.clear();
     this.pageNodes = [];
   }
@@ -744,6 +763,8 @@ export class FlipBookEngine {
     }
 
     e.preventDefault();
+    clearTimeout(this._pointerMovedResetTimer);
+    this._pointerMovedResetTimer = null;
     this.isPointerDown = true;
     this.activePointerId = e.pointerId ?? null;
     this.pointerMoved = false;
@@ -780,6 +801,11 @@ export class FlipBookEngine {
         this.interactiveFlip.singlePrev &&
         this.settings.hasCollectedStack?.()
       );
+      this.interactiveFlip.stackBackedNext = !!(
+        this.single &&
+        chosenSide === 'right' &&
+        this.settings.hasCollectedStack?.()
+      );
       if (!this.interactiveFlip.singlePrev) {
         this.interactiveFlip.from.y = clamp(bp.y, 0, this.pageH);
       }
@@ -792,11 +818,7 @@ export class FlipBookEngine {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
       const began = this._beginInteractiveTurn(chosenSide, bp, 'drag', { x: e.clientX, y: e.clientY });
       if (!began) {
-        this.isPointerDown = false;
-        this.activePointerId = null;
-        if (e.pointerId !== undefined && e.pointerId !== null) {
-          try { this.stage?.releasePointerCapture?.(e.pointerId); } catch {}
-        }
+        this._releaseActivePointer();
       }
     }
   }
@@ -843,7 +865,7 @@ export class FlipBookEngine {
     // Hover corner-tip curl only (FlipHTML5 aroundCorner behavior)
     if (!this.settings.showPageCorners || this.isPointerDown) return;
     if (this.flyingFlips.length > 0) return;
-    if (e.target && e.target !== this.stage && e.target.closest?.('.more-menu, .side-drawer, .bottom-bar, .top-bar, .sticky-edge-tab, .popover-panel, .thumbnails-strip, .modal-backdrop, .nav-back-pill, .auto-playback-hud, .mag-controls-pill')) {
+    if (e.target && e.target !== this.stage && e.target.closest?.('.more-menu, .side-drawer, .bottom-bar, .top-bar, .sticky-edge-tab, .popover-panel, .thumbnails-strip, .modal-backdrop, .nav-back-pill, .auto-playback-hud, .mag-controls-pill, .mag-lens, .focus-curtain-band, .focus-curtain-pill, .ref-pin-card, .snip-overlay, .page-context-menu')) {
       if (this.interactiveFlip && this.interactiveFlip.mode === 'hover') {
         this._beginFallback(this.interactiveFlip, false);
       }
@@ -882,13 +904,7 @@ export class FlipBookEngine {
     }
   }
 
-  _handlePointerUp(e) {
-    if (this._handledPointerEv === e) return;
-    this._handledPointerEv = e;
-    if (!this.isPointerDown) return;
-    if (this.activePointerId !== null && e.pointerId !== undefined && e.pointerId !== this.activePointerId) {
-      return;
-    }
+  _releaseActivePointer() {
     const releasedId = this.activePointerId;
     this.isPointerDown = false;
     this.activePointerId = null;
@@ -899,6 +915,25 @@ export class FlipBookEngine {
         }
       } catch {}
     }
+  }
+
+  _schedulePointerMovedReset() {
+    clearTimeout(this._pointerMovedResetTimer);
+    this._pointerMovedResetTimer = setTimeout(() => {
+      this._pointerMovedResetTimer = null;
+      this.pointerMoved = false;
+    }, 0);
+  }
+
+  _handlePointerUp(e) {
+    if (this._handledPointerEv === e) return;
+    this._handledPointerEv = e;
+    if (!this.isPointerDown) return;
+    if (this.activePointerId !== null && e.pointerId !== undefined && e.pointerId !== this.activePointerId) {
+      return;
+    }
+    this._releaseActivePointer();
+    this._schedulePointerMovedReset();
 
     const cx = Number.isFinite(e?.clientX) ? e.clientX : (this.lastClientPos?.x ?? 0);
     const cy = Number.isFinite(e?.clientY) ? e.clientY : (this.lastClientPos?.y ?? 0);
@@ -955,11 +990,14 @@ export class FlipBookEngine {
     if (this.activePointerId !== null && e?.pointerId !== undefined && e.pointerId !== this.activePointerId) {
       return;
     }
-    this._handlePointerUp({
-      pointerId: this.activePointerId,
-      clientX: Number.isFinite(e?.clientX) ? e.clientX : (this.lastClientPos?.x ?? 0),
-      clientY: Number.isFinite(e?.clientY) ? e.clientY : (this.lastClientPos?.y ?? 0),
-    });
+    this._releaseActivePointer();
+    this._schedulePointerMovedReset();
+    if (!this.interactiveFlip) return;
+    if (this.interactiveFlip.mode === 'hover') {
+      this._cancelInteractiveFlipImmediate();
+    } else {
+      this._beginFallback(this.interactiveFlip, Boolean(this.interactiveFlip.wasDragged));
+    }
   }
 
   _handleLostPointerCapture(e) {
@@ -980,15 +1018,17 @@ export class FlipBookEngine {
 
   _handleWindowBlur() {
     if (!this.isPointerDown) return;
-    // If OS focus leaves without pointer capture delivering moves/up, settle smoothly
-    const captured = this.activePointerId !== null && this.stage?.hasPointerCapture?.(this.activePointerId);
-    if (!captured) {
-      this._handlePointerUp({
-        pointerId: this.activePointerId,
-        clientX: this.lastClientPos?.x ?? 0,
-        clientY: this.lastClientPos?.y ?? 0,
-      });
+    if (!this.pointerMoved && this.interactiveFlip) {
+      this._releaseActivePointer();
+      this._schedulePointerMovedReset();
+      this._beginFallback(this.interactiveFlip, false);
+      return;
     }
+    this._handlePointerUp({
+      pointerId: this.activePointerId,
+      clientX: this.lastClientPos?.x ?? 0,
+      clientY: this.lastClientPos?.y ?? 0,
+    });
   }
 
   /* ---------- Interactive Flip Construction & rAF Spring Loop ---------- */
@@ -1391,6 +1431,7 @@ export class FlipBookEngine {
 
     const grabStartPos = mode === 'drag' ? { x: bookPos.x, y: bookPos.y } : null;
     const stackBackedPrev = !!(singlePrev && this.settings.hasCollectedStack?.() && mode !== 'hover');
+    const stackBackedNext = !!(this.single && side === 'right' && this.settings.hasCollectedStack?.() && mode !== 'hover');
     this.interactiveFlip = {
       ...dom,
       side,
@@ -1400,6 +1441,7 @@ export class FlipBookEngine {
       mode,
       wasDragged: mode === 'drag',
       stackBackedPrev,
+      stackBackedNext,
       grabStartPos,
       lastClientX: clientPos?.x ?? 0,
       lastClientY: clientPos?.y ?? 0,
@@ -1620,7 +1662,7 @@ export class FlipBookEngine {
     }
 
     let layerOpacity = 1;
-    if (this.single && f.side === 'right') {
+    if (this.single && f.side === 'right' && f.stackBackedNext) {
       if (f.mode === 'drag' || f.mode === 'fallback') {
         const liftRatio = travel <= 0.22 ? 0 : clamp((travel - 0.22) / 0.44, 0, 1);
         layerOpacity = 1 - clamp((travel - 0.24) / 0.30, 0, 1);
@@ -1651,6 +1693,17 @@ export class FlipBookEngine {
         if (f.upTabsWrap) f.upTabsWrap.style.opacity = String(layerOpacity);
         f.castBounds.style.opacity = String(layerOpacity);
         f.flapDropBounds.style.opacity = String(layerOpacity);
+      }
+    } else if (this.single && f.side === 'right') {
+      f.downMask.style.opacity = '1';
+      f.upMask.style.opacity = '1';
+      if (f.downTabs) f.downTabs.style.opacity = '1';
+      if (f.upTabsWrap) f.upTabsWrap.style.opacity = '1';
+      f.castBounds.style.opacity = '1';
+      f.flapDropBounds.style.opacity = '1';
+      if (f.singleDragLifting) {
+        f.singleDragLifting = false;
+        this._emit('dragLift', { active: false });
       }
     }
 
@@ -1796,7 +1849,10 @@ export class FlipBookEngine {
 
   _removeFlipDom(f) {
     if (!f?.els) return;
-    for (const el of f.els) el.remove();
+    for (const el of f.els) {
+      releaseCanvasesIn(el);
+      el.remove();
+    }
   }
 
   _loop(now) {
@@ -1944,6 +2000,9 @@ export class FlipBookEngine {
     }
     this._removeFlipDom(this.interactiveFlip);
     this.interactiveFlip = null;
+    if (!this.isPointerDown) {
+      this._schedulePointerMovedReset();
+    }
     this._updateLandingSpineBlend();
     if (!this.flyingFlips.length) {
       this._renderStaticSpread();
@@ -1954,7 +2013,10 @@ export class FlipBookEngine {
 
   _cancelAllFlipsImmediate() {
     this._stopRaf();
+    this._releaseActivePointer();
+    this._schedulePointerMovedReset();
     this._emit('dragLift', { active: false });
+    releaseCanvasesIn(this.flipLayer);
     this.flipLayer.innerHTML = '';
     this.interactiveFlip = null;
     this.flyingFlips = [];
@@ -2067,6 +2129,7 @@ export class FlipBookEngine {
 
     const singlePrev = this.single && dir === -1;
     const stackBackedPrev = !!(singlePrev && this.settings.hasCollectedStack?.());
+    const stackBackedNext = !!(this.single && dir === 1 && this.settings.hasCollectedStack?.());
     const cornerY = corner === 'top' ? 0 : this.pageH;
     const startX = this.single ? (side === 'right' ? this.pageW : 0) : side === 'right' ? this.pageW : -this.pageW;
     const targetX = side === 'right' ? -this.pageW : this.pageW;
@@ -2125,6 +2188,7 @@ export class FlipBookEngine {
       prevSpread,
       nextSpread,
       stackBackedPrev,
+      stackBackedNext,
       mode: 'animate',
       from: fromPoint,
       coord: delayMs > 0 ? { ...fromPoint } : { ...initCoord },

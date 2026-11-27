@@ -21,11 +21,19 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --port|-P)
-      PORT="${2:-0}"
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Error: $1 requires a port number" >&2
+        exit 1
+      fi
+      PORT="$2"
       shift 2
       ;;
     --page|-p)
-      PAGE="${2:-}"
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Error: $1 requires a page number" >&2
+        exit 1
+      fi
+      PAGE="$2"
       shift 2
       ;;
     --help|-h)
@@ -40,14 +48,40 @@ Options:
 USAGE
       exit 0
       ;;
-    *)
-      if [[ -z "$FILE_ARG" ]]; then
+    --)
+      shift
+      if [[ $# -gt 0 ]]; then
+        if [[ -n "$FILE_ARG" ]]; then
+          echo "Error: Unexpected extra argument: $1" >&2
+          exit 1
+        fi
         FILE_ARG="$1"
+        shift
       fi
+      if [[ $# -gt 0 ]]; then
+        echo "Error: Unexpected extra argument: $1" >&2
+        exit 1
+      fi
+      ;;
+    -*)
+      echo "Error: Unknown option: $1 (try --help)" >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$FILE_ARG" ]]; then
+        echo "Error: Unexpected extra argument: $1" >&2
+        exit 1
+      fi
+      FILE_ARG="$1"
       shift
       ;;
   esac
 done
+
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 0 || PORT > 65535 )); then
+  echo "Error: Invalid port: $PORT" >&2
+  exit 1
+fi
 
 # Support file.pdf#p=50 syntax
 if [[ -n "$FILE_ARG" && "$FILE_ARG" == *"#p="* ]]; then
@@ -58,22 +92,33 @@ if [[ -n "$FILE_ARG" && "$FILE_ARG" == *"#p="* ]]; then
   FILE_ARG="${FILE_ARG%%#p=*}"
 fi
 
+if [[ -n "$PAGE" ]]; then
+  if [[ ! "$PAGE" =~ ^[0-9]+$ ]] || (( PAGE < 1 )); then
+    echo "Error: Invalid page number: $PAGE" >&2
+    exit 1
+  fi
+fi
+
 ABS_FILE=""
 if [[ -n "$FILE_ARG" ]]; then
   if [[ ! -f "$FILE_ARG" ]]; then
     echo "Error: PDF file not found: $FILE_ARG" >&2
     exit 1
   fi
-  ABS_FILE="$(cd "$(dirname "$FILE_ARG")" && pwd)/$(basename "$FILE_ARG")"
-  if [[ -n "$PAGE" ]]; then
-    node "$READER_DIR/server.mjs" --register "$ABS_FILE" --page "$PAGE" >/dev/null
-  else
-    node "$READER_DIR/server.mjs" --register "$ABS_FILE" >/dev/null
+  if [[ "${FILE_ARG:l}" != *.pdf ]]; then
+    echo "Error: Only PDF files are supported: $FILE_ARG" >&2
+    exit 1
   fi
+  ABS_FILE="$(cd "$(dirname -- "$FILE_ARG")" && pwd)/$(basename -- "$FILE_ARG")"
 fi
 
 if [[ "$WEB_MODE" -eq 0 && -d "$APP_BUNDLE" ]]; then
   if [[ -n "$ABS_FILE" ]]; then
+    if [[ -n "$PAGE" ]]; then
+      node "$READER_DIR/server.mjs" --register "$ABS_FILE" --page "$PAGE" >/dev/null
+    else
+      node "$READER_DIR/server.mjs" --register "$ABS_FILE" >/dev/null
+    fi
     open -a "$APP_BUNDLE" "$ABS_FILE"
   else
     open -a "$APP_BUNDLE"
@@ -81,11 +126,13 @@ if [[ "$WEB_MODE" -eq 0 && -d "$APP_BUNDLE" ]]; then
   exit 0
 fi
 
-# Web fallback / --web mode: reuse running server if alive, else spawn detached
+mkdir -p "$DATA_DIR"
+
+# Web fallback / --web mode: reuse running server if alive (and matching explicit --port), else spawn detached
 TARGET_PORT=""
 if [[ -f "$SERVER_JSON" ]]; then
-  EXISTING_PORT="$(python3 -c "import json,sys; d=json.load(open('$SERVER_JSON')); print(d.get('port',''))" 2>/dev/null || true)"
-  if [[ -n "$EXISTING_PORT" ]] && curl -sf "http://127.0.0.1:${EXISTING_PORT}/api/health" >/dev/null 2>&1; then
+  EXISTING_PORT="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("port",""))' "$SERVER_JSON" 2>/dev/null || true)"
+  if [[ -n "$EXISTING_PORT" && ( "$PORT" -eq 0 || "$EXISTING_PORT" == "$PORT" ) ]] && curl -sf "http://127.0.0.1:${EXISTING_PORT}/api/health" >/dev/null 2>&1; then
     TARGET_PORT="$EXISTING_PORT"
   fi
 fi
@@ -100,8 +147,8 @@ if [[ -z "$TARGET_PORT" ]]; then
   nohup node "$READER_DIR/server.mjs" "${ARGS[@]}" >"$LOG_FILE" 2>&1 </dev/null &
   for _ in {1..40}; do
     if [[ -f "$SERVER_JSON" ]]; then
-      CANDIDATE="$(python3 -c "import json; print(json.load(open('$SERVER_JSON')).get('port',''))" 2>/dev/null || true)"
-      if [[ -n "$CANDIDATE" ]] && curl -sf "http://127.0.0.1:${CANDIDATE}/api/health" >/dev/null 2>&1; then
+      CANDIDATE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("port",""))' "$SERVER_JSON" 2>/dev/null || true)"
+      if [[ -n "$CANDIDATE" && ( "$PORT" -eq 0 || "$CANDIDATE" == "$PORT" ) ]] && curl -sf "http://127.0.0.1:${CANDIDATE}/api/health" >/dev/null 2>&1; then
         TARGET_PORT="$CANDIDATE"
         break
       fi
@@ -117,10 +164,14 @@ fi
 
 URL="http://127.0.0.1:${TARGET_PORT}/"
 if [[ -n "$ABS_FILE" ]]; then
-  RESP="$(curl -sf -X POST "http://127.0.0.1:${TARGET_PORT}/api/open" \
+  OPEN_PAYLOAD="$(python3 -c 'import json,sys; print(json.dumps({"path": sys.argv[1], "page": int(sys.argv[2]) if sys.argv[2] else None}))' "$ABS_FILE" "$PAGE")"
+  if ! RESP="$(curl -sS -f -X POST "http://127.0.0.1:${TARGET_PORT}/api/open" \
     -H "Content-Type: application/json" \
-    -d "$(python3 -c "import json,sys; print(json.dumps({'path': sys.argv[1], 'page': int(sys.argv[2]) if sys.argv[2] else None}))" "$ABS_FILE" "$PAGE")")"
-  BOOK_ID="$(python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('id',''))" <<<"$RESP")"
+    -d "$OPEN_PAYLOAD")"; then
+    echo "Error: Failed to open PDF via FlipBook server at http://127.0.0.1:${TARGET_PORT}/" >&2
+    exit 1
+  fi
+  BOOK_ID="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("id",""))' <<<"$RESP" 2>/dev/null || true)"
   if [[ -n "$BOOK_ID" ]]; then
     URL="http://127.0.0.1:${TARGET_PORT}/?book=${BOOK_ID}"
     [[ -n "$PAGE" ]] && URL="${URL}#p=${PAGE}"

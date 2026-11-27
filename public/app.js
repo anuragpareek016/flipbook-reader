@@ -115,6 +115,7 @@ const els = {
   stage: document.getElementById('stage'),
   welcomeOverlay: document.getElementById('welcomeOverlay'),
   btnWelcomePick: document.getElementById('btnWelcomePick'),
+  btnBrowseWelcome: document.getElementById('btnBrowseWelcome'),
   welcomeRecentWrap: document.getElementById('welcomeRecentWrap'),
   welcomeRecentList: document.getElementById('welcomeRecentList'),
   loadingOverlay: document.getElementById('loadingOverlay'),
@@ -247,7 +248,9 @@ const els = {
   libraryModal: document.getElementById('libraryModal'),
   btnCloseLibrary: document.getElementById('btnCloseLibrary'),
   btnModalPickPdf: document.getElementById('btnModalPickPdf'),
+  btnModalBrowsePdf: document.getElementById('btnModalBrowsePdf'),
   libraryList: document.getElementById('libraryList'),
+  appToast: document.getElementById('appToast'),
 
   btnMore: document.getElementById('btnMore'),
   btnThumbs: document.getElementById('btnThumbs'),
@@ -404,6 +407,18 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+let toastTimer = 0;
+function showToast(message, { isError = false, durationMs = 3800 } = {}) {
+  if (!els.appToast || !message) return;
+  clearTimeout(toastTimer);
+  els.appToast.textContent = String(message);
+  els.appToast.classList.toggle('is-error', Boolean(isError));
+  els.appToast.hidden = false;
+  toastTimer = setTimeout(() => {
+    if (els.appToast) els.appToast.hidden = true;
+  }, durationMs);
+}
+
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -472,13 +487,18 @@ function formatSpreadLabel(indices = getVisibleIndices()) {
 }
 
 /* ---------- Persistence & Server API ---------- */
-async function fetchLibrary() {
+let hasAppliedInitialSettings = false;
+
+async function fetchLibrary({ applySettings = false } = {}) {
   try {
     const res = await fetch('/api/library');
     if (!res.ok) return null;
     const data = await res.json();
     state.libraryBooks = data.books || [];
-    applySavedSettings(data.settings || {});
+    if (!hasAppliedInitialSettings || applySettings) {
+      hasAppliedInitialSettings = true;
+      applySavedSettings(data.settings || {});
+    }
     renderLibraryLists();
     return data;
   } catch {
@@ -572,73 +592,93 @@ function applySavedSettings(settings) {
   updateFocusCurtainUi();
 }
 
+function buildPersistPayload() {
+  const payload = {
+    settings: {
+      theme: state.theme,
+      readDark: state.readDark,
+      paperWarmth: state.paperWarmth,
+      paperGrain: state.paperGrain,
+      paperGrainStrength: state.paperGrainStrength,
+      paperGrainStyle: state.paperGrainStyle,
+      paperGrainScalePx: state.paperGrainScalePx,
+      autoHideBars: state.autoHideBars,
+      twoFingerPan: state.twoFingerPan,
+      scrollMode: state.scrollMode,
+      soundEnabled: state.soundEnabled,
+      soundPreset: state.soundPreset,
+      ambientPreset: state.ambientPreset,
+      ambientVolume: state.ambientVolume,
+      pageMode: state.pageMode,
+      showCover: state.showCover,
+      clickMode: state.clickMode,
+      autoFlipSeconds: state.autoFlipSeconds,
+      autoScrollSpeed: state.autoScrollSpeed,
+      magStyle: state.magStyle,
+      magPower: state.magPower,
+      magCircleSize: state.magCircleSize,
+      magBarWidth: state.magBarWidth,
+      magBarHeight: state.magBarHeight,
+      curtainHeight: state.curtainHeight,
+      curtainLengthPct: state.curtainLengthPct,
+      curtainDim: state.curtainDim,
+      curtainTone: state.curtainTone,
+      curtainGuide: state.curtainGuide,
+      curtainFollow: state.curtainFollow,
+    },
+  };
+  if (state.bookId && state.totalPages > 0) {
+    payload.id = state.bookId;
+    payload.lastPage = state.currentIndex + 1;
+    payload.totalPages = state.totalPages;
+    payload.bookmarks = state.bookmarks;
+    payload.stickyTabs = state.stickyTabs;
+    payload.highlights = state.highlights;
+    payload.marginNotes = state.marginNotes;
+    payload.pinnedRefs = state.pinnedRefs;
+  }
+  return payload;
+}
+
+function isLocalOnlyBookId(bookId) {
+  return typeof bookId === 'string' && bookId.startsWith('blob-');
+}
+
+function flushPersistState({ keepalive = false } = {}) {
+  clearTimeout(state.persistTimer);
+  state.persistTimer = null;
+  const payload = buildPersistPayload();
+  if (payload.id) {
+    try {
+      localStorage.setItem(`flipbook:${payload.id}`, JSON.stringify({
+        lastPage: payload.lastPage,
+        bookmarks: payload.bookmarks,
+        stickyTabs: payload.stickyTabs,
+        highlights: payload.highlights,
+        marginNotes: payload.marginNotes,
+        pinnedRefs: payload.pinnedRefs,
+      }));
+    } catch {
+      // ignore storage errors
+    }
+  }
+  const serverPayload = isLocalOnlyBookId(payload.id)
+    ? { settings: payload.settings }
+    : payload;
+  if (!serverPayload.id && !hasAppliedInitialSettings) return;
+  fetch('/api/book-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(serverPayload),
+    keepalive,
+  }).catch(() => {});
+}
+
 function schedulePersistState() {
   clearTimeout(state.persistTimer);
   state.persistTimer = setTimeout(() => {
-    const payload = {
-      settings: {
-        theme: state.theme,
-        readDark: state.readDark,
-        paperWarmth: state.paperWarmth,
-        paperGrain: state.paperGrain,
-        paperGrainStrength: state.paperGrainStrength,
-        paperGrainStyle: state.paperGrainStyle,
-        paperGrainScalePx: state.paperGrainScalePx,
-        autoHideBars: state.autoHideBars,
-        twoFingerPan: state.twoFingerPan,
-        scrollMode: state.scrollMode,
-        soundEnabled: state.soundEnabled,
-        soundPreset: state.soundPreset,
-        ambientPreset: state.ambientPreset,
-        ambientVolume: state.ambientVolume,
-        pageMode: state.pageMode,
-        showCover: state.showCover,
-        clickMode: state.clickMode,
-        autoFlipSeconds: state.autoFlipSeconds,
-        autoScrollSpeed: state.autoScrollSpeed,
-        magStyle: state.magStyle,
-        magPower: state.magPower,
-        magCircleSize: state.magCircleSize,
-        magBarWidth: state.magBarWidth,
-        magBarHeight: state.magBarHeight,
-        curtainHeight: state.curtainHeight,
-        curtainLengthPct: state.curtainLengthPct,
-        curtainDim: state.curtainDim,
-        curtainTone: state.curtainTone,
-        curtainGuide: state.curtainGuide,
-        curtainFollow: state.curtainFollow,
-      },
-    };
-    if (state.bookId) {
-      payload.id = state.bookId;
-      payload.lastPage = state.currentIndex + 1;
-      payload.totalPages = state.totalPages;
-      payload.bookmarks = state.bookmarks;
-      payload.stickyTabs = state.stickyTabs;
-      payload.highlights = state.highlights;
-      payload.marginNotes = state.marginNotes;
-      payload.pinnedRefs = state.pinnedRefs;
-    }
-    fetch('/api/book-state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-
-    if (state.bookId && state.totalPages > 0) {
-      try {
-        localStorage.setItem(`flipbook:${state.bookId}`, JSON.stringify({
-          lastPage: state.currentIndex + 1,
-          bookmarks: state.bookmarks,
-          stickyTabs: state.stickyTabs,
-          highlights: state.highlights,
-          marginNotes: state.marginNotes,
-          pinnedRefs: state.pinnedRefs,
-        }));
-      } catch {
-        // ignore storage errors
-      }
-    }
+    state.persistTimer = null;
+    flushPersistState();
   }, 350);
 }
 
@@ -669,12 +709,29 @@ function computeBookGeometry(forceSingle = false) {
 }
 
 function disposeBook() {
+  clearTimeout(state.persistTimer);
+  state.persistTimer = null;
+  clearTimeout(state.zoomRerenderTimer);
+  state.zoomRerenderTimer = null;
+  clearTimeout(state.scrollSyncTimer);
+  state.scrollSyncTimer = null;
+  clearTimeout(state.nearbyRenderTimer);
+  state.nearbyRenderTimer = null;
+
   stopAutoFlip();
   stopAutoScroll({ resetPlaying: true });
   setMagnifierEnabled(false, { persist: false });
+  if (typeof setFocusCurtainEnabled === 'function') setFocusCurtainEnabled(false, { persist: false });
   if (typeof setSnipToolActive === 'function') setSnipToolActive(false);
   if (typeof hideMarginNoteHoverCard === 'function') hideMarginNoteHoverCard();
   if (typeof closeMarginNotePopover === 'function') closeMarginNotePopover();
+  if (typeof closeStickyTabPopover === 'function') closeStickyTabPopover();
+  if (typeof closePageContextMenu === 'function') closePageContextMenu();
+
+  state.curtainX = null;
+  state.curtainY = null;
+  state.curtainDragging = false;
+  state.curtainResizing = null;
   state.pinnedRefs = [];
   if (els.refPinsLayer) els.refPinsLayer.innerHTML = '';
   clearMagnifierCache();
@@ -689,6 +746,7 @@ function disposeBook() {
   nearbyPrefetchState.scheduled = false;
   state.textCache.clear();
   state.thumbRendered.clear();
+  snipThumbCache.clear();
   if (state.thumbObserver) {
     state.thumbObserver.disconnect();
     state.thumbObserver = null;
@@ -702,6 +760,7 @@ function disposeBook() {
     state.pageFlip = null;
   }
   els.bookContainer.innerHTML = '';
+  els.bookShell.hidden = true;
   if (els.bookEdgeTabsLeft) els.bookEdgeTabsLeft.innerHTML = '';
   if (els.bookEdgeTabsRight) els.bookEdgeTabsRight.innerHTML = '';
   if (els.scrollTabsRail) {
@@ -720,11 +779,54 @@ function disposeBook() {
   els.tocList.innerHTML = '';
   els.searchResults.innerHTML = '';
   els.searchStatus.textContent = '';
+  state.searchQuery = '';
+  if (els.searchInput) els.searchInput.value = '';
+  if (els.pageTextPreview) els.pageTextPreview.textContent = '';
+
+  state.bookId = null;
+  state.bookTitle = 'FlipBook Reader';
+  state.totalPages = 0;
+  state.currentIndex = 0;
   state.pageNodes = [];
+  state.bookmarks = [];
+  state.stickyTabs = [];
   state.highlights = [];
+  state.marginNotes = [];
   state.savesCategory = 'all';
   state.hlFilterMode = 'all';
   state.hlFilterPage = null;
+  state.hlNotesView = false;
+  state.zoom = 1;
+  state.committedZoom = 1;
+  state.panX = 0;
+  state.panY = 0;
+  state.isPanning = false;
+  state.panMoved = false;
+  if (els.zoomViewport) {
+    els.zoomViewport.style.transform = '';
+    els.zoomViewport.classList.remove('is-zoomed', 'is-panning');
+  }
+  if (els.topBarRight) els.topBarRight.hidden = true;
+  if (els.btnPrevArrow) els.btnPrevArrow.hidden = true;
+  if (els.btnNextArrow) els.btnNextArrow.hidden = true;
+  if (els.btnFirstPage) els.btnFirstPage.hidden = true;
+  if (els.btnLastPage) els.btnLastPage.hidden = true;
+  if (els.sideDrawer) els.sideDrawer.hidden = true;
+  if (els.thumbnailsStrip) els.thumbnailsStrip.hidden = true;
+  if (els.moreMenu) els.moreMenu.hidden = true;
+  els.btnHighlightsTop?.classList.remove('active', 'has-hl');
+  els.btnThumbs?.classList.remove('active');
+  els.btnMore?.classList.remove('active');
+  if (els.bookTitleLabel) els.bookTitleLabel.textContent = 'FlipBook Reader';
+  document.title = 'FlipBook Reader';
+  if (els.pageInput) els.pageInput.value = '0/0';
+  if (els.pageScrubber) {
+    els.pageScrubber.max = '1';
+    els.pageScrubber.value = '1';
+  }
+  if (window.location.hash) {
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  }
   hideHighlightPopover();
   showBars(false);
 }
@@ -766,6 +868,8 @@ function initReaderView(startIndex = 0) {
 function initScrollView(startIndex = 0) {
   if (!state.pdfDoc) return;
 
+  clearTimeout(state.zoomRerenderTimer);
+  state.zoomRerenderTimer = null;
   for (const entry of state.renderedMap.values()) {
     try { entry.renderTask?.cancel(); } catch {}
   }
@@ -807,6 +911,7 @@ function initScrollView(startIndex = 0) {
   }
   els.scrollPages.appendChild(frag);
   els.scrollViewport.hidden = false;
+  els.scrollViewport.scrollLeft = 0;
 
   els.welcomeOverlay.hidden = true;
   els.topBarRight.hidden = false;
@@ -833,6 +938,7 @@ function initScrollView(startIndex = 0) {
   state.currentIndex = safeStart;
   const targetWrap = els.scrollPages.children[safeStart];
   if (targetWrap) {
+    state.programmaticScrollUntil = performance.now() + 120;
     els.scrollViewport.scrollTop = Math.max(0, targetWrap.offsetTop - 54);
   }
   state.autoScrollPosY = els.scrollViewport.scrollTop;
@@ -848,6 +954,8 @@ function initPageFlip(startIndex = 0) {
   if (!state.pdfDoc) return;
   stopAutoScroll({ resetPlaying: true });
 
+  clearTimeout(state.zoomRerenderTimer);
+  state.zoomRerenderTimer = null;
   for (const entry of state.renderedMap.values()) {
     try { entry.renderTask?.cancel(); } catch {}
   }
@@ -882,6 +990,15 @@ function initPageFlip(startIndex = 0) {
   els.bookContainer.appendChild(host);
 
   computeBookGeometry();
+  state.committedZoom = state.zoom;
+  if (state.zoom <= 1.01) {
+    state.panX = 0;
+    state.panY = 0;
+  } else {
+    const clampedPan = clampZoomPan(state.panX, state.panY);
+    state.panX = clampedPan.x;
+    state.panY = clampedPan.y;
+  }
 
   const sw = Math.round(state.pageW * state.committedZoom);
   const sh = Math.round(state.pageH * state.committedZoom);
@@ -1048,6 +1165,7 @@ function initPageFlip(startIndex = 0) {
 
   // Immediate render for initial spread
   state.currentIndex = safeStart;
+  applyZoomTransform(false);
   onSpreadChanged(false);
 }
 
@@ -2210,8 +2328,11 @@ function jumpToPage(oneBasedPage, animate = false, { recordHistory = true, reaso
     const wrap = els.scrollPages.children[targetIdx];
     if (wrap) {
       const destTop = Math.max(0, wrap.offsetTop - 54);
+      const dist = Math.abs(destTop - els.scrollViewport.scrollTop);
+      const pauseMs = animate ? clamp(Math.round(460 + dist * 0.28), 460, 1200) : 120;
+      state.programmaticScrollUntil = performance.now() + pauseMs;
       if (animate) {
-        state.autoScrollPauseUntil = performance.now() + 460;
+        state.autoScrollPauseUntil = performance.now() + pauseMs;
       } else {
         state.autoScrollPosY = destTop;
       }
@@ -2269,6 +2390,7 @@ function commitZoomLayout() {
   for (const idx of getVisibleIndices()) {
     renderPageNode(idx);
   }
+  queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 4));
 }
 
 function applyZoomTransform(rerender = true, immediate = false) {
@@ -2325,6 +2447,13 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
 
   if (state.scrollMode === 'scroll') {
     hideHighlightPopover();
+    state.panX = 0;
+    state.panY = 0;
+    if (els.zoomViewport) {
+      els.zoomViewport.style.transform = '';
+      els.zoomViewport.classList.remove('is-zoomed', 'is-panning');
+    }
+    if (state.magEnabled) scheduleMagnifierRedraw();
 
     if (state.pdfDoc && els.scrollPages.children.length) {
       const sv = els.scrollViewport;
@@ -2371,6 +2500,7 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         for (const i of visScroll) renderPageNode(i);
         queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 3));
         if (state.curtainEnabled) positionFocusCurtain();
+        if (state.magEnabled) scheduleMagnifierRedraw();
       };
       if (immediate) commitScroll();
       else state.zoomRerenderTimer = setTimeout(commitScroll, 85);
@@ -2451,22 +2581,43 @@ function buildThumbnailsStrip() {
   highlightActiveThumbnail(getVisibleIndices());
 }
 
-async function renderThumbnailCanvas(idx, canvas) {
-  if (!state.pdfDoc || !canvas) return;
-  try {
-    const page = await state.pdfDoc.getPage(idx + 1);
-    const vp1 = page.getViewport({ scale: 1 });
-    const scale = Math.min(130 / vp1.width, 180 / vp1.height);
-    const vp = page.getViewport({ scale });
-    canvas.width = Math.max(1, Math.floor(vp.width));
-    canvas.height = Math.max(1, Math.floor(vp.height));
-    const ctx = canvas.getContext('2d', { alpha: false });
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  } catch {
-    // ignore
+const THUMB_MAX_CONCURRENT = 3;
+let thumbActiveCount = 0;
+const thumbPendingQueue = [];
+
+function pumpThumbnailQueue() {
+  while (thumbActiveCount < THUMB_MAX_CONCURRENT && thumbPendingQueue.length > 0) {
+    const job = thumbPendingQueue.shift();
+    if (!job || !job.canvas?.isConnected || state.pdfDoc !== job.doc) continue;
+    thumbActiveCount++;
+    (async () => {
+      try {
+        const page = await job.doc.getPage(job.idx + 1);
+        if (state.pdfDoc !== job.doc || !job.canvas.isConnected) return;
+        const vp1 = page.getViewport({ scale: 1 });
+        const scale = Math.min(130 / vp1.width, 180 / vp1.height);
+        const vp = page.getViewport({ scale });
+        job.canvas.width = Math.max(1, Math.floor(vp.width));
+        job.canvas.height = Math.max(1, Math.floor(vp.height));
+        const ctx = job.canvas.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, job.canvas.width, job.canvas.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      } catch {
+        // ignore
+      } finally {
+        thumbActiveCount = Math.max(0, thumbActiveCount - 1);
+        pumpThumbnailQueue();
+      }
+    })();
   }
+}
+
+async function renderThumbnailCanvas(idx, canvas) {
+  const doc = state.pdfDoc;
+  if (!doc || !canvas || !canvas.isConnected) return;
+  thumbPendingQueue.push({ doc, idx, canvas });
+  pumpThumbnailQueue();
 }
 
 function highlightActiveThumbnail(visible) {
@@ -2486,9 +2637,11 @@ function highlightActiveThumbnail(visible) {
 /* ---------- Outline (TOC), Bookmarks, Search & Copy Text ---------- */
 async function buildOutline() {
   els.tocList.innerHTML = '';
-  if (!state.pdfDoc) return;
+  const doc = state.pdfDoc;
+  if (!doc) return;
   try {
-    const outline = await state.pdfDoc.getOutline();
+    const outline = await doc.getOutline();
+    if (state.pdfDoc !== doc) return;
     if (!outline || !outline.length) {
       els.tocList.innerHTML = '<div class="search-status">This PDF has no embedded table of contents.</div>';
       return;
@@ -2496,19 +2649,23 @@ async function buildOutline() {
 
     const walk = async (items, depth) => {
       for (const item of items) {
+        if (state.pdfDoc !== doc) return;
         let pageNum = null;
         try {
           let dest = item.dest;
           if (typeof dest === 'string') {
-            dest = await state.pdfDoc.getDestination(dest);
+            dest = await doc.getDestination(dest);
           }
+          if (state.pdfDoc !== doc) return;
           if (Array.isArray(dest) && dest[0]) {
-            const pageIdx = await state.pdfDoc.getPageIndex(dest[0]);
+            const pageIdx = await doc.getPageIndex(dest[0]);
+            if (state.pdfDoc !== doc) return;
             pageNum = pageIdx + 1;
           }
         } catch {
           // ignore unresolvable destination
         }
+        if (state.pdfDoc !== doc) return;
         const btn = document.createElement('button');
         btn.className = 'toc-item';
         btn.style.paddingLeft = `${8 + depth * 14}px`;
@@ -2524,7 +2681,9 @@ async function buildOutline() {
     };
     await walk(outline, 0);
   } catch {
-    els.tocList.innerHTML = '<div class="search-status">Unable to load table of contents.</div>';
+    if (state.pdfDoc === doc) {
+      els.tocList.innerHTML = '<div class="search-status">Unable to load table of contents.</div>';
+    }
   }
 }
 
@@ -2537,17 +2696,39 @@ async function getPagePlainText(pageNum) {
   return str;
 }
 
+function buildHighlightedSnippetHtml(rawSnippet, query) {
+  if (!query) return escapeHtml(rawSnippet);
+  const lowerRaw = rawSnippet.toLowerCase();
+  const lowerQ = query.toLowerCase();
+  const qLen = lowerQ.length;
+  let out = '';
+  let cursor = 0;
+  while (cursor < rawSnippet.length) {
+    const idx = lowerRaw.indexOf(lowerQ, cursor);
+    if (idx === -1) {
+      out += escapeHtml(rawSnippet.slice(cursor));
+      break;
+    }
+    if (idx > cursor) out += escapeHtml(rawSnippet.slice(cursor, idx));
+    out += `<mark>${escapeHtml(rawSnippet.slice(idx, idx + qLen))}</mark>`;
+    cursor = idx + qLen;
+  }
+  return out;
+}
+
 async function runSearch(query) {
   const q = query.trim();
   state.searchQuery = q;
   const abortId = ++state.searchAbortId;
+  const doc = state.pdfDoc;
   els.searchResults.innerHTML = '';
 
-  for (const idx of getVisibleIndices()) {
+  const visOnStart = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices();
+  for (const idx of visOnStart) {
     paintSearchHighlightsOnPage(idx);
   }
 
-  if (!q || !state.pdfDoc) {
+  if (!q || !doc) {
     els.searchStatus.textContent = q ? 'No book loaded.' : '';
     return;
   }
@@ -2557,14 +2738,19 @@ async function runSearch(query) {
   els.searchStatus.textContent = `Searching 0 / ${state.totalPages} pages…`;
 
   for (let p = 1; p <= state.totalPages; p++) {
-    if (abortId !== state.searchAbortId) return;
+    if (abortId !== state.searchAbortId || state.pdfDoc !== doc) return;
     if (p % 12 === 0 || p === state.totalPages) {
       els.searchStatus.textContent = `Searching ${p} / ${state.totalPages} pages (${matchPages} matches)…`;
       await new Promise((r) => setTimeout(r, 0));
     }
 
-    const txt = await getPagePlainText(p);
-    if (abortId !== state.searchAbortId) return;
+    let txt = '';
+    try {
+      txt = await getPagePlainText(p);
+    } catch {
+      continue;
+    }
+    if (abortId !== state.searchAbortId || state.pdfDoc !== doc) return;
     const low = txt.toLowerCase();
     const pos = low.indexOf(lowerQ);
     if (pos !== -1) {
@@ -2574,10 +2760,9 @@ async function runSearch(query) {
       const rawSnippet = (start > 0 ? '…' : '') + txt.slice(start, end) + (end < txt.length ? '…' : '');
       const hitBtn = document.createElement('button');
       hitBtn.className = 'search-hit';
-      const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
       hitBtn.innerHTML = `
         <div class="search-hit-page">Page ${p}</div>
-        <div class="search-hit-snippet">${escapeHtml(rawSnippet).replace(re, '<mark>$1</mark>')}</div>
+        <div class="search-hit-snippet">${buildHighlightedSnippetHtml(rawSnippet, q)}</div>
       `;
       hitBtn.addEventListener('click', () => {
         jumpToPage(p, false);
@@ -2587,11 +2772,13 @@ async function runSearch(query) {
     }
   }
 
+  if (abortId !== state.searchAbortId || state.pdfDoc !== doc) return;
   els.searchStatus.textContent = matchPages
     ? `Found ${matchPages} page${matchPages === 1 ? '' : 's'} matching "${q}"`
     : `No matches found for "${q}"`;
 
-  for (const idx of getVisibleIndices()) {
+  const visOnEnd = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices();
+  for (const idx of visOnEnd) {
     paintSearchHighlightsOnPage(idx);
   }
 }
@@ -2610,45 +2797,87 @@ function paintSearchHighlightsOnPage(idx) {
   const pageRect = node.getBoundingClientRect();
   if (!pageRect.width || !pageRect.height) return;
 
-  const spans = textLayer.querySelectorAll('span');
-  for (const span of spans) {
-    const raw = span.textContent || '';
-    const lower = raw.toLowerCase();
-    if (!lower || !lower.includes(q)) continue;
-    const textNode = span.firstChild;
-    if (!textNode || textNode.nodeType !== Node.TEXT_NODE) continue;
+  // Build normalized concatenated text stream across TextLayer text nodes so split spans match accurately
+  const segments = [];
+  let normText = '';
+  const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+  let tNode;
+  while ((tNode = walker.nextNode())) {
+    if (tNode.parentElement?.closest?.('.endOfContent')) continue;
+    const raw = tNode.nodeValue || '';
+    if (!raw) continue;
+    const startNorm = normText.length;
+    normText += raw.toLowerCase();
+    segments.push({ node: tNode, startNorm, endNorm: normText.length });
+  }
+  if (!normText || !segments.length) return;
 
-    let from = 0;
-    while (from < lower.length) {
-      const pos = lower.indexOf(q, from);
-      if (pos === -1) break;
-      const range = document.createRange();
-      range.setStart(textNode, pos);
-      range.setEnd(textNode, pos + q.length);
-      for (const r of range.getClientRects()) {
-        if (!r.width || !r.height) continue;
-        const box = document.createElement('div');
-        box.className = 'fb-search-box';
-        box.style.left = `${((r.left - pageRect.left) / pageRect.width) * 100}%`;
-        box.style.top = `${((r.top - pageRect.top) / pageRect.height) * 100}%`;
-        box.style.width = `${(r.width / pageRect.width) * 100}%`;
-        box.style.height = `${(r.height / pageRect.height) * 100}%`;
-        hlLayer.appendChild(box);
-      }
-      from = pos + q.length;
+  const findSegIndex = (normPos) => {
+    let lo = 0;
+    let hi = segments.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const seg = segments[mid];
+      if (normPos < seg.startNorm) hi = mid - 1;
+      else if (normPos >= seg.endNorm) lo = mid + 1;
+      else return mid;
     }
+    return -1;
+  };
+
+  let from = 0;
+  let count = 0;
+  while (from < normText.length && count < 200) {
+    const pos = normText.indexOf(q, from);
+    if (pos === -1) break;
+    count++;
+    const endPos = pos + q.length - 1;
+    const sIdx = findSegIndex(pos);
+    const eIdx = findSegIndex(endPos);
+    if (sIdx !== -1 && eIdx !== -1) {
+      const sSeg = segments[sIdx];
+      const eSeg = segments[eIdx];
+      try {
+        const range = document.createRange();
+        range.setStart(sSeg.node, pos - sSeg.startNorm);
+        range.setEnd(eSeg.node, endPos - eSeg.startNorm + 1);
+        for (const r of range.getClientRects()) {
+          if (!r.width || !r.height) continue;
+          const box = document.createElement('div');
+          box.className = 'fb-search-box';
+          box.style.left = `${((r.left - pageRect.left) / pageRect.width) * 100}%`;
+          box.style.top = `${((r.top - pageRect.top) / pageRect.height) * 100}%`;
+          box.style.width = `${(r.width / pageRect.width) * 100}%`;
+          box.style.height = `${(r.height / pageRect.height) * 100}%`;
+          hlLayer.appendChild(box);
+        }
+      } catch {
+        // ignore invalid range boundaries
+      }
+    }
+    from = pos + q.length;
   }
 }
 
+let textPaneSeq = 0;
 async function refreshTextPane() {
-  if (!state.pdfDoc) return;
+  const doc = state.pdfDoc;
+  if (!doc) return;
+  const seq = ++textPaneSeq;
   const visible = getVisibleIndices();
   els.textPaneLabel.textContent = `Page ${formatSpreadLabel(visible)}`;
   const parts = [];
   for (const idx of visible) {
-    const txt = await getPagePlainText(idx + 1);
-    parts.push(`--- Page ${idx + 1} ---\n${txt || '(No selectable text on this page)'}`);
+    try {
+      const txt = await getPagePlainText(idx + 1);
+      if (state.pdfDoc !== doc || seq !== textPaneSeq) return;
+      parts.push(`--- Page ${idx + 1} ---\n${txt || '(No selectable text on this page)'}`);
+    } catch {
+      if (state.pdfDoc !== doc || seq !== textPaneSeq) return;
+      parts.push(`--- Page ${idx + 1} ---\n(Unable to extract text from this page)`);
+    }
   }
+  if (state.pdfDoc !== doc || seq !== textPaneSeq) return;
   els.pageTextPreview.textContent = parts.join('\n\n');
 }
 
@@ -2958,12 +3187,34 @@ function renderBookEdgeTabs() {
     els.bookEdgeTabsRight.innerHTML = '';
     renderSingleCollectedStackTabs([], posMap);
     if (els.scrollTabsRail) {
+      const prevScrollTop = els.scrollTabsRail.scrollTop;
+      const prevCurPage = els.scrollTabsRail.dataset.lastCurrentPage || '';
       els.scrollTabsRail.innerHTML = '';
       els.scrollTabsRail.hidden = tabs.length === 0 || !state.pdfDoc;
+      let activeEl = null;
+      let nextCurPage = '';
       for (const tab of tabs) {
-        els.scrollTabsRail.appendChild(
-          createStickyEdgeTabElement(tab, 50, visible1Based.has(tab.page), { withTail: false })
-        );
+        const isCur = visible1Based.has(tab.page);
+        const tabEl = createStickyEdgeTabElement(tab, 50, isCur, { withTail: false });
+        if (isCur && !activeEl) {
+          activeEl = tabEl;
+          nextCurPage = String(tab.page);
+        }
+        els.scrollTabsRail.appendChild(tabEl);
+      }
+      els.scrollTabsRail.dataset.lastCurrentPage = nextCurPage;
+      els.scrollTabsRail.scrollTop = prevScrollTop;
+      if (activeEl && nextCurPage !== prevCurPage) {
+        const top = activeEl.offsetTop;
+        const bottom = top + activeEl.offsetHeight;
+        const viewH = els.scrollTabsRail.clientHeight;
+        if (viewH > 0) {
+          if (top < els.scrollTabsRail.scrollTop) {
+            els.scrollTabsRail.scrollTop = Math.max(0, top - 4);
+          } else if (bottom > els.scrollTabsRail.scrollTop + viewH) {
+            els.scrollTabsRail.scrollTop = bottom - viewH + 6;
+          }
+        }
       }
     }
     if (state.magEnabled) scheduleMagnifierRedraw();
@@ -3058,8 +3309,11 @@ function syncStickyPopoverPageFields(targetPage) {
   }
 }
 
-function positionFloatingBoxAt(el, x, y, boxW, boxH) {
+function positionFloatingBoxAt(el, x, y, fallbackW = 240, fallbackH = 220) {
   const pad = 12;
+  const rect = !el.hidden ? el.getBoundingClientRect() : null;
+  const boxW = rect?.width > 10 ? rect.width : fallbackW;
+  const boxH = rect?.height > 10 ? rect.height : fallbackH;
   const maxX = Math.max(pad, window.innerWidth - boxW - pad);
   const maxY = Math.max(pad, window.innerHeight - boxH - pad);
   el.style.left = `${clamp(Math.round(x), pad, maxX)}px`;
@@ -3075,13 +3329,14 @@ function openStickyTabPopover(explicitPage = null, anchorPos = null) {
   const initialPage = explicitPage ?? existingOnSpread ?? visible[0] ?? 1;
   syncStickyPopoverPageFields(initialPage);
   if (anchorPos && Number.isFinite(anchorPos.x) && Number.isFinite(anchorPos.y)) {
+    els.stickyTabPopover.hidden = false;
     positionFloatingBoxAt(els.stickyTabPopover, anchorPos.x + 8, anchorPos.y + 8, 256, 265);
   } else {
     els.stickyTabPopover.style.left = '';
     els.stickyTabPopover.style.top = '';
     els.stickyTabPopover.style.right = '';
+    els.stickyTabPopover.hidden = false;
   }
-  els.stickyTabPopover.hidden = false;
   showBar('header', false);
   setTimeout(() => {
     els.stickyTabLabelInput?.focus();
@@ -3122,9 +3377,8 @@ function openPageContextMenu(clientX, clientY, pageNum, coords = null) {
   if (els.ctxSelDivider) els.ctxSelDivider.hidden = !selText;
   if (els.ctxCopyText) els.ctxCopyText.hidden = !selText;
 
-  const estH = (selText ? 175 : existingTab ? 142 : 112) + 104;
-  positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 224, estH);
   els.pageContextMenu.hidden = false;
+  positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 224, 240);
 }
 
 function closePageContextMenu() {
@@ -3735,6 +3989,24 @@ function renderRefPinsLayer() {
   }
 }
 
+function clampRefPinsToStage() {
+  if (!els.refPinsLayer || !state.pinnedRefs.length) return;
+  const sr = els.stage?.getBoundingClientRect();
+  const stageW = sr?.width || window.innerWidth;
+  const stageH = sr?.height || window.innerHeight;
+  for (const pin of state.pinnedRefs) {
+    const maxX = Math.max(12, stageW - pin.width - 12);
+    const maxY = Math.max(54, stageH - 100);
+    pin.x = clamp(pin.x, 12, maxX);
+    pin.y = clamp(pin.y, 54, maxY);
+    const card = els.refPinsLayer.querySelector(`.ref-pin-card[data-pin-id="${CSS.escape(pin.id)}"]`);
+    if (card) {
+      card.style.left = `${pin.x}px`;
+      card.style.top = `${pin.y}px`;
+    }
+  }
+}
+
 function pinReferenceCard({ page, label = null, crop = null }) {
   if (!state.pdfDoc || !page) return null;
   const p = clamp(Math.floor(page), 1, state.totalPages);
@@ -3746,6 +4018,10 @@ function pinReferenceCard({ page, label = null, crop = null }) {
       schedulePersistState();
       return existing;
     }
+  }
+  if (state.pinnedRefs.length >= 12) {
+    showToast('Maximum of 12 pinned reference cards reached — unpin one first.', { isError: true });
+    return null;
   }
   const sr = els.stage?.getBoundingClientRect();
   const drawerBlockingRight = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
@@ -3821,15 +4097,21 @@ function normalizeMarginNotes(list) {
   return out.slice(0, 500);
 }
 
+const previewCanvasTokens = new WeakMap();
+
 async function paintRegionIntoPreviewCanvas(pageNum, rect, canvasEl) {
   if (!canvasEl || !rect) return;
+  const seq = (previewCanvasTokens.get(canvasEl) || 0) + 1;
+  previewCanvasTokens.set(canvasEl, seq);
   const key = getSnipCacheKey(pageNum, rect);
   let src = snipThumbCache.get(key);
   if (!src) {
+    canvasEl.width = 1;
+    canvasEl.height = 1;
     src = await renderPdfRegionToCanvas(pageNum, rect, 240, 2.0);
     if (src) snipThumbCache.set(key, src);
   }
-  if (!src || !canvasEl.isConnected) return;
+  if (!src || !canvasEl.isConnected || previewCanvasTokens.get(canvasEl) !== seq) return;
   canvasEl.width = src.width;
   canvasEl.height = src.height;
   canvasEl.getContext('2d', { alpha: false }).drawImage(src, 0, 0);
@@ -3867,7 +4149,8 @@ function hideMarginNoteHoverCard() {
 
 function findVisiblePageNodeAtClient(clientX, clientY) {
   const candidates = [];
-  for (const idx of getVisibleIndices()) {
+  const indices = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices();
+  for (const idx of indices) {
     const pageEl = state.pageNodes[idx];
     if (!pageEl || !pageEl.isConnected) continue;
     const r = pageEl.getBoundingClientRect();
@@ -4058,8 +4341,8 @@ function openMarginNotePopover({ id = null, page, xPct = 8, yPct = 14, color = '
 
   const posX = Number.isFinite(clientX) ? clientX : window.innerWidth * 0.5 - 145;
   const posY = Number.isFinite(clientY) ? clientY : window.innerHeight * 0.3;
-  positionFloatingBoxAt(els.marginNotePopover, posX, posY, 290, state.marginEditDraft.snipRect ? 380 : 250);
   els.marginNotePopover.hidden = false;
+  positionFloatingBoxAt(els.marginNotePopover, posX, posY, 290, state.marginEditDraft.snipRect ? 380 : 250);
   requestAnimationFrame(() => els.marginNoteTextInput?.focus());
 }
 
@@ -4173,14 +4456,14 @@ async function executeSnipCapture(pageNode, selClientRect) {
       : `Captured 3× HD (${hdCanvas.width}×${hdCanvas.height})`;
   }
   if (els.snipResultCard) {
+    els.snipResultCard.hidden = false;
     positionFloatingBoxAt(
       els.snipResultCard,
       Math.min(window.innerWidth - 396, Math.max(16, right + 14)),
       Math.max(58, top),
       380,
-      340
+      360
     );
-    els.snipResultCard.hidden = false;
   }
 }
 
@@ -4262,6 +4545,10 @@ function removeHighlightById(id) {
     hideHighlightPopover();
   }
   paintUserHighlightsOnPage(target.page - 1);
+  if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === target.page - 1) {
+    appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+  }
+  state.pageFlip?.refreshSnapshots?.();
   updateHighlightsUi();
   schedulePersistState();
 }
@@ -4352,18 +4639,19 @@ function renderSavesDrawerPane() {
 
   const notesAndHlPageCount = filteredHls.length + filteredNotes.length;
   const totalNotesAndHlCount = hlsAllCount + state.marginNotes.length;
-  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = notesAndHlPageCount === 0;
-  if (els.btnExportMarkdown) els.btnExportMarkdown.hidden = notesAndHlPageCount === 0;
+  const isBmOnly = cat === 'bookmarks';
+  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = isBmOnly || notesAndHlPageCount === 0;
+  if (els.btnExportMarkdown) els.btnExportMarkdown.hidden = isBmOnly || notesAndHlPageCount === 0;
   if (els.btnToggleNotesView) {
     els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
     els.btnToggleNotesView.textContent = state.hlNotesView ? 'List View' : 'Notes View';
   }
-  if (els.btnClearHighlights) els.btnClearHighlights.hidden = totalNotesAndHlCount === 0;
+  if (els.btnClearHighlights) els.btnClearHighlights.hidden = isBmOnly || totalNotesAndHlCount === 0;
   if (els.btnClearPageHighlights) {
-    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && notesAndHlPageCount > 0);
+    els.btnClearPageHighlights.hidden = isBmOnly || !(state.hlFilterMode !== 'all' && notesAndHlPageCount > 0);
   }
   if (els.savesClearRow) {
-    els.savesClearRow.hidden = totalNotesAndHlCount === 0;
+    els.savesClearRow.hidden = isBmOnly || totalNotesAndHlCount === 0;
   }
 
   // Category chips: All / Sticky / Highlights / Bookmarks
@@ -4480,10 +4768,12 @@ function renderSavesDrawerPane() {
         row.addEventListener('click', (e) => {
           const btn = e.target.closest('button');
           if (btn?.dataset.action === 'remove') {
+            e.stopPropagation();
             removeStickyTabForPage(tab.page);
             return;
           }
           if (btn?.dataset.action === 'edit') {
+            e.stopPropagation();
             openStickyTabPopover(tab.page);
             return;
           }
@@ -4509,6 +4799,7 @@ function renderSavesDrawerPane() {
           </button>
         `;
         row.addEventListener('click', (e) => {
+          e.stopPropagation();
           if (e.target.closest('button')) {
             deleteMarginNoteById(n.id);
             return;
@@ -4841,6 +5132,9 @@ function applyHighlightColor(color) {
     if (target) {
       target.color = safeColor;
       paintUserHighlightsOnPage(target.page - 1);
+      if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === target.page - 1) {
+        appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+      }
     }
   } else if (draft.mode === 'create' && Array.isArray(draft.entries)) {
     const now = new Date().toISOString();
@@ -4855,12 +5149,16 @@ function applyHighlightColor(color) {
         createdAt: now,
       });
       paintUserHighlightsOnPage(ent.page - 1);
+      if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === ent.page - 1) {
+        appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+      }
     }
     try {
       window.getSelection()?.removeAllRanges?.();
     } catch {}
   }
 
+  state.pageFlip?.refreshSnapshots?.();
   updateHighlightsUi();
   schedulePersistState();
   hideHighlightPopover();
@@ -4880,10 +5178,14 @@ function deleteActiveHighlight() {
   state.highlights = state.highlights.filter((h) => !delSet.has(h.id));
   for (const idx of affectedPages) {
     paintUserHighlightsOnPage(idx);
+    if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === idx) {
+      appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+    }
   }
   try {
     window.getSelection()?.removeAllRanges?.();
   } catch {}
+  state.pageFlip?.refreshSnapshots?.();
   updateHighlightsUi();
   schedulePersistState();
   hideHighlightPopover();
@@ -4924,8 +5226,10 @@ function findHighlightAtClientPoint(pageNode, clientX, clientY) {
 
 /* ---------- Opening Books ---------- */
 async function openPdfSource(source, { title = 'Book', bookId = null, startPage = 1, bookmarks = [], stickyTabs = [], highlights = [], marginNotes = [], pinnedRefs = [] } = {}) {
+  flushPersistState();
   els.loadingText.textContent = `Opening ${title}…`;
   els.loadingOverlay.hidden = false;
+  els.welcomeOverlay.hidden = true;
   els.libraryModal.hidden = true;
   els.moreMenu.hidden = true;
 
@@ -4955,7 +5259,7 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     clearNavHistory();
 
     // Recover saved local progress if missing from server entry
-    let targetPage = startPage;
+    let targetPage = Number.isFinite(Number(startPage)) && Number(startPage) >= 1 ? Math.floor(Number(startPage)) : null;
     if (bookId) {
       try {
         const local = JSON.parse(localStorage.getItem(`flipbook:${bookId}`) || 'null');
@@ -4977,6 +5281,7 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
         // ignore
       }
     }
+    if (!targetPage) targetPage = 1;
 
     const firstPage = await pdf.getPage(1);
     const vp1 = firstPage.getViewport({ scale: 1 });
@@ -4985,28 +5290,33 @@ async function openPdfSource(source, { title = 'Book', bookId = null, startPage 
     els.bookTitleLabel.textContent = title;
     document.title = `${title} — FlipBook Reader`;
 
-    const startIdx = clamp((targetPage || 1) - 1, 0, Math.max(0, state.totalPages - 1));
+    const startIdx = clamp(targetPage - 1, 0, Math.max(0, state.totalPages - 1));
     initReaderView(startIdx);
     buildOutline();
     if (!els.thumbnailsStrip.hidden) buildThumbnailsStrip();
     updateBookmarkUi();
     updateHighlightsUi();
     renderRefPinsLayer();
-    fetchLibrary();
+    fetchLibrary({ applySettings: false });
   } catch (err) {
-    alert(`Failed to open PDF: ${err.message || err}`);
+    disposeBook();
+    state.pdfDoc = null;
     els.welcomeOverlay.hidden = false;
+    showToast(`Failed to open PDF: ${err?.message || err}`, { isError: true, durationMs: 5200 });
   } finally {
     els.loadingOverlay.hidden = true;
   }
 }
 
 async function openBookById(bookId, overridePage = null) {
-  const lib = await fetchLibrary();
+  const lib = await fetchLibrary({ applySettings: false });
   const books = lib?.books || state.libraryBooks || [];
   const book = books.find((b) => b.id === bookId);
-  if (!book) return;
-  const targetPage = overridePage || parseHashPage() || book.lastPage || 1;
+  if (!book) {
+    showToast('Book not found in library.', { isError: true });
+    return;
+  }
+  const targetPage = overridePage || book.lastPage || 1;
   await openPdfSource(book.url || `/api/book/${book.id}.pdf`, {
     title: book.title,
     bookId: book.id,
@@ -5023,13 +5333,23 @@ window.openBookById = openBookById;
 
 async function openLocalFileBlob(file) {
   if (!file) return;
-  const buf = await file.arrayBuffer();
-  const id = `blob-${file.name}-${file.size}`;
-  await openPdfSource(new Uint8Array(buf), {
-    title: file.name.replace(/\.pdf$/i, ''),
-    bookId: id,
-    startPage: 1,
-  });
+  els.loadingText.textContent = `Opening ${file.name}…`;
+  els.loadingOverlay.hidden = false;
+  els.libraryModal.hidden = true;
+  els.moreMenu.hidden = true;
+  try {
+    const buf = await file.arrayBuffer();
+    const id = `blob-${file.name}-${file.size}`;
+    await openPdfSource(new Uint8Array(buf), {
+      title: file.name.replace(/\.pdf$/i, ''),
+      bookId: id,
+      startPage: null,
+    });
+  } catch (err) {
+    els.loadingOverlay.hidden = true;
+    if (!state.pdfDoc) els.welcomeOverlay.hidden = false;
+    showToast(`Failed to read PDF file: ${err?.message || err}`, { isError: true, durationMs: 5000 });
+  }
 }
 
 async function pickFileViaHost() {
@@ -5039,7 +5359,10 @@ async function pickFileViaHost() {
   }
   try {
     const res = await fetch('/api/pick-file', { method: 'POST' });
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.error) {
+      throw new Error(data?.error || `Picker failed (${res.status})`);
+    }
     if (data && !data.cancelled && data.id) {
       await openPdfSource(data.url, {
         title: data.title,
@@ -5052,8 +5375,8 @@ async function pickFileViaHost() {
         pinnedRefs: data.pinnedRefs || [],
       });
     }
-  } catch {
-    els.fileInputHidden.click();
+  } catch (err) {
+    showToast(`${err?.message || 'System file picker unavailable'} — click "Browse File" instead.`, { isError: true, durationMs: 4600 });
   }
 }
 
@@ -5096,12 +5419,12 @@ function shouldKeepBarVisible(zone) {
   const p = state.lastBarPointer;
   if (zone === 'header') {
     if (els.stickyTabPopover && !els.stickyTabPopover.hidden) return true;
-    if (isBarInputFocused(els.topBar)) return true;
+    if (isBarInputFocused(els.topBar) || els.topBar?.matches(':focus-within')) return true;
     if (els.topBar?.matches(':hover')) return true;
     return Boolean(p && p.clientY <= HEADER_WAKE_PX);
   }
   if (!els.moreMenu.hidden || !els.thumbnailsStrip.hidden) return true;
-  if (isBarInputFocused(els.bottomBar)) return true;
+  if (isBarInputFocused(els.bottomBar) || els.bottomBar?.matches(':focus-within')) return true;
   if (els.bottomBar?.matches(':hover')) return true;
   if (els.autoPlaybackHud?.matches(':hover') || els.navBackPill?.matches(':hover')) {
     return false;
@@ -5372,7 +5695,11 @@ function ensureMagHiResPage(idx, desiredW) {
   (async () => {
     try {
       const pdfPage = await state.pdfDoc.getPage(idx + 1);
-      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) return;
+      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) {
+        record.rendering = false;
+        if (!record.canvas && state.magHiResCache.get(idx) === record) state.magHiResCache.delete(idx);
+        return;
+      }
       const vp1 = pdfPage.getViewport({ scale: 1 });
       const vp = pdfPage.getViewport({ scale: clampedW / Math.max(1, vp1.width) });
       const hiCanvas = document.createElement('canvas');
@@ -5385,13 +5712,22 @@ function ensureMagHiResPage(idx, desiredW) {
       const task = pdfPage.render({ canvasContext: hctx, viewport: vp });
       record.renderTask = task;
       await task.promise;
-      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) return;
+      if (state.magHiResCache.get(idx) !== record || !state.magEnabled) {
+        hiCanvas.width = 0;
+        hiCanvas.height = 0;
+        record.rendering = false;
+        if (!record.canvas && state.magHiResCache.get(idx) === record) state.magHiResCache.delete(idx);
+        return;
+      }
       record.canvas = hiCanvas;
       record.targetW = clampedW;
       record.rendering = false;
+      record.renderTask = null;
       scheduleMagnifierRedraw();
     } catch {
       record.rendering = false;
+      record.renderTask = null;
+      if (!record.canvas && state.magHiResCache.get(idx) === record) state.magHiResCache.delete(idx);
     }
   })();
 
@@ -5538,6 +5874,7 @@ function drawMagPageContent(
     }
 
     drawMagTextSelection(ctx, state.pageNodes[idx], x, y, w, h, dark);
+    drawMagMarginNotes(ctx, pageNum, x, y, w, h);
   }
 
   if (innerSpine) {
@@ -5545,6 +5882,72 @@ function drawMagPageContent(
   }
 
   ctx.restore();
+}
+
+const MAG_MARGIN_NOTE_COLORS = {
+  yellow: { bg: '#fde067', fold: '#cfa91b', foldHi: '#fff2aa', ink: 'rgba(58, 43, 6, 0.55)' },
+  blue: { bg: '#7ec4ff', fold: '#438fd4', foldHi: '#bce2ff', ink: 'rgba(11, 41, 74, 0.52)' },
+  mint: { bg: '#74dfb1', fold: '#3caa7b', foldHi: '#b8f5da', ink: 'rgba(9, 46, 30, 0.52)' },
+  coral: { bg: '#f49589', fold: '#ca5c50', foldHi: '#ffc4bd', ink: 'rgba(62, 16, 11, 0.52)' },
+  violet: { bg: '#c2aef8', fold: '#8d72d6', foldHi: '#e2d8ff', ink: 'rgba(34, 18, 72, 0.52)' },
+};
+
+function drawMagMarginNotes(ctx, pageNum, x, y, w, h) {
+  if (!state.marginNotes?.length) return;
+  const pageNotes = state.marginNotes.filter((n) => n.page === pageNum);
+  if (!pageNotes.length) return;
+  const basePageW = Math.max(1, (state.pageW || 400) * (state.committedZoom || 1));
+  const pinScale = w / basePageW;
+  const sz = 24 * pinScale;
+  const half = sz / 2;
+  const fold = 8 * pinScale;
+
+  for (const note of pageNotes) {
+    const pal = MAG_MARGIN_NOTE_COLORS[note.color] || MAG_MARGIN_NOTE_COLORS.yellow;
+    const cx = x + (note.xPct / 100) * w;
+    const cy = y + (note.yPct / 100) * h;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((-3 * Math.PI) / 180);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.36)';
+    ctx.shadowBlur = 6 * pinScale;
+    ctx.shadowOffsetY = 3 * pinScale;
+
+    ctx.beginPath();
+    ctx.moveTo(-half, -half);
+    ctx.lineTo(half, -half);
+    ctx.lineTo(half, half - fold);
+    ctx.lineTo(half - fold, half);
+    ctx.lineTo(-half, half);
+    ctx.closePath();
+    ctx.fillStyle = pal.bg;
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.fillStyle = pal.fold;
+    ctx.beginPath();
+    ctx.moveTo(half - fold, half - fold);
+    ctx.lineTo(half, half - fold);
+    ctx.lineTo(half - fold, half);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = pal.ink;
+    const lineW = sz - 9 * pinScale;
+    const lineH = Math.max(1, 2 * pinScale);
+    for (let li = 0; li < 3; li++) {
+      ctx.fillRect(-half + 4 * pinScale, -half + (7 + li * 4) * pinScale, lineW, lineH);
+    }
+
+    if (note.snipRect) {
+      ctx.fillStyle = '#2d6cdf';
+      ctx.beginPath();
+      ctx.arc(half - 1.5 * pinScale, -half + 1.5 * pinScale, 3.5 * pinScale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 }
 
 function drawMagTextSelection(ctx, pageNode, x, y, w, h, dark) {
@@ -5890,6 +6293,7 @@ function drawMagBookStacks(ctx, fw, fh, lensCx, lensCy, power) {
 /** Project and draw axis-aligned DOM sticky edge tabs (resting edge stacks or scroll rail) onto magCanvas. */
 function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx, lensCy, power) {
   if (!containerEl || containerEl.hidden || !containerEl.children.length) return;
+  const clipRailRect = containerEl === els.scrollTabsRail ? containerEl.getBoundingClientRect() : null;
   const items = [];
   for (let idx = 0; idx < containerEl.children.length; idx++) {
     const btn = containerEl.children[idx];
@@ -5899,6 +6303,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.01) continue;
     const r = faceEl.getBoundingClientRect();
     if (r.width <= 1 || r.height <= 1) continue;
+    if (clipRailRect && (r.bottom <= clipRailRect.top + 1 || r.top >= clipRailRect.bottom - 1)) continue;
     const tailEl = btn.querySelector('.sticky-tab-tail');
     const tailRect = tailEl && !tailEl.hidden ? tailEl.getBoundingClientRect() : null;
     items.push({
@@ -5930,6 +6335,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
     const textEl = btn.querySelector('.sticky-tab-text');
     const domTruncated = textEl ? textEl.scrollWidth > textEl.clientWidth + 1.5 : null;
     const domFontPx = (parseFloat(getComputedStyle(faceEl).fontSize) || 10 * domTabZoom) * power;
+    const isMini = btn.classList.contains('scs-mini-tab');
 
     drawMagStickyTab(ctx, dx, dy, dw, dh, {
       color: getStickyTabColorKey(btn),
@@ -5937,7 +6343,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
       isRightSide,
       isCurrent: btn.classList.contains('is-current'),
       tailW: dTail,
-      zoomScale: tabZoomScale,
+      zoomScale: isMini ? Math.max(0.24, (dh / 23)) : tabZoomScale,
       fontSizePx: domFontPx,
       domTruncated,
     });
@@ -5948,6 +6354,7 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
 function drawMagTurningTabsForLeaf(ctx, containerEl, x0, y0, pageW, pageH, tabZoom, skipHidden = true) {
   if (!containerEl || !containerEl.children.length) return;
   for (const el of containerEl.children) {
+    if (!el.classList?.contains('sticky-edge-tab')) continue;
     if (skipHidden && el.hidden) continue;
     const topPct = Number(el.dataset.topPct);
     const yCenter = y0 + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * pageH;
@@ -6390,6 +6797,9 @@ function drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power) {
         drawMagPageContent(ctx, singleStackMeta.renderedIdx, dx, dy, dw, dh, dw * dpr, { drawHighlights: false });
       }
     }
+    if (els.scsTabsRail?.children?.length) {
+      drawMagProjectedEdgeTabs(ctx, els.scsTabsRail, true, fw, fh, lensCx, lensCy, power);
+    }
 
     if (els.scsBadge && els.scsBadge.textContent) {
       const br = els.scsBadge.getBoundingClientRect();
@@ -6639,9 +7049,9 @@ function getFocusCurtainBookRect() {
     state.pageFlip?.flyingFlips?.length
   );
   if (!single && visible.length === 1 && !hasActiveFlip) {
-    if (visible[0] === 0) {
+    if (state.showCover && visible[0] === 0) {
       baseLeft = bc.left + bc.width / 2;
-    } else if (visible[0] >= state.totalPages - 1) {
+    } else {
       baseRight = bc.left + bc.width / 2;
     }
   }
@@ -6794,9 +7204,12 @@ function updateFocusCurtainUi() {
   }
   if (els.focusCurtainOverlay) {
     els.focusCurtainOverlay.hidden = !active;
-    els.focusCurtainOverlay.classList.toggle('with-mag-pill', Boolean(state.magEnabled));
     els.focusCurtainOverlay.classList.toggle('tone-warm', state.curtainTone === 'warm');
     els.focusCurtainOverlay.classList.toggle('tone-deep', state.curtainTone === 'deep');
+  }
+  if (els.focusCurtainPill) {
+    els.focusCurtainPill.hidden = !active;
+    els.focusCurtainPill.classList.toggle('with-mag-pill', Boolean(state.magEnabled));
   }
   if (els.focusCurtainBand) {
     els.focusCurtainBand.classList.toggle('has-guides', Boolean(state.curtainGuide));
@@ -6843,9 +7256,14 @@ function updateFocusCurtainUi() {
 function setFocusCurtainEnabled(enabled, { persist = false } = {}) {
   const next = Boolean(enabled && state.pdfDoc);
   state.curtainEnabled = next;
-  if (!next && state.curtainSyncRaf) {
-    cancelAnimationFrame(state.curtainSyncRaf);
-    state.curtainSyncRaf = 0;
+  if (!next) {
+    state.curtainDragging = false;
+    state.curtainResizing = null;
+    els.focusCurtainBand?.classList.remove('is-dragging');
+    if (state.curtainSyncRaf) {
+      cancelAnimationFrame(state.curtainSyncRaf);
+      state.curtainSyncRaf = 0;
+    }
   }
   updateFocusCurtainUi();
   if (next) positionFocusCurtain();
@@ -6947,11 +7365,16 @@ function updateMagnifierUi() {
 }
 
 function stepMagnifierSize(dir) {
+  const stageW = els.stage?.clientWidth || window.innerWidth || 1000;
+  const stageH = els.stage?.clientHeight || window.innerHeight || 700;
   if (state.magStyle === 'bar') {
-    state.magBarWidth = clamp(Math.round(state.magBarWidth + dir * 36), 180, 780);
-    state.magBarHeight = clamp(Math.round(state.magBarHeight + dir * 10), 48, 240);
+    const maxBarW = Math.max(180, stageW - 24);
+    const maxBarH = Math.max(60, Math.min(240, stageH - 90));
+    state.magBarWidth = clamp(Math.round(Math.min(state.magBarWidth, maxBarW) + dir * 36), 180, maxBarW);
+    state.magBarHeight = clamp(Math.round(Math.min(state.magBarHeight, maxBarH) + dir * 10), 48, maxBarH);
   } else {
-    state.magCircleSize = clamp(Math.round(state.magCircleSize + dir * 24), 110, 420);
+    const maxCircle = Math.max(110, Math.min(420, Math.min(stageW, stageH) - 24));
+    state.magCircleSize = clamp(Math.round(Math.min(state.magCircleSize, maxCircle) + dir * 24), 110, maxCircle);
   }
   updateMagnifierUi();
   if (state.magEnabled) {
@@ -6965,10 +7388,14 @@ function setMagnifierEnabled(enabled, { persist = false } = {}) {
   const next = Boolean(enabled && state.pdfDoc);
   state.magEnabled = next;
   if (!next) {
+    state.magDragging = false;
+    state.magResizing = null;
+    els.magLens?.classList.remove('is-dragging', 'is-resizing');
     if (state.magRedrawRaf) {
       cancelAnimationFrame(state.magRedrawRaf);
       state.magRedrawRaf = 0;
     }
+    clearMagnifierCache();
     updateMagnifierUi();
     if (persist) schedulePersistState();
     return;
@@ -7380,12 +7807,12 @@ function populateAmbientPresetSelect() {
   updateAmbientSoundUi();
 }
 
-function updateAmbientSoundUi() {
+function updateAmbientSoundUi({ syncPreset = true, syncVolume = true } = {}) {
   const info = ambientSound.getPresetInfo(state.ambientPreset);
   state.ambientPreset = info.id;
   state.ambientVolume = clamp(Math.round(Number(state.ambientVolume) || 0), 0, 100);
-  ambientSound.setVolume(state.ambientVolume);
-  ambientSound.setPreset(state.ambientPreset);
+  if (syncVolume) ambientSound.setVolume(state.ambientVolume);
+  if (syncPreset) ambientSound.setPreset(state.ambientPreset);
 
   if (els.valAmbientSound) {
     els.valAmbientSound.textContent = info.label;
@@ -7406,8 +7833,10 @@ function updateAmbientSoundUi() {
 
 function setAmbientSoundPreset(presetId, persist = true) {
   state.ambientPreset = normalizeAmbientPresetId(presetId);
-  updateAmbientSoundUi();
-  if (state.ambientPreset !== 'off') ambientSound.unlock();
+  updateAmbientSoundUi({ syncPreset: true, syncVolume: true });
+  if (state.ambientPreset !== 'off' && !window.webkit?.messageHandlers?.flipbook) {
+    ambientSound.unlock();
+  }
   if (persist) schedulePersistState();
 }
 
@@ -7415,7 +7844,7 @@ function setAmbientSoundVolume(vol, persist = true) {
   const v = Number(vol);
   if (!Number.isFinite(v)) return;
   state.ambientVolume = clamp(Math.round(v), 0, 100);
-  updateAmbientSoundUi();
+  updateAmbientSoundUi({ syncPreset: false, syncVolume: true });
   if (persist) schedulePersistState();
 }
 
@@ -7607,6 +8036,15 @@ function setAutoFlipSeconds(seconds, { persist = true, reschedule = true, syncIn
   if (persist) schedulePersistState();
 }
 
+function isAtLastFlipSpread() {
+  if (!state.pageFlip || !state.totalPages) return true;
+  if (Array.isArray(state.pageFlip.spreads) && state.pageFlip.spreads.length) {
+    return state.pageFlip.currentSpreadIndex >= state.pageFlip.spreads.length - 1;
+  }
+  const vis = getVisibleIndices();
+  return (vis[vis.length - 1] ?? 0) >= state.totalPages - 1;
+}
+
 function scheduleAutoFlipTick(preserveElapsed = false) {
   if (state.autoFlipTimer) {
     clearTimeout(state.autoFlipTimer);
@@ -7621,7 +8059,7 @@ function scheduleAutoFlipTick(preserveElapsed = false) {
     state.autoFlipTimer = setTimeout(() => {
       state.autoFlipTimer = null;
       if (!state.autoFlipEnabled || state.autoFlipPaused || state.scrollMode !== 'flip') return;
-      if (!state.pageFlip || state.currentIndex >= state.totalPages - 1) {
+      if (isAtLastFlipSpread()) {
         stopAutoFlip();
         return;
       }
@@ -7651,7 +8089,7 @@ function stopAutoFlip() {
 
 function startAutoFlip() {
   if (!state.pdfDoc || state.scrollMode !== 'flip') return;
-  if (!state.pageFlip || state.currentIndex >= state.totalPages - 1) {
+  if (isAtLastFlipSpread()) {
     stopAutoFlip();
     return;
   }
@@ -7743,21 +8181,26 @@ function startAutoScrollLoop() {
     }
 
     const maxScroll = Math.max(0, sv.scrollHeight - sv.clientHeight);
+    if (maxScroll <= 0) {
+      state.autoScrollPlaying = false;
+      state.autoScrollEnabled = false;
+      state.autoScrollRafId = 0;
+      updatePlaybackUi();
+      return;
+    }
     if (Math.abs(sv.scrollTop - state.autoScrollPosY) > 3) {
       state.autoScrollPosY = sv.scrollTop;
     }
-    if (maxScroll > 0) {
-      const zoomFactor = 0.65 + 0.35 * clamp(state.zoom, 1, 3);
-      const pxPerSec = clamp(state.autoScrollSpeed, 0.2, 5) * 48 * zoomFactor;
-      state.autoScrollPosY = Math.min(maxScroll, state.autoScrollPosY + pxPerSec * dt);
-      sv.scrollTop = state.autoScrollPosY;
-      if (state.autoScrollPosY >= maxScroll - 0.5) {
-        state.autoScrollPlaying = false;
-        state.autoScrollEnabled = false;
-        state.autoScrollRafId = 0;
-        updatePlaybackUi();
-        return;
-      }
+    const zoomFactor = 0.65 + 0.35 * clamp(state.zoom, 1, 3);
+    const pxPerSec = clamp(state.autoScrollSpeed, 0.2, 5) * 48 * zoomFactor;
+    state.autoScrollPosY = Math.min(maxScroll, state.autoScrollPosY + pxPerSec * dt);
+    sv.scrollTop = state.autoScrollPosY;
+    if (state.autoScrollPosY >= maxScroll - 0.5) {
+      state.autoScrollPlaying = false;
+      state.autoScrollEnabled = false;
+      state.autoScrollRafId = 0;
+      updatePlaybackUi();
+      return;
     }
     state.autoScrollRafId = requestAnimationFrame(step);
   };
@@ -7867,6 +8310,12 @@ function wireEvents() {
         clientY: e.clientY,
       });
     });
+    const endScsDrag = () => {
+      if (!scsDrag) return;
+      scsDrag = null;
+      updateSingleDragPickup({ active: false });
+    };
+    window.addEventListener('blur', endScsDrag);
     window.addEventListener('mouseup', (e) => {
       if (!scsDrag) return;
       const d = scsDrag;
@@ -7970,10 +8419,17 @@ function wireEvents() {
     els.btnMore.classList.toggle('active', true);
   });
 
-  els.btnOpenTop.addEventListener('click', () => {
-    fetchLibrary();
+  const openLibraryModal = () => {
+    closeMarginNotePopover();
+    closeStickyTabPopover();
+    closePageContextMenu();
+    hideHighlightPopover();
+    els.moreMenu.hidden = true;
+    fetchLibrary({ applySettings: false });
     els.libraryModal.hidden = false;
-  });
+  };
+
+  els.btnOpenTop.addEventListener('click', openLibraryModal);
   els.btnCloseLibrary.addEventListener('click', () => {
     els.libraryModal.hidden = true;
   });
@@ -8097,12 +8553,16 @@ function wireEvents() {
 
       if (r.kind === 'e') {
         const newRight = clamp(localX, r.left + minW, r.boxW);
-        state.curtainLengthPct = clamp(Math.round(((newRight - r.left) / r.boxW) * 100), 20, 100);
-        nextCx = r.boxLeft + (r.left + newRight) / 2;
+        const nextPct = clamp(Math.round(((newRight - r.left) / r.boxW) * 100), 20, 100);
+        const qW = clamp(Math.round((nextPct / 100) * r.boxW), minW, r.boxW - r.left);
+        state.curtainLengthPct = nextPct;
+        nextCx = r.boxLeft + r.left + qW / 2;
       } else if (r.kind === 'w') {
         const newLeft = clamp(localX, 0, r.right - minW);
-        state.curtainLengthPct = clamp(Math.round(((r.right - newLeft) / r.boxW) * 100), 20, 100);
-        nextCx = r.boxLeft + (newLeft + r.right) / 2;
+        const nextPct = clamp(Math.round(((r.right - newLeft) / r.boxW) * 100), 20, 100);
+        const qW = clamp(Math.round((nextPct / 100) * r.boxW), minW, r.right);
+        state.curtainLengthPct = nextPct;
+        nextCx = r.boxLeft + r.right - qW / 2;
       } else if (r.kind === 's') {
         const newBottom = clamp(localY, r.top + 22, Math.min(r.boxH, r.top + maxH));
         state.curtainHeight = clamp(Math.round(newBottom - r.top), 22, maxH);
@@ -8133,11 +8593,15 @@ function wireEvents() {
       curtainDragState = null;
       els.focusCurtainBand?.classList.remove('is-dragging');
       schedulePersistState();
-      try { els.focusCurtainBand?.releasePointerCapture?.(e.pointerId); } catch {}
+      if (e?.pointerId !== undefined) {
+        try { els.focusCurtainBand?.releasePointerCapture?.(e.pointerId); } catch {}
+      }
     }
   };
   els.focusCurtainBand?.addEventListener('pointerup', endCurtainPointer);
   els.focusCurtainBand?.addEventListener('pointercancel', endCurtainPointer);
+  els.focusCurtainBand?.addEventListener('lostpointercapture', endCurtainPointer);
+  window.addEventListener('blur', () => endCurtainPointer(null));
 
   els.btnMagShapeCircle?.addEventListener('click', () => setMagnifierStyle('circle'));
   els.btnMagShapeBar?.addEventListener('click', () => setMagnifierStyle('bar'));
@@ -8193,20 +8657,25 @@ function wireEvents() {
     if (state.magResizing && magResizeStart) {
       const dx = e.clientX - magResizeStart.startClientX;
       const dy = e.clientY - magResizeStart.startClientY;
+      const stageW = els.stage?.clientWidth || window.innerWidth || 1000;
+      const stageH = els.stage?.clientHeight || window.innerHeight || 700;
       if (state.magStyle === 'circle') {
         const delta = Math.max(dx, dy) === dx ? dx : dy;
         const avgDelta = (dx + dy) * 0.65;
-        const newSize = clamp(Math.round(magResizeStart.startW + (Math.abs(dx) > Math.abs(dy) * 1.4 || Math.abs(dy) > Math.abs(dx) * 1.4 ? delta : avgDelta)), 110, 420);
+        const maxCircle = Math.max(110, Math.min(420, Math.min(stageW, stageH) - 24));
+        const newSize = clamp(Math.round(magResizeStart.startW + (Math.abs(dx) > Math.abs(dy) * 1.4 || Math.abs(dy) > Math.abs(dx) * 1.4 ? delta : avgDelta)), 110, maxCircle);
         state.magCircleSize = newSize;
         updateMagnifierUi();
         positionMagnifier(magResizeStart.leftEdge + newSize / 2, magResizeStart.topEdge + newSize / 2);
       } else {
+        const maxBarW = Math.max(180, stageW - 24);
+        const maxBarH = Math.max(60, Math.min(240, stageH - 90));
         const newW = magResizeStart.kind === 's'
           ? magResizeStart.startW
-          : clamp(Math.round(magResizeStart.startW + dx), 180, 780);
+          : clamp(Math.round(magResizeStart.startW + dx), 180, maxBarW);
         const newH = magResizeStart.kind === 'e'
           ? magResizeStart.startH
-          : clamp(Math.round(magResizeStart.startH + dy), 48, 240);
+          : clamp(Math.round(magResizeStart.startH + dy), 48, maxBarH);
         state.magBarWidth = newW;
         state.magBarHeight = newH;
         updateMagnifierUi();
@@ -8224,17 +8693,23 @@ function wireEvents() {
       magResizeStart = null;
       els.magLens?.classList.remove('is-resizing');
       schedulePersistState();
-      try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+      if (e?.pointerId !== undefined) {
+        try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+      }
     }
     if (state.magDragging) {
       state.magDragging = false;
       magDragOffset = null;
       els.magLens?.classList.remove('is-dragging');
-      try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+      if (e?.pointerId !== undefined) {
+        try { els.magLens?.releasePointerCapture?.(e.pointerId); } catch {}
+      }
     }
   };
   els.magLens?.addEventListener('pointerup', endMagPointer);
   els.magLens?.addEventListener('pointercancel', endMagPointer);
+  els.magLens?.addEventListener('lostpointercapture', endMagPointer);
+  window.addEventListener('blur', () => endMagPointer(null));
   els.magLens?.addEventListener('wheel', (e) => {
     if (!state.magEnabled || state.magFollow) return;
     e.preventDefault();
@@ -8319,11 +8794,7 @@ function wireEvents() {
     els.moreMenu.hidden = true;
     pickFileViaHost();
   });
-  els.menuLibrary.addEventListener('click', () => {
-    els.moreMenu.hidden = true;
-    fetchLibrary();
-    els.libraryModal.hidden = false;
-  });
+  els.menuLibrary.addEventListener('click', openLibraryModal);
   els.menuScrollMode?.addEventListener('click', () => {
     if (state.scrollMode === 'scroll') {
       stopAutoScroll({ resetPlaying: true });
@@ -8342,19 +8813,19 @@ function wireEvents() {
     state.pageMode = state.pageMode === 'auto' ? 'single' : state.pageMode === 'single' ? 'double' : 'auto';
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initReaderView(state.currentIndex);
+    if (state.pdfDoc && state.scrollMode === 'flip') initReaderView(state.currentIndex);
   });
   els.menuHardCover.addEventListener('click', () => {
     state.showCover = !state.showCover;
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initReaderView(state.currentIndex);
+    if (state.pdfDoc && state.scrollMode === 'flip') initReaderView(state.currentIndex);
   });
   els.menuClickMode.addEventListener('click', () => {
     state.clickMode = state.clickMode === 'smart' ? 'anywhere' : 'smart';
     updateMenuValues();
     schedulePersistState();
-    if (state.pdfDoc) initReaderView(state.currentIndex);
+    if (state.pdfDoc && state.scrollMode === 'flip') initReaderView(state.currentIndex);
   });
   els.menuAutoFlip?.addEventListener('click', toggleAutoFlip);
   els.btnFlipTimeDec?.addEventListener('click', () => setAutoFlipSeconds(stepFlipInterval(state.autoFlipSeconds, -1)));
@@ -8527,16 +8998,28 @@ function wireEvents() {
     btn.addEventListener('click', () => setPaperGrainScalePx(Number(btn.dataset.scale)));
   });
 
-  // Page Right-Click Context Menu for quick Margin Notes / Pins / Snip / Sticky Tabs / Bookmarks
+  // Unified Page / Highlight Right-Click Context Menu
   els.stage?.addEventListener('contextmenu', (e) => {
     if (!state.pdfDoc) return;
-    if (e.target.closest('#btnSound, .sticky-edge-tab, .fb-margin-note-pin, .ref-pin-card, .snip-result-card, .popover-panel, #moreMenu, .side-drawer, .nav-back-pill, .mag-controls-pill, .auto-playback-hud')) {
+    if (e.target.closest('#btnSound, .sticky-edge-tab, .fb-margin-note-pin, .ref-pin-card, .snip-result-card, .popover-panel, #moreMenu, .side-drawer, .nav-back-pill, .mag-controls-pill, .focus-curtain-pill, .auto-playback-hud')) {
       return;
     }
     const pageEl = e.target.closest('.fb-page');
+    const hlHit = pageEl ? findHighlightAtClientPoint(pageEl, e.clientX, e.clientY) : null;
+    if (hlHit) {
+      e.preventDefault();
+      closePageContextMenu();
+      showHighlightPopover(hlHit.anchorRect, {
+        mode: 'edit',
+        id: hlHit.hl.id,
+        color: hlHit.hl.color,
+      });
+      return;
+    }
     const stackEl = e.target.closest('.book-shell, .scroll-page-wrap');
     if (!pageEl && !stackEl) return;
     e.preventDefault();
+    hideHighlightPopover();
     const rawIdx = pageEl?.dataset?.pageIndex;
     const p = rawIdx !== undefined && Number.isFinite(Number(rawIdx))
       ? Number(rawIdx) + 1
@@ -8613,25 +9096,42 @@ function wireEvents() {
   // File Pickers & Drag-Drop
   els.btnWelcomePick.addEventListener('click', pickFileViaHost);
   els.btnModalPickPdf.addEventListener('click', pickFileViaHost);
+  els.btnBrowseWelcome?.addEventListener('click', () => els.fileInputHidden?.click());
+  els.btnModalBrowsePdf?.addEventListener('click', () => els.fileInputHidden?.click());
   els.fileInputHidden.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
-    if (file) openLocalFileBlob(file);
+    if (file) {
+      if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+        showToast('Please select a PDF (.pdf) file.', { isError: true });
+      } else {
+        openLocalFileBlob(file);
+      }
+    }
     els.fileInputHidden.value = '';
   });
 
+  const isFileTransfer = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
   window.addEventListener('dragover', (e) => {
+    if (!isFileTransfer(e)) return;
     e.preventDefault();
     els.dropOverlay.hidden = false;
   });
   window.addEventListener('dragleave', (e) => {
     if (e.relatedTarget === null) els.dropOverlay.hidden = true;
   });
+  window.addEventListener('dragend', () => {
+    els.dropOverlay.hidden = true;
+  });
   window.addEventListener('drop', (e) => {
+    if (!isFileTransfer(e)) return;
     e.preventDefault();
     els.dropOverlay.hidden = true;
     const file = e.dataTransfer?.files?.[0];
-    if (file && file.name.toLowerCase().endsWith('.pdf')) {
+    if (!file) return;
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
       openLocalFileBlob(file);
+    } else {
+      showToast('Only PDF (.pdf) files can be opened here.', { isError: true });
     }
   });
 
@@ -8686,7 +9186,8 @@ function wireEvents() {
 
     const sel = window.getSelection();
     const hasSelection = !!(sel && !sel.isCollapsed && sel.toString().trim());
-    if (!e.target.closest('#hlPopover') && !hasSelection) {
+    const clickedUiChrome = Boolean(e.target.closest('#topBar, #bottomBar, #sideDrawer, #moreMenu, #libraryModal'));
+    if (!e.target.closest('#hlPopover') && (!hasSelection || clickedUiChrome)) {
       const wasPanDrag = state.panMoved;
       state.panMoved = false;
       const pageNode = !wasPanDrag && !state.pageFlip?.pointerMoved
@@ -8743,6 +9244,9 @@ function wireEvents() {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       saveMarginNoteFromPopover();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMarginNotePopover();
     }
   });
 
@@ -8754,7 +9258,15 @@ function wireEvents() {
     e.preventDefault();
     e.stopPropagation();
     if (els.snipResultCard) els.snipResultCard.hidden = true;
-    const pageEl = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.classList?.contains('fb-page'));
+    let pageEl = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.classList?.contains('fb-page'));
+    if (!pageEl) {
+      const near = findVisiblePageNodeAtClient(e.clientX, e.clientY);
+      if (near) {
+        const dx = Math.max(near.r.left - e.clientX, 0, e.clientX - near.r.right);
+        const dy = Math.max(near.r.top - e.clientY, 0, e.clientY - near.r.bottom);
+        if (Math.hypot(dx, dy) <= 24) pageEl = near.pageEl;
+      }
+    }
     if (!pageEl) return;
     const sr = els.stage.getBoundingClientRect();
     snipDrag = {
@@ -8789,8 +9301,11 @@ function wireEvents() {
     if (!snipDrag) return;
     const drag = snipDrag;
     snipDrag = null;
-    try { els.snipOverlay?.releasePointerCapture?.(e.pointerId); } catch {}
+    if (e?.pointerId !== undefined) {
+      try { els.snipOverlay?.releasePointerCapture?.(e.pointerId); } catch {}
+    }
     if (els.snipSelectionBox) els.snipSelectionBox.hidden = true;
+    if (!e || e.type === 'pointercancel' || e.type === 'blur') return;
     const clientRect = {
       left: Math.min(drag.startClientX, e.clientX),
       top: Math.min(drag.startClientY, e.clientY),
@@ -8803,6 +9318,8 @@ function wireEvents() {
   };
   els.snipOverlay?.addEventListener('pointerup', endSnipDrag);
   els.snipOverlay?.addEventListener('pointercancel', endSnipDrag);
+  els.snipOverlay?.addEventListener('lostpointercapture', endSnipDrag);
+  window.addEventListener('blur', () => endSnipDrag({ type: 'blur' }));
   els.btnSnipCancel?.addEventListener('click', () => setSnipToolActive(false));
   els.btnSnipResultClose?.addEventListener('click', () => setSnipToolActive(false));
   els.btnSnipAgain?.addEventListener('click', () => {
@@ -8903,6 +9420,10 @@ function wireEvents() {
     closeMarginNotePopover();
     repaintRenderedHighlights();
     repaintAllMarginNotes();
+    if (Number.isInteger(singleStackMeta.renderedIdx)) {
+      appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+    }
+    state.pageFlip?.refreshSnapshots?.();
     updateHighlightsUi();
     schedulePersistState();
   });
@@ -8914,6 +9435,10 @@ function wireEvents() {
     closeMarginNotePopover();
     repaintRenderedHighlights();
     repaintAllMarginNotes();
+    if (Number.isInteger(singleStackMeta.renderedIdx)) {
+      appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+    }
+    state.pageFlip?.refreshSnapshots?.();
     updateHighlightsUi();
     schedulePersistState();
   });
@@ -8927,12 +9452,22 @@ function wireEvents() {
     if (!state.autoScrollRafId || now < state.autoScrollPauseUntil) {
       state.autoScrollPosY = sv.scrollTop;
     }
-    const itemStride = Math.round(state.pageH * state.zoom) + 18;
-    const centerOffset = sv.scrollTop + sv.clientHeight * 0.38 - 54;
-    const estIdx = clamp(Math.floor(centerOffset / Math.max(40, itemStride)), 0, state.totalPages - 1);
-    if (estIdx !== state.currentIndex) {
-      state.currentIndex = estIdx;
-      onSpreadChanged(true, 4);
+    if (now >= (state.programmaticScrollUntil || 0)) {
+      const maxScroll = Math.max(0, sv.scrollHeight - sv.clientHeight);
+      let estIdx;
+      if (sv.scrollTop <= 2) {
+        estIdx = 0;
+      } else if (maxScroll > 0 && sv.scrollTop >= maxScroll - 2) {
+        estIdx = state.totalPages - 1;
+      } else {
+        const itemStride = Math.round(state.pageH * state.zoom) + 18;
+        const centerOffset = sv.scrollTop + sv.clientHeight * 0.38 - 54;
+        estIdx = clamp(Math.floor(centerOffset / Math.max(40, itemStride)), 0, state.totalPages - 1);
+      }
+      if (estIdx !== state.currentIndex) {
+        state.currentIndex = estIdx;
+        onSpreadChanged(true, 4);
+      }
     }
     if (now - (state.autoScrollRenderTickAt || 0) >= 180) {
       state.autoScrollRenderTickAt = now;
@@ -8947,14 +9482,17 @@ function wireEvents() {
   }, { passive: true });
   els.scrollViewport.addEventListener('wheel', (e) => {
     if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
+    state.programmaticScrollUntil = 0;
     state.autoScrollPauseUntil = performance.now() + (e.deltaY < 0 ? 750 : 320);
   }, { passive: true });
   els.scrollViewport.addEventListener('touchstart', () => {
     if (state.scrollMode !== 'scroll') return;
+    state.programmaticScrollUntil = 0;
     state.autoScrollPauseUntil = performance.now() + 900;
   }, { passive: true });
   els.scrollViewport.addEventListener('mousedown', (e) => {
     if (state.scrollMode !== 'scroll') return;
+    state.programmaticScrollUntil = 0;
     if (e.target === els.scrollViewport || e.target.closest('.textLayer')) {
       state.scrollUserSelecting = true;
     }
@@ -8965,18 +9503,8 @@ function wireEvents() {
       state.autoScrollPauseUntil = performance.now() + 360;
     }
   });
-
-  // Right-click any existing highlight on a page to recolor or delete it cleanly
-  els.stage.addEventListener('contextmenu', (e) => {
-    const pageNode = e.target.closest('.fb-page');
-    const hit = pageNode ? findHighlightAtClientPoint(pageNode, e.clientX, e.clientY) : null;
-    if (!hit) return;
-    e.preventDefault();
-    showHighlightPopover(hit.anchorRect, {
-      mode: 'edit',
-      id: hit.hl.id,
-      color: hit.hl.color,
-    });
+  window.addEventListener('blur', () => {
+    state.scrollUserSelecting = false;
   });
 
   // Independent edge-triggered auto-hide for header (top) & footer (bottom)
@@ -9144,23 +9672,33 @@ function wireEvents() {
   const endTextSelecting = () => {
     isSelectingText = false;
   };
-  window.addEventListener('pointermove', stopMoveIfSelecting, true);
-  window.addEventListener('mousemove', stopMoveIfSelecting, true);
+  els.bookContainer.addEventListener('pointermove', stopMoveIfSelecting, true);
+  els.bookContainer.addEventListener('mousemove', stopMoveIfSelecting, true);
   window.addEventListener('pointerup', endTextSelecting, true);
   window.addEventListener('pointercancel', endTextSelecting, true);
   window.addEventListener('mouseup', endTextSelecting, true);
+  window.addEventListener('blur', endTextSelecting);
 
   // Keep Web Audio unlocked & recover automatically after sleep, audio-route change, or focus loss
-  const keepAudioActive = () => {
-    if (state.soundEnabled) flipSound.unlock();
-    if (state.ambientPreset !== 'off') ambientSound.unlock();
+  const keepAudioActive = (e) => {
+    const hasNative = Boolean(window.webkit?.messageHandlers?.flipbook);
+    if (hasNative && e && e.type !== 'focus' && e.type !== 'visibilitychange') return;
+    if (state.soundEnabled && (!flipSound.unlocked || (flipSound.ctx && flipSound.ctx.state !== 'running'))) {
+      flipSound.unlock();
+    }
+    if (state.ambientPreset !== 'off') {
+      const needsAmbientUnlock = hasNative
+        ? (e?.type === 'focus' || e?.type === 'visibilitychange')
+        : (ambientSound.ctx?.state === 'suspended' || ambientSound.htmlAudio?.paused || (!ambientSound.activeScene && !ambientSound.htmlAudio));
+      if (needsAmbientUnlock) ambientSound.unlock();
+    }
   };
   window.addEventListener('pointerdown', keepAudioActive, { capture: true, passive: true });
   window.addEventListener('keydown', keepAudioActive, { capture: true, passive: true });
   window.addEventListener('touchstart', keepAudioActive, { capture: true, passive: true });
   window.addEventListener('focus', keepAudioActive, { passive: true });
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) keepAudioActive();
+  document.addEventListener('visibilitychange', (e) => {
+    if (!document.hidden) keepAudioActive(e);
   });
 
   // Two-finger double-click / trackpad Smart Zoom + panning when zoomed + text highlight selection trigger
@@ -9282,7 +9820,10 @@ function wireEvents() {
       panDownPos = null;
       els.zoomViewport.classList.remove('is-panning');
     }
-    if (!e.target?.closest?.('#hlPopover')) {
+    if (panWasMoved) {
+      setTimeout(() => { state.panMoved = false; }, 0);
+    }
+    if (e.button === 0 && !e.target?.closest?.('#hlPopover, #sideDrawer, #moreMenu, #libraryModal, .popover-panel, .top-bar, .bottom-bar, .fb-margin-note-pin')) {
       setTimeout(() => {
         if (panWasMoved || state.isFlipping) return;
         const draft = extractSelectionHighlightDraft();
@@ -9292,11 +9833,21 @@ function wireEvents() {
       }, 0);
     }
   });
+  window.addEventListener('blur', () => {
+    if (state.isPanning) {
+      state.isPanning = false;
+      state.panStart = null;
+      panDownPos = null;
+      els.zoomViewport.classList.remove('is-panning');
+    }
+    state.panMoved = false;
+  });
 
   // Trackpad two-finger drag pan + pinch/Ctrl+Wheel zoom anchored at cursor
   els.stage.addEventListener('wheel', (e) => {
     if (!state.pdfDoc) return;
     if (e.ctrlKey || e.metaKey) {
+      if (e.target.closest('#snipResultCard, #focusCurtainPill, #magControlsPill, #snipHintPill, #hlPopover')) return;
       e.preventDefault();
       if (!e.deltaY) return;
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
@@ -9305,7 +9856,7 @@ function wireEvents() {
       return;
     }
     if (state.twoFingerPan && state.zoom > 1.01 && state.scrollMode === 'flip') {
-      if (e.target.closest('#sideDrawer, #thumbnailsStrip, #moreMenu, #libraryModal')) return;
+      if (e.target.closest('#sideDrawer, #thumbnailsStrip, #moreMenu, #libraryModal, #snipResultCard, .ref-pin-card, .popover-panel')) return;
       e.preventDefault();
       const unit = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? Math.max(240, els.stage.clientHeight * 0.85) : 1;
       const dx = (e.deltaX || 0) * unit;
@@ -9347,8 +9898,9 @@ function wireEvents() {
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {
-    const tag = document.activeElement?.tagName;
-    const editing = tag === 'INPUT' || tag === 'TEXTAREA';
+    const activeEl = document.activeElement;
+    const tag = activeEl?.tagName;
+    const editing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(activeEl?.isContentEditable);
 
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
       e.preventDefault();
@@ -9361,16 +9913,66 @@ function wireEvents() {
       return;
     }
 
+    if (e.key === 'Escape') {
+      if (activeEl === els.pageInput) return; // handled by pageInput's own Escape handler
+      if (editing) activeEl.blur?.();
+      if (state.snipActive) setSnipToolActive(false);
+      else if (els.marginNotePopover && !els.marginNotePopover.hidden) closeMarginNotePopover();
+      else if (els.pageContextMenu && !els.pageContextMenu.hidden) closePageContextMenu();
+      else if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
+      else if (!els.hlPopover.hidden) hideHighlightPopover();
+      else if (!els.moreMenu.hidden) {
+        els.moreMenu.hidden = true;
+        els.btnMore.classList.remove('active');
+      } else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
+      else if (!els.sideDrawer.hidden) {
+        els.sideDrawer.hidden = true;
+        els.btnHighlightsTop?.classList.remove('active');
+      } else if (!els.thumbnailsStrip.hidden) {
+        els.thumbnailsStrip.hidden = true;
+        els.btnThumbs.classList.remove('active');
+      } else if (state.magEnabled) setMagnifierEnabled(false);
+      else if (state.curtainEnabled) setFocusCurtainEnabled(false, { persist: true });
+      else if (state.zoom > 1) setZoom(1, true);
+      return;
+    }
+
     if (editing) return;
+
+    const hasMod = e.metaKey || e.ctrlKey || e.altKey;
+    if (e.key === 'ArrowLeft' && e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (state.pdfDoc && els.libraryModal.hidden) {
+        e.preventDefault();
+        jumpBackHistory();
+      }
+      return;
+    }
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && state.pdfDoc && els.libraryModal.hidden && state.curtainEnabled && !e.metaKey && !e.ctrlKey && (state.scrollMode === 'flip' || e.altKey || e.shiftKey)) {
+      e.preventDefault();
+      const delta = e.key === 'ArrowUp' ? (e.shiftKey ? -44 : -20) : (e.shiftKey ? 44 : 20);
+      moveFocusCurtainByLines(delta);
+      return;
+    }
+
+    if (hasMod) return;
+
+    if ((e.key === 'l' || e.key === 'L') && !e.shiftKey) {
+      if (!els.libraryModal.hidden) {
+        els.libraryModal.hidden = true;
+      } else {
+        openLibraryModal();
+      }
+      return;
+    }
+    if ((e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+      toggleFullscreen();
+      return;
+    }
+
+    if (!state.pdfDoc || !els.libraryModal.hidden) return;
 
     switch (e.key) {
       case 'ArrowLeft':
-        if (e.altKey) {
-          e.preventDefault();
-          jumpBackHistory();
-          break;
-        }
-      // falls through
       case 'PageUp': {
         e.preventDefault();
         const now = performance.now();
@@ -9388,18 +9990,6 @@ function wireEvents() {
         goNext();
         break;
       }
-      case 'ArrowUp':
-        if (state.curtainEnabled) {
-          e.preventDefault();
-          moveFocusCurtainByLines(e.shiftKey ? -44 : -20);
-        }
-        break;
-      case 'ArrowDown':
-        if (state.curtainEnabled) {
-          e.preventDefault();
-          moveFocusCurtainByLines(e.shiftKey ? 44 : 20);
-        }
-        break;
       case ' ': {
         e.preventDefault();
         if (state.scrollMode === 'scroll') {
@@ -9429,10 +10019,6 @@ function wireEvents() {
       case 'H':
         els.btnHighlightsTop?.click();
         break;
-      case 'f':
-      case 'F':
-        toggleFullscreen();
-        break;
       case 't':
       case 'T':
         els.btnThumbs.click();
@@ -9440,7 +10026,7 @@ function wireEvents() {
       case 'b':
       case 'B':
         if (e.shiftKey) {
-          if (state.pdfDoc) openStickyTabPopover();
+          openStickyTabPopover();
           break;
         }
         toggleBookmarkCurrent();
@@ -9461,11 +10047,6 @@ function wireEvents() {
       case 'p':
       case 'P':
         togglePinCurrentPage();
-        break;
-      case 'l':
-      case 'L':
-        fetchLibrary();
-        els.libraryModal.hidden = false;
         break;
       case '+':
       case '=':
@@ -9492,34 +10073,21 @@ function wireEvents() {
           showBar('header', true, 1400);
         }
         break;
-      case 'Escape':
-        if (state.snipActive) setSnipToolActive(false);
-        else if (els.marginNotePopover && !els.marginNotePopover.hidden) closeMarginNotePopover();
-        else if (els.pageContextMenu && !els.pageContextMenu.hidden) closePageContextMenu();
-        else if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
-        else if (!els.hlPopover.hidden) hideHighlightPopover();
-        else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
-        else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
-        else if (!els.sideDrawer.hidden) {
-          els.sideDrawer.hidden = true;
-          els.btnHighlightsTop?.classList.remove('active');
-        }
-        else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
-        else if (state.magEnabled) setMagnifierEnabled(false);
-        else if (state.curtainEnabled) setFocusCurtainEnabled(false, { persist: true });
-        else if (state.zoom > 1) setZoom(1, true);
-        break;
     }
   });
 
-  // Responsive Resize
+  // Responsive Resize & Persistence Flush
   window.addEventListener('resize', () => {
     if (!state.pdfDoc) return;
     clearTimeout(state.resizeTimer);
     state.resizeTimer = setTimeout(() => {
       initReaderView(state.currentIndex);
+      clampRefPinsToStage();
       if (state.curtainEnabled) scheduleCurtainBoundsSync(240);
     }, 180);
+  });
+  window.addEventListener('pagehide', () => {
+    flushPersistState({ keepalive: true });
   });
 }
 

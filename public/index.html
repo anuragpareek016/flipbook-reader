@@ -56,7 +56,7 @@
         <button type="button" id="btnStickySideLeft" class="sticky-side-btn active">Left p. 1</button>
         <button type="button" id="btnStickySideRight" class="sticky-side-btn">Right p. 2</button>
       </div>
-      <input id="stickyTabLabelInput" class="sticky-label-input" type="text" maxlength="16" placeholder="Ch 4, Imp, Doubt…" autocomplete="off" />
+      <input id="stickyTabLabelInput" class="sticky-label-input" type="text" maxlength="18" placeholder="Ch 4, Imp, Doubt…" autocomplete="off" />
       <div class="sticky-quick-chips" id="stickyQuickChips">
         <button type="button" class="sticky-chip" data-label="Ch">Ch</button>
         <button type="button" class="sticky-chip" data-label="Imp">Imp</button>
@@ -161,8 +161,8 @@
           <h1>FlipBook Reader</h1>
           <p class="welcome-sub">Drop any PDF book here to read with realistic corner-curl page flipping.</p>
           <div class="welcome-actions">
-            <button id="btnWelcomePick" class="btn-primary">Open PDF File…</button>
-            <label class="btn-secondary" for="fileInputHidden">Browse in Browser</label>
+            <button type="button" id="btnWelcomePick" class="btn-primary">Open PDF File…</button>
+            <button type="button" id="btnBrowseWelcome" class="btn-secondary">Browse in Browser</button>
           </div>
           <div id="welcomeRecentWrap" class="welcome-recent" hidden>
             <div class="welcome-recent-title">Recent Books</div>
@@ -260,33 +260,6 @@
             <div class="curtain-resize-e" data-curtain-resize="e" title="Drag to adjust spotlight right edge / length" aria-hidden="true"></div>
           </div>
         </div>
-        <div id="focusCurtainPill" class="mag-controls-pill focus-curtain-pill" role="toolbar" aria-label="Focus reading line curtain controls">
-          <div class="mag-seg" role="group" aria-label="Spotlight line height presets">
-            <button type="button" id="btnCurtain1L" class="mag-seg-btn" data-curtain-lines="1" title="Single line strip (32px)">1L</button>
-            <button type="button" id="btnCurtain2L" class="mag-seg-btn active" data-curtain-lines="2" title="Two-line strip (54px)">2L</button>
-            <button type="button" id="btnCurtain3L" class="mag-seg-btn" data-curtain-lines="3" title="Three-line strip (78px)">3L</button>
-            <button type="button" id="btnCurtain4L" class="mag-seg-btn" data-curtain-lines="4" title="Four-line strip (104px)">4L</button>
-          </div>
-          <span class="mag-pill-sep"></span>
-          <span class="curtain-ctrl-label" title="Spotlight height">Size</span>
-          <button type="button" id="btnCurtainHeightDec" class="hud-step-btn" title="Smaller spotlight size (−)" aria-label="Decrease spotlight size">−</button>
-          <span id="curtainHeightLabel" class="hud-readout curtain-readout">54px</span>
-          <button type="button" id="btnCurtainHeightInc" class="hud-step-btn" title="Larger spotlight size (+)" aria-label="Increase spotlight size">+</button>
-          <span class="mag-pill-sep"></span>
-          <span class="curtain-ctrl-label" title="Spotlight horizontal length">Length</span>
-          <button type="button" id="btnCurtainLengthDec" class="hud-step-btn" title="Shorter spotlight length (−)" aria-label="Decrease spotlight length">−</button>
-          <span id="curtainLengthLabel" class="hud-readout curtain-readout">100%</span>
-          <button type="button" id="btnCurtainLengthInc" class="hud-step-btn" title="Longer spotlight length (+)" aria-label="Increase spotlight length">+</button>
-          <span class="mag-pill-sep"></span>
-          <button type="button" id="btnCurtainDimDec" class="hud-step-btn" title="Lighter curtain dim (−)" aria-label="Decrease curtain dim">−</button>
-          <span id="curtainDimLabel" class="hud-readout curtain-readout">30% dim</span>
-          <button type="button" id="btnCurtainDimInc" class="hud-step-btn" title="Darker curtain dim (+)" aria-label="Increase curtain dim">+</button>
-          <span class="mag-pill-sep"></span>
-          <button type="button" id="btnCurtainTone" class="mag-mode-btn" title="Cycle curtain shade tint (Clean / Warm / Deep)" aria-label="Cycle curtain shade tint">Tint: Clean</button>
-          <button type="button" id="btnCurtainGuide" class="mag-mode-btn active" title="Toggle thin reading ruler lines" aria-label="Toggle reading ruler guide lines">Guides</button>
-          <button type="button" id="btnCurtainFollow" class="mag-mode-btn active" title="Follow cursor or switch to Place &amp; Resize to drag edges" aria-label="Toggle Follow cursor or Place and Resize">Follow Cursor</button>
-          <button type="button" id="btnCurtainClose" class="hud-stop-btn" title="Close Focus Line Curtain (R)" aria-label="Close focus reading line curtain">✕</button>
-        </div>
       </div>
 
       <!-- Interactive 3D Magnifying Glass / Reading Bar -->
@@ -329,6 +302,35 @@
           <div class="mag-resize-e" data-mag-resize="e" title="Drag to widen bar" aria-hidden="true"></div>
           <div class="mag-resize-s" data-mag-resize="s" title="Drag to resize bar height" aria-hidden="true"></div>
         </div>
+      </div>
+
+      <!-- Focus Curtain Controls Pill (layered above Magnifier lens) -->
+      <div id="focusCurtainPill" class="mag-controls-pill focus-curtain-pill" hidden role="toolbar" aria-label="Focus reading line curtain controls">
+        <div class="mag-seg" role="group" aria-label="Spotlight line height presets">
+          <button type="button" id="btnCurtain1L" class="mag-seg-btn" data-curtain-lines="1" title="Single line strip (32px)">1L</button>
+          <button type="button" id="btnCurtain2L" class="mag-seg-btn active" data-curtain-lines="2" title="Two-line strip (54px)">2L</button>
+          <button type="button" id="btnCurtain3L" class="mag-seg-btn" data-curtain-lines="3" title="Three-line strip (78px)">3L</button>
+          <button type="button" id="btnCurtain4L" class="mag-seg-btn" data-curtain-lines="4" title="Four-line strip (104px)">4L</button>
+        </div>
+        <span class="mag-pill-sep"></span>
+        <span class="curtain-ctrl-label" title="Spotlight height">Size</span>
+        <button type="button" id="btnCurtainHeightDec" class="hud-step-btn" title="Smaller spotlight size (−)" aria-label="Decrease spotlight size">−</button>
+        <span id="curtainHeightLabel" class="hud-readout curtain-readout">54px</span>
+        <button type="button" id="btnCurtainHeightInc" class="hud-step-btn" title="Larger spotlight size (+)" aria-label="Increase spotlight size">+</button>
+        <span class="mag-pill-sep"></span>
+        <span class="curtain-ctrl-label" title="Spotlight horizontal length">Length</span>
+        <button type="button" id="btnCurtainLengthDec" class="hud-step-btn" title="Shorter spotlight length (−)" aria-label="Decrease spotlight length">−</button>
+        <span id="curtainLengthLabel" class="hud-readout curtain-readout">100%</span>
+        <button type="button" id="btnCurtainLengthInc" class="hud-step-btn" title="Longer spotlight length (+)" aria-label="Increase spotlight length">+</button>
+        <span class="mag-pill-sep"></span>
+        <button type="button" id="btnCurtainDimDec" class="hud-step-btn" title="Lighter curtain dim (−)" aria-label="Decrease curtain dim">−</button>
+        <span id="curtainDimLabel" class="hud-readout curtain-readout">30% dim</span>
+        <button type="button" id="btnCurtainDimInc" class="hud-step-btn" title="Darker curtain dim (+)" aria-label="Increase curtain dim">+</button>
+        <span class="mag-pill-sep"></span>
+        <button type="button" id="btnCurtainTone" class="mag-mode-btn" title="Cycle curtain shade tint (Clean / Warm / Deep)" aria-label="Cycle curtain shade tint">Tint: Clean</button>
+        <button type="button" id="btnCurtainGuide" class="mag-mode-btn active" title="Toggle thin reading ruler lines" aria-label="Toggle reading ruler guide lines">Guides</button>
+        <button type="button" id="btnCurtainFollow" class="mag-mode-btn active" title="Follow cursor or switch to Place &amp; Resize to drag edges" aria-label="Toggle Follow cursor or Place and Resize">Follow Cursor</button>
+        <button type="button" id="btnCurtainClose" class="hud-stop-btn" title="Close Focus Line Curtain (R)" aria-label="Close focus reading line curtain">✕</button>
       </div>
 
       <!-- Pinned Floating Reference Cards Layer (Diagram Compare Mode) -->
@@ -589,6 +591,12 @@
         <div><kbd>←</kbd><kbd>→</kbd> Flip &nbsp; <kbd>R</kbd> Curtain &nbsp; <kbd>M</kbd> Lens</div>
         <div><kbd>⌘F</kbd> Search &nbsp; <kbd>+</kbd>/<kbd>-</kbd> Zoom &nbsp; <kbd>F</kbd> Full</div>
       </div>
+      <div class="menu-divider"></div>
+      <div class="menu-about">
+        <div class="about-app-name">FlipBook Reader</div>
+        <div class="about-org">OpenFrontier Labs</div>
+        <div class="about-dev">Developed by Anurag Pareek</div>
+      </div>
     </div>
 
     <!-- Bottom Thumbnails Filmstrip (FlipHTML5 Popular style) -->
@@ -673,8 +681,8 @@
           <button id="btnCloseLibrary" class="drawer-close">✕</button>
         </div>
         <div class="modal-actions">
-          <button id="btnModalPickPdf" class="btn-primary">Open PDF from Mac…</button>
-          <label class="btn-secondary" for="fileInputHidden">Browse File</label>
+          <button type="button" id="btnModalPickPdf" class="btn-primary">Open PDF from Mac…</button>
+          <button type="button" id="btnModalBrowsePdf" class="btn-secondary">Browse File</button>
         </div>
         <div id="libraryList" class="library-list"></div>
       </div>
@@ -742,7 +750,8 @@
       </div>
     </footer>
 
-    <input id="fileInputHidden" type="file" accept="application/pdf,.pdf" hidden />
+    <div id="appToast" class="app-toast" hidden role="status" aria-live="polite"></div>
+    <input id="fileInputHidden" class="sr-only" type="file" accept="application/pdf,.pdf" tabindex="-1" aria-hidden="true" />
   </div>
 
   <script type="module" src="/assets/app.js"></script>

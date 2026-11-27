@@ -305,23 +305,94 @@ final class NativeAmbientSoundEngine {
     }
 }
 
-/// Subclassed WKWebView forwarding macOS trackpad two-finger double-tap (Smart Zoom) cleanly into FlipBook JS.
+/// Subclassed WKWebView forwarding macOS trackpad two-finger double-tap (Smart Zoom) cleanly into FlipBook JS
+/// and intercepting Finder PDF drops natively so books stream via the backend and persist in library.json.
 final class FlipBookWebView: WKWebView {
+    var onDropPdfURLs: (([URL]) -> Void)?
+
+    override init(frame: CGRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
     override func smartMagnify(with event: NSEvent) {
         let loc = convert(event.locationInWindow, from: nil)
         let y = isFlipped ? loc.y : (bounds.height - loc.y)
         let js = "window.__flipbookHandleTwoFingerZoom && window.__flipbookHandleTwoFingerZoom(\(Double(loc.x)), \(Double(y)));"
         evaluateJavaScript(js, completionHandler: nil)
     }
+
+    private func extractDroppedPdfURLs(from sender: NSDraggingInfo) -> [URL] {
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] else {
+            return []
+        }
+        return urls.compactMap { url in
+            guard url.isFileURL else { return nil }
+            let resolved = url.resolvingSymlinksInPath()
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDir),
+                  !isDir.boolValue,
+                  resolved.pathExtension.lowercased() == "pdf" else {
+                return nil
+            }
+            return resolved
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if !extractDroppedPdfURLs(from: sender).isEmpty {
+            return .copy
+        }
+        if sender.draggingPasteboard.types?.contains(.fileURL) == true {
+            return []
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if !extractDroppedPdfURLs(from: sender).isEmpty {
+            return .copy
+        }
+        if sender.draggingPasteboard.types?.contains(.fileURL) == true {
+            return []
+        }
+        return super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pdfs = extractDroppedPdfURLs(from: sender)
+        if !pdfs.isEmpty {
+            onDropPdfURLs?(pdfs)
+            return true
+        }
+        if sender.draggingPasteboard.types?.contains(.fileURL) == true {
+            return false
+        }
+        return super.performDragOperation(sender)
+    }
 }
 
-final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate {
+final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
-    private var webView: WKWebView!
+    private var webView: FlipBookWebView!
     private var serverProcess: Process?
+    private var serverStdinWriteHandle: FileHandle?
+    private var serverOutputHandle: FileHandle?
+    private let serverPipeQueue = DispatchQueue(label: "dev.openfrontierlabs.flipbook.serverpipe")
     private var serverPort: Int = 0
     private var pendingFilePaths: [String] = []
     private var isWebLoaded = false
+    private var isTerminating = false
+    private var didReportServerReady = false
+    private var didShowStartupError = false
     private var appActivity: NSObjectProtocol?
     private var soundEngine: NativeFlipSoundEngine?
     private var ambientEngine: NativeAmbientSoundEngine?
@@ -349,13 +420,29 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
+        serverOutputHandle?.readabilityHandler = nil
+        serverOutputHandle = nil
+        try? serverStdinWriteHandle?.close()
+        serverStdinWriteHandle = nil
         if let proc = serverProcess, proc.isRunning {
             proc.terminate()
         }
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "flipbook")
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        let pdfPaths = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "pdf" }.map { $0.path }
+        let pdfPaths = urls.compactMap { url -> String? in
+            guard url.isFileURL else { return nil }
+            let resolved = url.resolvingSymlinksInPath()
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDir),
+                  !isDir.boolValue,
+                  resolved.pathExtension.lowercased() == "pdf" else {
+                return nil
+            }
+            return resolved.path
+        }
         guard !pdfPaths.isEmpty else { return }
         for p in pdfPaths {
             openLocalPdfPath(p)
@@ -367,8 +454,12 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private func collectCliFiles() {
         for arg in CommandLine.arguments.dropFirst() {
             if arg.hasPrefix("-") { continue }
-            if FileManager.default.fileExists(atPath: arg) {
-                pendingFilePaths.append(arg)
+            let resolved = URL(fileURLWithPath: arg).resolvingSymlinksInPath()
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDir),
+               !isDir.boolValue,
+               resolved.pathExtension.lowercased() == "pdf" {
+                pendingFilePaths.append(resolved.path)
             }
         }
     }
@@ -407,8 +498,17 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
 
         webView = FlipBookWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsBackForwardNavigationGestures = false
+        webView.onDropPdfURLs = { [weak self] urls in
+            guard let self else { return }
+            for url in urls {
+                self.openLocalPdfPath(url.path)
+            }
+            self.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         window.contentView = webView
         window.delegate = self
@@ -424,7 +524,9 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
-        appMenu.addItem(withTitle: "About FlipBook Reader", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "About FlipBook Reader", action: #selector(showAboutPanel), keyEquivalent: "")
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Hide FlipBook Reader", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(NSMenuItem.separator())
@@ -454,12 +556,14 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
 
-        // View menu
+        // View menu (use Ctrl+Cmd+F so Cmd+F goes to in-book Search)
         let viewMenuItem = NSMenuItem()
         mainMenu.addItem(viewMenuItem)
         let viewMenu = NSMenu(title: "View")
         viewMenuItem.submenu = viewMenu
-        viewMenu.addItem(withTitle: "Toggle Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        let fullScreenItem = NSMenuItem(title: "Toggle Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullScreenItem.keyEquivalentModifierMask = [.control, .command]
+        viewMenu.addItem(fullScreenItem)
 
         // Window menu
         let windowMenuItem = NSMenuItem()
@@ -470,6 +574,24 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
 
         NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func showAboutPanel() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineSpacing = 2.0
+        let credits = NSAttributedString(
+            string: "Developed by Anurag Pareek\nOpenFrontier Labs\n\nA tactile digital book reader with realistic corner-curl physics.",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11.5),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraph,
+            ]
+        )
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "FlipBook Reader",
+            .credits: credits,
+        ])
     }
 
     private func startBackendServer() {
@@ -486,34 +608,72 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         }
 
         let serverScript = "\(devRoot)/opt/flipbook-reader/server.mjs"
+        guard FileManager.default.fileExists(atPath: serverScript) else {
+            showStartupError("Could not find FlipBook server script at \(serverScript)")
+            return
+        }
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: nodeBin)
-        proc.arguments = [serverScript, "--port", "0"]
+        proc.arguments = [serverScript, "--port", "0", "--no-server-info", "--watch-stdin"]
 
         var env = ProcessInfo.processInfo.environment
         env["DEVELOPER_ROOT"] = devRoot
         proc.environment = env
+
+        let stdinPipe = Pipe()
+        proc.standardInput = stdinPipe
+        serverStdinWriteHandle = stdinPipe.fileHandleForWriting
 
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = pipe
 
         let handle = pipe.fileHandleForReading
+        serverOutputHandle = handle
         var buffer = Data()
+        var readyParsed = false
+
         handle.readabilityHandler = { [weak self] fh in
             let chunk = fh.availableData
-            if chunk.isEmpty { return }
-            buffer.append(chunk)
-            guard let text = String(data: buffer, encoding: .utf8) else { return }
-            if let range = text.range(of: #"FLIPBOOK_READY port=(\d+)"#, options: .regularExpression) {
-                let line = String(text[range])
-                let digits = line.replacingOccurrences(of: "FLIPBOOK_READY port=", with: "")
-                if let port = Int(digits), port > 0 {
+            self?.serverPipeQueue.async {
+                if chunk.isEmpty {
                     fh.readabilityHandler = nil
                     DispatchQueue.main.async {
-                        self?.onServerReady(port: port)
+                        guard let self, !self.isTerminating, !self.didReportServerReady else { return }
+                        self.showStartupError("FlipBook backend server exited before becoming ready.")
+                    }
+                    return
+                }
+                if readyParsed {
+                    // Continue draining stdout/stderr so the 64 KB pipe buffer never blocks Node.js.
+                    return
+                }
+                buffer.append(chunk)
+                if buffer.count > 65536 {
+                    buffer = buffer.suffix(16384)
+                }
+                guard let text = String(data: buffer, encoding: .utf8) else { return }
+                if let range = text.range(of: #"FLIPBOOK_READY port=(\d+)"#, options: .regularExpression) {
+                    let line = String(text[range])
+                    let digits = line.replacingOccurrences(of: "FLIPBOOK_READY port=", with: "")
+                    if let port = Int(digits), port > 0 {
+                        readyParsed = true
+                        buffer.removeAll(keepingCapacity: false)
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.didReportServerReady = true
+                            self.onServerReady(port: port)
+                        }
                     }
                 }
+            }
+        }
+
+        proc.terminationHandler = { [weak self] finishedProc in
+            DispatchQueue.main.async {
+                guard let self, !self.isTerminating, !self.didReportServerReady else { return }
+                self.showStartupError("FlipBook server terminated unexpectedly (status \(finishedProc.terminationStatus)).")
             }
         }
 
@@ -521,6 +681,9 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
             try proc.run()
             self.serverProcess = proc
         } catch {
+            try? serverStdinWriteHandle?.close()
+            serverStdinWriteHandle = nil
+            handle.readabilityHandler = nil
             showStartupError("Failed to start FlipBook server: \(error.localizedDescription)")
         }
     }
@@ -540,6 +703,16 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         webView.load(URLRequest(url: url))
     }
 
+    private func isLocalServerURL(_ url: URL) -> Bool {
+        guard serverPort > 0,
+              url.scheme?.lowercased() == "http",
+              let host = url.host?.lowercased(),
+              host == "127.0.0.1" || host == "localhost" else {
+            return false
+        }
+        return (url.port ?? 80) == serverPort
+    }
+
     private func syncWindowChromeState(isFullScreen: Bool? = nil) {
         guard isWebLoaded else { return }
         let full = isFullScreen ?? window?.styleMask.contains(.fullScreen) ?? false
@@ -552,6 +725,163 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isWebLoaded = true
         syncWindowChromeState()
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code == NSURLErrorCancelled { return }
+        presentAlertSheet(title: "Navigation Error", message: error.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code == NSURLErrorCancelled { return }
+        presentAlertSheet(title: "Failed to Load Reader", message: error.localizedDescription)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isWebLoaded = false
+        if serverPort > 0 {
+            loadUrl("http://127.0.0.1:\(serverPort)/")
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        if isLocalServerURL(url) {
+            decisionHandler(.allow)
+            return
+        }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if !isMainFrame && (scheme == "about" || scheme == "blob" || scheme == "data") {
+            decisionHandler(.allow)
+            return
+        }
+        if url.isFileURL {
+            let resolved = url.resolvingSymlinksInPath()
+            if resolved.pathExtension.lowercased() == "pdf" {
+                openLocalPdfPath(resolved.path)
+            }
+            decisionHandler(.cancel)
+            return
+        }
+        if scheme == "http" || scheme == "https" || scheme == "mailto" {
+            NSWorkspace.shared.open(url)
+        }
+        decisionHandler(.cancel)
+    }
+
+    // MARK: - WKUIDelegate
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.title = "Open PDF Book"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.pdf]
+
+        let handleResponse: (NSApplication.ModalResponse) -> Void = { resp in
+            completionHandler(resp == .OK ? panel.urls : nil)
+        }
+        if let win = window, win.attachedSheet == nil {
+            panel.beginSheetModal(for: win, completionHandler: handleResponse)
+        } else {
+            handleResponse(panel.runModal())
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "FlipBook Reader"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if let win = window, win.attachedSheet == nil {
+            alert.beginSheetModal(for: win) { _ in completionHandler() }
+        } else {
+            alert.runModal()
+            completionHandler()
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "FlipBook Reader"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        if let win = window, win.attachedSheet == nil {
+            alert.beginSheetModal(for: win) { resp in
+                completionHandler(resp == .alertFirstButtonReturn)
+            }
+        } else {
+            completionHandler(alert.runModal() == .alertFirstButtonReturn)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "FlipBook Reader"
+        alert.informativeText = prompt
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        input.stringValue = defaultText ?? ""
+        alert.accessoryView = input
+        let finish: (NSApplication.ModalResponse) -> Void = { resp in
+            completionHandler(resp == .alertFirstButtonReturn ? input.stringValue : nil)
+        }
+        if let win = window, win.attachedSheet == nil {
+            alert.beginSheetModal(for: win, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        if let url = navigationAction.request.url {
+            if isLocalServerURL(url) {
+                webView.load(navigationAction.request)
+            } else {
+                let scheme = url.scheme?.lowercased() ?? ""
+                if scheme == "http" || scheme == "https" || scheme == "mailto" {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+        return nil
     }
 
     func windowWillEnterFullScreen(_ notification: Notification) {
@@ -588,20 +918,38 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         let payload: [String: Any] = ["path": filePath]
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
-            guard let self, let data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let id = json["id"] as? String else { return }
-            DispatchQueue.main.async {
-                if self.isWebLoaded {
-                    let safeId = id.replacingOccurrences(of: "'", with: "")
-                    self.webView.evaluateJavaScript(
-                        "if (typeof window.openBookById === 'function') { window.openBookById('\(safeId)'); } else { window.location.href = '/?book=\(safeId)'; }",
-                        completionHandler: nil
-                    )
-                } else {
-                    self.loadUrl("http://127.0.0.1:\(self.serverPort)/?book=\(id)")
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
+            guard let self else { return }
+            let httpStatus = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            if httpStatus == 200, let id = json?["id"] as? String, !id.isEmpty {
+                DispatchQueue.main.async {
+                    if self.isWebLoaded {
+                        let safeId = id
+                            .replacingOccurrences(of: "\\", with: "\\\\")
+                            .replacingOccurrences(of: "'", with: "\\'")
+                        self.webView.evaluateJavaScript(
+                            "if (typeof window.openBookById === 'function') { window.openBookById('\(safeId)'); } else { window.location.href = '/?book=\(safeId)'; }",
+                            completionHandler: nil
+                        )
+                    } else {
+                        self.loadUrl("http://127.0.0.1:\(self.serverPort)/?book=\(id)")
+                    }
                 }
+                return
+            }
+
+            let errMsg = (json?["error"] as? String)
+                ?? err?.localizedDescription
+                ?? "Server returned status \(httpStatus)"
+            DispatchQueue.main.async {
+                if !self.isWebLoaded {
+                    self.loadUrl("http://127.0.0.1:\(self.serverPort)/")
+                }
+                self.presentAlertSheet(
+                    title: "Could Not Open PDF",
+                    message: "\(URL(fileURLWithPath: filePath).lastPathComponent): \(errMsg)"
+                )
             }
         }.resume()
     }
@@ -613,8 +961,15 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.pdf]
-        if panel.runModal() == .OK, let url = panel.url {
-            openLocalPdfPath(url.path)
+        let handleResponse: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            if resp == .OK, let url = panel.url {
+                self?.openLocalPdfPath(url.path)
+            }
+        }
+        if let win = window, win.attachedSheet == nil {
+            panel.beginSheetModal(for: win, completionHandler: handleResponse)
+        } else {
+            handleResponse(panel.runModal())
         }
     }
 
@@ -634,7 +989,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private func saveFileWithPanel(filename: String, data: Data, ext: String, callbackId: String?) {
         let panel = NSSavePanel()
         panel.title = ext == "png" ? "Save Snip PNG" : "Save File"
-        panel.nameFieldStringValue = filename
+        panel.nameFieldStringValue = filename.replacingOccurrences(of: "/", with: "-")
         panel.canCreateDirectories = true
         if !ext.isEmpty, let ut = UTType(filenameExtension: ext) {
             panel.allowedContentTypes = [ut]
@@ -651,7 +1006,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
                 self?.resolveNativeJsCallback(callbackId, ok: false)
             }
         }
-        if let win = window {
+        if let win = window, win.attachedSheet == nil {
             panel.beginSheetModal(for: win, completionHandler: handleResponse)
         } else {
             handleResponse(panel.runModal())
@@ -728,7 +1083,21 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         }
     }
 
+    private func presentAlertSheet(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if let win = window, win.attachedSheet == nil {
+            alert.beginSheetModal(for: win, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
     private func showStartupError(_ msg: String) {
+        guard !didShowStartupError else { return }
+        didShowStartupError = true
         let alert = NSAlert()
         alert.messageText = "FlipBook Reader Error"
         alert.informativeText = msg
