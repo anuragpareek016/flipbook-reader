@@ -155,6 +155,25 @@
           </svg>
         </button>
       </div>
+
+      <!-- Floating Auto-Flip / Smooth Auto-Scroll Control Pill -->
+      <div id="autoPlaybackHud" class="auto-playback-hud" hidden role="region" aria-label="Auto playback controls">
+        <button id="btnHudPlayPause" class="hud-icon-btn" type="button" title="Pause / Resume" aria-label="Pause or resume">
+          <svg id="iconHudPlay" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" hidden>
+            <polygon points="6 4 20 12 6 20 6 4"/>
+          </svg>
+          <svg id="iconHudPause" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4.5" height="16" rx="1"/>
+            <rect x="13.5" y="4" width="4.5" height="16" rx="1"/>
+          </svg>
+        </button>
+        <span id="hudModeLabel" class="hud-mode-label">Auto-Flip</span>
+        <button id="btnHudDec" class="hud-step-btn" type="button" title="Decrease" aria-label="Decrease">−</button>
+        <input id="hudRange" class="hud-range" type="range" min="0.5" max="30" step="0.5" value="4" aria-label="Playback rate or interval" />
+        <button id="btnHudInc" class="hud-step-btn" type="button" title="Increase" aria-label="Increase">+</button>
+        <span id="hudReadout" class="hud-readout">4s</span>
+        <button id="btnHudStop" class="hud-stop-btn" type="button" title="Stop" aria-label="Stop">✕</button>
+      </div>
     </main>
 
     <!-- Extended '+' Menu Popover -->
@@ -188,14 +207,57 @@
         <span>Page Interaction</span>
         <span class="menu-val" id="valClickMode">Corner + Select</span>
       </button>
-      <button class="menu-item" id="menuAutoFlip">
-        <span>Auto-Flip</span>
-        <span class="menu-val" id="valAutoFlip">Off</span>
-      </button>
       <button class="menu-item" id="menuAutoHideBars">
         <span>Auto-Hide Toolbars</span>
         <span class="menu-val" id="valAutoHideBars">On</span>
       </button>
+      <div class="menu-divider"></div>
+      <div class="menu-auto-block" id="menuAutoBlock">
+        <div id="menuAutoFlipGroup">
+          <button type="button" class="menu-auto-head" id="menuAutoFlip">
+            <span>Auto-Flip</span>
+            <span class="menu-val" id="valAutoFlip">Off • 4s</span>
+          </button>
+          <div class="auto-control-row">
+            <button type="button" class="auto-step-btn" id="btnFlipTimeDec" title="Faster flip (-)" aria-label="Decrease auto-flip interval">−</button>
+            <input id="autoFlipRange" class="auto-range" type="range" min="0.5" max="30" step="0.5" value="4" aria-label="Auto-flip interval in seconds" />
+            <button type="button" class="auto-step-btn" id="btnFlipTimeInc" title="Slower flip (+)" aria-label="Increase auto-flip interval">+</button>
+            <label class="auto-num-wrap" title="Custom seconds (0.5–300)">
+              <input id="autoFlipInput" class="auto-num-input" type="number" min="0.5" max="300" step="0.5" value="4" aria-label="Auto-flip interval seconds" />
+              <span>s</span>
+            </label>
+          </div>
+          <div class="auto-pills" id="autoFlipPresets" role="group" aria-label="Auto-flip interval presets">
+            <button type="button" class="auto-pill" data-sec="2">2s</button>
+            <button type="button" class="auto-pill active" data-sec="4">4s</button>
+            <button type="button" class="auto-pill" data-sec="8">8s</button>
+            <button type="button" class="auto-pill" data-sec="15">15s</button>
+            <button type="button" class="auto-pill" data-sec="30">30s</button>
+          </div>
+        </div>
+        <div id="menuAutoScrollGroup" hidden>
+          <button type="button" class="menu-auto-head" id="menuAutoScrollToggle">
+            <span>Smooth Auto-Scroll</span>
+            <span class="menu-val" id="valAutoScroll">Paused • 1.0×</span>
+          </button>
+          <div class="auto-control-row">
+            <button type="button" class="auto-step-btn" id="btnScrollSpeedDec" title="Slower scroll (-)" aria-label="Decrease scroll speed">−</button>
+            <input id="autoScrollRange" class="auto-range" type="range" min="0.2" max="5" step="0.1" value="1" aria-label="Auto-scroll speed multiplier" />
+            <button type="button" class="auto-step-btn" id="btnScrollSpeedInc" title="Faster scroll (+)" aria-label="Increase scroll speed">+</button>
+            <label class="auto-num-wrap" title="Custom speed multiplier (0.2×–5.0×)">
+              <input id="autoScrollInput" class="auto-num-input" type="number" min="0.2" max="5" step="0.1" value="1" aria-label="Auto-scroll speed multiplier" />
+              <span>×</span>
+            </label>
+          </div>
+          <div class="auto-pills" id="autoScrollPresets" role="group" aria-label="Auto-scroll speed presets">
+            <button type="button" class="auto-pill" data-speed="0.5">0.5×</button>
+            <button type="button" class="auto-pill active" data-speed="1">1.0×</button>
+            <button type="button" class="auto-pill" data-speed="1.5">1.5×</button>
+            <button type="button" class="auto-pill" data-speed="2.5">2.5×</button>
+            <button type="button" class="auto-pill" data-speed="4">4.0×</button>
+          </div>
+        </div>
+      </div>
       <div class="menu-divider"></div>
       <div class="menu-sound-block">
         <div class="menu-sound-head">

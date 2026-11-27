@@ -66,10 +66,35 @@ const els = {
   valHardCover: document.getElementById('valHardCover'),
   menuClickMode: document.getElementById('menuClickMode'),
   valClickMode: document.getElementById('valClickMode'),
-  menuAutoFlip: document.getElementById('menuAutoFlip'),
-  valAutoFlip: document.getElementById('valAutoFlip'),
   menuAutoHideBars: document.getElementById('menuAutoHideBars'),
   valAutoHideBars: document.getElementById('valAutoHideBars'),
+  menuAutoBlock: document.getElementById('menuAutoBlock'),
+  menuAutoFlipGroup: document.getElementById('menuAutoFlipGroup'),
+  menuAutoFlip: document.getElementById('menuAutoFlip'),
+  valAutoFlip: document.getElementById('valAutoFlip'),
+  btnFlipTimeDec: document.getElementById('btnFlipTimeDec'),
+  autoFlipRange: document.getElementById('autoFlipRange'),
+  btnFlipTimeInc: document.getElementById('btnFlipTimeInc'),
+  autoFlipInput: document.getElementById('autoFlipInput'),
+  autoFlipPresets: document.getElementById('autoFlipPresets'),
+  menuAutoScrollGroup: document.getElementById('menuAutoScrollGroup'),
+  menuAutoScrollToggle: document.getElementById('menuAutoScrollToggle'),
+  valAutoScroll: document.getElementById('valAutoScroll'),
+  btnScrollSpeedDec: document.getElementById('btnScrollSpeedDec'),
+  autoScrollRange: document.getElementById('autoScrollRange'),
+  btnScrollSpeedInc: document.getElementById('btnScrollSpeedInc'),
+  autoScrollInput: document.getElementById('autoScrollInput'),
+  autoScrollPresets: document.getElementById('autoScrollPresets'),
+  autoPlaybackHud: document.getElementById('autoPlaybackHud'),
+  btnHudPlayPause: document.getElementById('btnHudPlayPause'),
+  iconHudPlay: document.getElementById('iconHudPlay'),
+  iconHudPause: document.getElementById('iconHudPause'),
+  hudModeLabel: document.getElementById('hudModeLabel'),
+  btnHudDec: document.getElementById('btnHudDec'),
+  hudRange: document.getElementById('hudRange'),
+  btnHudInc: document.getElementById('btnHudInc'),
+  hudReadout: document.getElementById('hudReadout'),
+  btnHudStop: document.getElementById('btnHudStop'),
 
   thumbnailsStrip: document.getElementById('thumbnailsStrip'),
   btnCloseThumbs: document.getElementById('btnCloseThumbs'),
@@ -146,6 +171,18 @@ const state = {
   soundPreset: DEFAULT_SOUND_PRESET,
   theme: 'charcoal',
   autoFlipTimer: null,
+  autoFlipEnabled: false,
+  autoFlipPaused: false,
+  autoFlipSeconds: 4,
+  autoFlipLastTickAt: 0,
+  autoScrollSpeed: 1.0,
+  autoScrollPlaying: false,
+  autoScrollRafId: 0,
+  autoScrollLastTs: 0,
+  autoScrollPosY: 0,
+  autoScrollPauseUntil: 0,
+  autoScrollRenderTickAt: 0,
+  scrollUserSelecting: false,
 
   zoom: 1,
   committedZoom: 1,
@@ -262,6 +299,12 @@ function applySavedSettings(settings) {
   if (settings.pageMode) state.pageMode = settings.pageMode;
   if (typeof settings.showCover === 'boolean') state.showCover = settings.showCover;
   if (settings.clickMode) state.clickMode = settings.clickMode;
+  if (Number.isFinite(Number(settings.autoFlipSeconds))) {
+    state.autoFlipSeconds = clamp(Math.round(Number(settings.autoFlipSeconds) * 10) / 10, 0.5, 300);
+  }
+  if (Number.isFinite(Number(settings.autoScrollSpeed))) {
+    state.autoScrollSpeed = clamp(Math.round(Number(settings.autoScrollSpeed) * 10) / 10, 0.2, 5);
+  }
   updateMenuValues();
 }
 
@@ -279,6 +322,8 @@ function schedulePersistState() {
         pageMode: state.pageMode,
         showCover: state.showCover,
         clickMode: state.clickMode,
+        autoFlipSeconds: state.autoFlipSeconds,
+        autoScrollSpeed: state.autoScrollSpeed,
       },
     };
     if (state.bookId) {
@@ -336,6 +381,7 @@ function computeBookGeometry(forceSingle = false) {
 
 function disposeBook() {
   stopAutoFlip();
+  stopAutoScroll({ resetPlaying: true });
   state.searchAbortId++;
   for (const entry of state.renderedMap.values()) {
     try { entry.renderTask?.cancel(); } catch {}
@@ -465,7 +511,7 @@ function initScrollView(startIndex = 0) {
         renderPageNode(idx);
       }
     }
-  }, { root: els.scrollViewport, rootMargin: '650px 0px' });
+  }, { root: els.scrollViewport, rootMargin: '1200px 0px' });
 
   for (const wrap of els.scrollPages.children) {
     state.scrollObserver.observe(wrap);
@@ -477,11 +523,18 @@ function initScrollView(startIndex = 0) {
   if (targetWrap) {
     els.scrollViewport.scrollTop = Math.max(0, targetWrap.offsetTop - 54);
   }
+  state.autoScrollPosY = els.scrollViewport.scrollTop;
   onSpreadChanged(false, 4);
+  if (state.autoScrollPlaying) {
+    startAutoScrollLoop();
+  } else {
+    updatePlaybackUi();
+  }
 }
 
 function initPageFlip(startIndex = 0) {
   if (!state.pdfDoc) return;
+  stopAutoScroll({ resetPlaying: true });
 
   for (const entry of state.renderedMap.values()) {
     try { entry.renderTask?.cancel(); } catch {}
@@ -599,6 +652,10 @@ function initPageFlip(startIndex = 0) {
         state.allowSpine = false;
         els.bookSpineShadow.style.opacity = '0';
       }
+    }
+    if (state.autoFlipEnabled && !state.autoFlipPaused) {
+      state.autoFlipLastTickAt = performance.now();
+      scheduleAutoFlipTick(false);
     }
   });
 
@@ -1477,8 +1534,14 @@ function jumpToPage(oneBasedPage, animate = false) {
   if (state.scrollMode === 'scroll') {
     const wrap = els.scrollPages.children[targetIdx];
     if (wrap) {
+      const destTop = Math.max(0, wrap.offsetTop - 54);
+      if (animate) {
+        state.autoScrollPauseUntil = performance.now() + 460;
+      } else {
+        state.autoScrollPosY = destTop;
+      }
       els.scrollViewport.scrollTo({
-        top: Math.max(0, wrap.offsetTop - 54),
+        top: destTop,
         behavior: animate ? 'smooth' : 'auto',
       });
     }
@@ -1593,6 +1656,7 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
 
       sv.scrollLeft = Math.max(0, anchorWrap.offsetLeft + relX * sw - vpX);
       sv.scrollTop = Math.max(0, anchorWrap.offsetTop + relY * sh - vpY);
+      state.autoScrollPosY = sv.scrollTop;
 
       clearTimeout(state.zoomRerenderTimer);
       const commitScroll = () => {
@@ -2615,7 +2679,7 @@ function shouldKeepBarsVisible() {
       (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA')) {
     return true;
   }
-  if (els.topBar.matches(':hover') || els.bottomBar?.matches(':hover')) {
+  if (els.topBar.matches(':hover') || els.bottomBar?.matches(':hover') || els.autoPlaybackHud?.matches(':hover')) {
     return true;
   }
   const p = state.lastBarPointer;
@@ -2699,40 +2763,306 @@ function updateSoundUi() {
   }
 }
 
+function formatFlipSeconds(sec) {
+  const rounded = Math.round(clamp(Number(sec) || 4, 0.5, 300) * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}s` : `${rounded.toFixed(1)}s`;
+}
+
+function formatScrollSpeed(speed) {
+  const rounded = Math.round(clamp(Number(speed) || 1, 0.2, 5) * 10) / 10;
+  return `${rounded.toFixed(1)}×`;
+}
+
+function stepFlipInterval(currentSec, dir) {
+  const cur = clamp(Number(currentSec) || 4, 0.5, 300);
+  const step = cur < 10 || (cur === 10 && dir < 0) ? 0.5 : cur < 30 || (cur === 30 && dir < 0) ? 1 : 5;
+  return clamp(Math.round((cur + dir * step) * 10) / 10, 0.5, 300);
+}
+
+function stepScrollSpeed(currentSpeed, dir) {
+  const cur = clamp(Number(currentSpeed) || 1, 0.2, 5);
+  return clamp(Math.round((cur + dir * 0.2) * 10) / 10, 0.2, 5);
+}
+
+function updatePlaybackUi() {
+  const isScroll = state.scrollMode === 'scroll';
+  const secLabel = formatFlipSeconds(state.autoFlipSeconds);
+  const spdLabel = formatScrollSpeed(state.autoScrollSpeed);
+
+  if (els.menuAutoFlipGroup) els.menuAutoFlipGroup.hidden = isScroll;
+  if (els.menuAutoScrollGroup) els.menuAutoScrollGroup.hidden = !isScroll;
+
+  if (els.valAutoFlip) {
+    els.valAutoFlip.textContent = !state.autoFlipEnabled
+      ? `Off • ${secLabel}`
+      : state.autoFlipPaused
+        ? `Paused • ${secLabel}`
+        : `On • ${secLabel}`;
+  }
+  if (els.autoFlipRange) {
+    els.autoFlipRange.value = String(clamp(state.autoFlipSeconds, 0.5, 30));
+  }
+  if (els.autoFlipInput && document.activeElement !== els.autoFlipInput) {
+    els.autoFlipInput.value = Number.isInteger(state.autoFlipSeconds)
+      ? String(state.autoFlipSeconds)
+      : state.autoFlipSeconds.toFixed(1);
+  }
+  if (els.autoFlipPresets) {
+    els.autoFlipPresets.querySelectorAll('.auto-pill').forEach((btn) => {
+      btn.classList.toggle('active', Math.abs(Number(btn.dataset.sec) - state.autoFlipSeconds) < 0.05);
+    });
+  }
+
+  if (els.valAutoScroll) {
+    els.valAutoScroll.textContent = state.autoScrollPlaying
+      ? `Playing • ${spdLabel}`
+      : `Paused • ${spdLabel}`;
+  }
+  if (els.autoScrollRange) {
+    els.autoScrollRange.value = String(clamp(state.autoScrollSpeed, 0.2, 5));
+  }
+  if (els.autoScrollInput && document.activeElement !== els.autoScrollInput) {
+    els.autoScrollInput.value = state.autoScrollSpeed.toFixed(1);
+  }
+  if (els.autoScrollPresets) {
+    els.autoScrollPresets.querySelectorAll('.auto-pill').forEach((btn) => {
+      btn.classList.toggle('active', Math.abs(Number(btn.dataset.speed) - state.autoScrollSpeed) < 0.05);
+    });
+  }
+
+  if (els.autoPlaybackHud) {
+    const showHud = Boolean(state.pdfDoc && (isScroll || state.autoFlipEnabled));
+    els.autoPlaybackHud.hidden = !showHud;
+    if (showHud) {
+      const playing = isScroll ? state.autoScrollPlaying : (state.autoFlipEnabled && !state.autoFlipPaused);
+      if (els.iconHudPlay) els.iconHudPlay.hidden = playing;
+      if (els.iconHudPause) els.iconHudPause.hidden = !playing;
+      if (els.btnHudPlayPause) {
+        els.btnHudPlayPause.title = isScroll
+          ? (playing ? 'Pause Auto-Scroll (Space)' : 'Resume Auto-Scroll (Space)')
+          : (playing ? 'Pause Auto-Flip' : 'Resume Auto-Flip');
+      }
+      if (els.hudModeLabel) els.hudModeLabel.textContent = isScroll ? 'Auto-Scroll' : 'Auto-Flip';
+      if (els.hudRange) {
+        if (isScroll) {
+          els.hudRange.min = '0.2';
+          els.hudRange.max = '5';
+          els.hudRange.step = '0.1';
+          els.hudRange.value = String(clamp(state.autoScrollSpeed, 0.2, 5));
+        } else {
+          els.hudRange.min = '0.5';
+          els.hudRange.max = '30';
+          els.hudRange.step = '0.5';
+          els.hudRange.value = String(clamp(state.autoFlipSeconds, 0.5, 30));
+        }
+      }
+      if (els.hudReadout) els.hudReadout.textContent = isScroll ? spdLabel : secLabel;
+      if (els.btnHudStop) {
+        els.btnHudStop.title = isScroll ? 'Back to Book Flip' : 'Stop Auto-Flip';
+        els.btnHudStop.setAttribute('aria-label', els.btnHudStop.title);
+      }
+    }
+  }
+}
+
 function updateMenuValues() {
   if (els.valScrollMode) {
-    els.valScrollMode.textContent = state.scrollMode === 'scroll' ? 'Continuous Scroll' : 'Book Flip';
+    els.valScrollMode.textContent = state.scrollMode === 'scroll' ? 'Smooth Auto-Scroll' : 'Book Flip';
   }
   els.valPageMode.textContent = state.pageMode === 'single' ? 'Single' : state.pageMode === 'double' ? 'Double' : 'Auto (Double)';
   els.valHardCover.textContent = state.showCover ? 'On' : 'Off';
   els.valClickMode.textContent = state.clickMode === 'smart' ? 'Corner + Select' : 'Click Anywhere';
-  els.valAutoFlip.textContent = state.autoFlipTimer ? 'On (4s)' : 'Off';
   if (els.valAutoHideBars) {
     els.valAutoHideBars.textContent = state.autoHideBars ? 'On' : 'Off';
   }
+  updatePlaybackUi();
+}
+
+function setAutoFlipSeconds(seconds, { persist = true, reschedule = true, syncInputText = true } = {}) {
+  const num = Number(seconds);
+  if (!Number.isFinite(num)) return;
+  state.autoFlipSeconds = clamp(Math.round(num * 10) / 10, 0.5, 300);
+  if (syncInputText && els.autoFlipInput) {
+    els.autoFlipInput.value = Number.isInteger(state.autoFlipSeconds)
+      ? String(state.autoFlipSeconds)
+      : state.autoFlipSeconds.toFixed(1);
+  }
+  updatePlaybackUi();
+  if (reschedule && state.autoFlipEnabled && !state.autoFlipPaused) {
+    scheduleAutoFlipTick(true);
+  }
+  if (persist) schedulePersistState();
+}
+
+function scheduleAutoFlipTick(preserveElapsed = false) {
+  if (state.autoFlipTimer) {
+    clearTimeout(state.autoFlipTimer);
+    state.autoFlipTimer = null;
+  }
+  if (!state.autoFlipEnabled || state.autoFlipPaused || state.scrollMode !== 'flip') return;
+  const delayMs = Math.round(clamp(state.autoFlipSeconds, 0.5, 300) * 1000);
+  const elapsed = preserveElapsed && state.autoFlipLastTickAt ? Math.max(0, performance.now() - state.autoFlipLastTickAt) : 0;
+  const waitMs = Math.max(80, delayMs - elapsed);
+
+  const arm = (ms) => {
+    state.autoFlipTimer = setTimeout(() => {
+      state.autoFlipTimer = null;
+      if (!state.autoFlipEnabled || state.autoFlipPaused || state.scrollMode !== 'flip') return;
+      if (!state.pageFlip || state.currentIndex >= state.totalPages - 1) {
+        stopAutoFlip();
+        return;
+      }
+      if (state.isFlipping || singleStackMeta.activeFlights > 0 || !els.libraryModal.hidden || !els.hlPopover.hidden) {
+        arm(140);
+        return;
+      }
+      state.autoFlipLastTickAt = performance.now();
+      goNext();
+      scheduleAutoFlipTick(false);
+    }, ms);
+  };
+  arm(waitMs);
 }
 
 function stopAutoFlip() {
+  const wasActive = state.autoFlipEnabled || Boolean(state.autoFlipTimer);
   if (state.autoFlipTimer) {
-    clearInterval(state.autoFlipTimer);
+    clearTimeout(state.autoFlipTimer);
     state.autoFlipTimer = null;
-    updateMenuValues();
   }
+  state.autoFlipEnabled = false;
+  state.autoFlipPaused = false;
+  state.autoFlipLastTickAt = 0;
+  if (wasActive) updatePlaybackUi();
 }
 
-function toggleAutoFlip() {
-  if (state.autoFlipTimer) {
+function startAutoFlip() {
+  if (!state.pdfDoc || state.scrollMode !== 'flip') return;
+  if (!state.pageFlip || state.currentIndex >= state.totalPages - 1) {
     stopAutoFlip();
     return;
   }
-  state.autoFlipTimer = setInterval(() => {
-    if (!state.pageFlip || state.currentIndex >= state.totalPages - 1) {
-      stopAutoFlip();
+  state.autoFlipEnabled = true;
+  state.autoFlipPaused = false;
+  state.autoFlipLastTickAt = performance.now();
+  scheduleAutoFlipTick(false);
+  updatePlaybackUi();
+}
+
+function toggleAutoFlipPause() {
+  if (!state.autoFlipEnabled) {
+    startAutoFlip();
+    return;
+  }
+  state.autoFlipPaused = !state.autoFlipPaused;
+  if (state.autoFlipPaused) {
+    if (state.autoFlipTimer) {
+      clearTimeout(state.autoFlipTimer);
+      state.autoFlipTimer = null;
+    }
+  } else {
+    state.autoFlipLastTickAt = performance.now();
+    scheduleAutoFlipTick(false);
+  }
+  updatePlaybackUi();
+}
+
+function toggleAutoFlip() {
+  if (state.autoFlipEnabled) {
+    stopAutoFlip();
+  } else {
+    startAutoFlip();
+  }
+}
+
+function setAutoScrollSpeed(speed, { persist = true, syncInputText = true } = {}) {
+  const num = Number(speed);
+  if (!Number.isFinite(num)) return;
+  state.autoScrollSpeed = clamp(Math.round(num * 10) / 10, 0.2, 5);
+  if (syncInputText && els.autoScrollInput) {
+    els.autoScrollInput.value = state.autoScrollSpeed.toFixed(1);
+  }
+  updatePlaybackUi();
+  if (persist) schedulePersistState();
+}
+
+function stopAutoScroll({ resetPlaying = false } = {}) {
+  if (state.autoScrollRafId) {
+    cancelAnimationFrame(state.autoScrollRafId);
+    state.autoScrollRafId = 0;
+  }
+  state.autoScrollLastTs = 0;
+  if (resetPlaying) {
+    state.autoScrollPlaying = false;
+  }
+  updatePlaybackUi();
+}
+
+function startAutoScrollLoop() {
+  if (state.scrollMode !== 'scroll' || !state.pdfDoc || !state.autoScrollPlaying) return;
+  const sv = els.scrollViewport;
+  const maxScrollStart = Math.max(0, sv.scrollHeight - sv.clientHeight);
+  if (maxScrollStart > 0 && sv.scrollTop >= maxScrollStart - 2) {
+    sv.scrollTop = 0;
+  }
+  state.autoScrollPosY = sv.scrollTop;
+  if (state.autoScrollRafId) {
+    updatePlaybackUi();
+    return;
+  }
+
+  state.autoScrollLastTs = 0;
+  const step = (now) => {
+    if (state.scrollMode !== 'scroll' || !state.pdfDoc || !state.autoScrollPlaying) {
+      state.autoScrollRafId = 0;
+      updatePlaybackUi();
       return;
     }
-    goNext();
-  }, 4000);
-  updateMenuValues();
+    if (!state.autoScrollLastTs) state.autoScrollLastTs = now;
+    const dt = Math.min(0.05, Math.max(0, (now - state.autoScrollLastTs) / 1000));
+    state.autoScrollLastTs = now;
+
+    if (now < state.autoScrollPauseUntil || state.scrollUserSelecting || !els.libraryModal.hidden || !els.hlPopover.hidden) {
+      state.autoScrollPosY = sv.scrollTop;
+      state.autoScrollRafId = requestAnimationFrame(step);
+      return;
+    }
+
+    const maxScroll = Math.max(0, sv.scrollHeight - sv.clientHeight);
+    if (Math.abs(sv.scrollTop - state.autoScrollPosY) > 3) {
+      state.autoScrollPosY = sv.scrollTop;
+    }
+    if (maxScroll > 0) {
+      const zoomFactor = 0.65 + 0.35 * clamp(state.zoom, 1, 3);
+      const pxPerSec = clamp(state.autoScrollSpeed, 0.2, 5) * 48 * zoomFactor;
+      state.autoScrollPosY = Math.min(maxScroll, state.autoScrollPosY + pxPerSec * dt);
+      sv.scrollTop = state.autoScrollPosY;
+      if (state.autoScrollPosY >= maxScroll - 0.5) {
+        state.autoScrollPlaying = false;
+        state.autoScrollRafId = 0;
+        updatePlaybackUi();
+        return;
+      }
+    }
+    state.autoScrollRafId = requestAnimationFrame(step);
+  };
+
+  updatePlaybackUi();
+  state.autoScrollRafId = requestAnimationFrame(step);
+}
+
+function setAutoScrollPlaying(playing) {
+  if (state.scrollMode !== 'scroll' || !state.pdfDoc) return;
+  state.autoScrollPlaying = !!playing;
+  if (state.autoScrollPlaying) {
+    startAutoScrollLoop();
+  } else {
+    stopAutoScroll({ resetPlaying: false });
+  }
+}
+
+function toggleAutoScrollPlay() {
+  setAutoScrollPlaying(!state.autoScrollPlaying);
 }
 
 function openDrawerTab(tabName) {
@@ -3002,7 +3332,14 @@ function wireEvents() {
     openDrawerTab('highlights');
   });
   els.menuScrollMode?.addEventListener('click', () => {
-    state.scrollMode = state.scrollMode === 'scroll' ? 'flip' : 'scroll';
+    if (state.scrollMode === 'scroll') {
+      stopAutoScroll({ resetPlaying: true });
+      state.scrollMode = 'flip';
+    } else {
+      stopAutoFlip();
+      state.scrollMode = 'scroll';
+      state.autoScrollPlaying = true;
+    }
     updateMenuValues();
     schedulePersistState();
     if (state.pdfDoc) initReaderView(state.currentIndex);
@@ -3025,7 +3362,85 @@ function wireEvents() {
     schedulePersistState();
     if (state.pdfDoc) initReaderView(state.currentIndex);
   });
-  els.menuAutoFlip.addEventListener('click', toggleAutoFlip);
+  els.menuAutoFlip?.addEventListener('click', toggleAutoFlip);
+  els.btnFlipTimeDec?.addEventListener('click', () => setAutoFlipSeconds(stepFlipInterval(state.autoFlipSeconds, -1)));
+  els.btnFlipTimeInc?.addEventListener('click', () => setAutoFlipSeconds(stepFlipInterval(state.autoFlipSeconds, 1)));
+  els.autoFlipRange?.addEventListener('input', () => setAutoFlipSeconds(els.autoFlipRange.value));
+  els.autoFlipRange?.addEventListener('change', () => els.autoFlipRange.blur());
+  els.autoFlipRange?.addEventListener('pointerup', () => els.autoFlipRange.blur());
+  els.autoFlipInput?.addEventListener('input', () => {
+    const v = Number(els.autoFlipInput.value);
+    if (Number.isFinite(v) && v >= 0.5 && v <= 300) {
+      setAutoFlipSeconds(v, { syncInputText: false });
+    }
+  });
+  els.autoFlipInput?.addEventListener('change', () => setAutoFlipSeconds(els.autoFlipInput.value));
+  els.autoFlipInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      setAutoFlipSeconds(els.autoFlipInput.value);
+      els.autoFlipInput.blur();
+    }
+  });
+  els.autoFlipPresets?.querySelectorAll('.auto-pill').forEach((btn) => {
+    btn.addEventListener('click', () => setAutoFlipSeconds(Number(btn.dataset.sec)));
+  });
+
+  els.menuAutoScrollToggle?.addEventListener('click', toggleAutoScrollPlay);
+  els.btnScrollSpeedDec?.addEventListener('click', () => setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, -1)));
+  els.btnScrollSpeedInc?.addEventListener('click', () => setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, 1)));
+  els.autoScrollRange?.addEventListener('input', () => setAutoScrollSpeed(els.autoScrollRange.value));
+  els.autoScrollRange?.addEventListener('change', () => els.autoScrollRange.blur());
+  els.autoScrollRange?.addEventListener('pointerup', () => els.autoScrollRange.blur());
+  els.autoScrollInput?.addEventListener('input', () => {
+    const v = Number(els.autoScrollInput.value);
+    if (Number.isFinite(v) && v >= 0.2 && v <= 5) {
+      setAutoScrollSpeed(v, { syncInputText: false });
+    }
+  });
+  els.autoScrollInput?.addEventListener('change', () => setAutoScrollSpeed(els.autoScrollInput.value));
+  els.autoScrollInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      setAutoScrollSpeed(els.autoScrollInput.value);
+      els.autoScrollInput.blur();
+    }
+  });
+  els.autoScrollPresets?.querySelectorAll('.auto-pill').forEach((btn) => {
+    btn.addEventListener('click', () => setAutoScrollSpeed(Number(btn.dataset.speed)));
+  });
+
+  els.btnHudPlayPause?.addEventListener('click', () => {
+    if (state.scrollMode === 'scroll') toggleAutoScrollPlay();
+    else toggleAutoFlipPause();
+    els.btnHudPlayPause.blur();
+  });
+  els.btnHudDec?.addEventListener('click', () => {
+    if (state.scrollMode === 'scroll') setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, -1));
+    else setAutoFlipSeconds(stepFlipInterval(state.autoFlipSeconds, -1));
+    els.btnHudDec.blur();
+  });
+  els.btnHudInc?.addEventListener('click', () => {
+    if (state.scrollMode === 'scroll') setAutoScrollSpeed(stepScrollSpeed(state.autoScrollSpeed, 1));
+    else setAutoFlipSeconds(stepFlipInterval(state.autoFlipSeconds, 1));
+    els.btnHudInc.blur();
+  });
+  els.hudRange?.addEventListener('input', () => {
+    if (state.scrollMode === 'scroll') setAutoScrollSpeed(els.hudRange.value);
+    else setAutoFlipSeconds(els.hudRange.value);
+  });
+  els.hudRange?.addEventListener('change', () => els.hudRange.blur());
+  els.hudRange?.addEventListener('pointerup', () => els.hudRange.blur());
+  els.btnHudStop?.addEventListener('click', () => {
+    if (state.scrollMode === 'scroll') {
+      stopAutoScroll({ resetPlaying: true });
+      state.scrollMode = 'flip';
+      updateMenuValues();
+      schedulePersistState();
+      if (state.pdfDoc) initReaderView(state.currentIndex);
+    } else {
+      stopAutoFlip();
+    }
+    els.btnHudStop.blur();
+  });
   els.menuAutoHideBars?.addEventListener('click', () => {
     state.autoHideBars = !state.autoHideBars;
     updateMenuValues();
@@ -3175,23 +3590,51 @@ function wireEvents() {
     schedulePersistState();
   });
 
-  // Scroll tracking & on-demand buffering in Continuous Scroll mode
+  // Scroll tracking & on-demand buffering in Smooth Auto-Scroll mode
   els.scrollViewport.addEventListener('scroll', () => {
     if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
     hideHighlightPopover();
     const sv = els.scrollViewport;
+    const now = performance.now();
+    if (!state.autoScrollRafId || now < state.autoScrollPauseUntil) {
+      state.autoScrollPosY = sv.scrollTop;
+    }
     const itemStride = Math.round(state.pageH * state.zoom) + 18;
     const centerOffset = sv.scrollTop + sv.clientHeight * 0.38 - 54;
     const estIdx = clamp(Math.floor(centerOffset / Math.max(40, itemStride)), 0, state.totalPages - 1);
     if (estIdx !== state.currentIndex) {
       state.currentIndex = estIdx;
-      onSpreadChanged(true, 3);
+      onSpreadChanged(true, 4);
+    }
+    if (now - (state.autoScrollRenderTickAt || 0) >= 180) {
+      state.autoScrollRenderTickAt = now;
+      queueNearbyRenders(state.currentIndex, 4);
     }
     clearTimeout(state.scrollSyncTimer);
     state.scrollSyncTimer = setTimeout(() => {
-      queueNearbyRenders(state.currentIndex, 3);
+      queueNearbyRenders(state.currentIndex, 4);
     }, 90);
   }, { passive: true });
+  els.scrollViewport.addEventListener('wheel', (e) => {
+    if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
+    state.autoScrollPauseUntil = performance.now() + (e.deltaY < 0 ? 750 : 320);
+  }, { passive: true });
+  els.scrollViewport.addEventListener('touchstart', () => {
+    if (state.scrollMode !== 'scroll') return;
+    state.autoScrollPauseUntil = performance.now() + 900;
+  }, { passive: true });
+  els.scrollViewport.addEventListener('mousedown', (e) => {
+    if (state.scrollMode !== 'scroll') return;
+    if (e.target === els.scrollViewport || e.target.closest('.textLayer')) {
+      state.scrollUserSelecting = true;
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if (state.scrollUserSelecting) {
+      state.scrollUserSelecting = false;
+      state.autoScrollPauseUntil = performance.now() + 360;
+    }
+  });
 
   // Right-click any existing highlight on a page to recolor or delete it cleanly
   els.stage.addEventListener('contextmenu', (e) => {
@@ -3229,7 +3672,7 @@ function wireEvents() {
     state.lastBarPointer = null;
     if (state.pdfDoc) scheduleHideBars(600);
   });
-  [els.topBar, els.bottomBar].forEach((bar) => {
+  [els.topBar, els.bottomBar, els.autoPlaybackHud].forEach((bar) => {
     if (!bar) return;
     bar.addEventListener('mouseenter', () => showBars(false));
     bar.addEventListener('mouseleave', () => scheduleHideBars());
@@ -3384,8 +3827,11 @@ function wireEvents() {
         break;
       }
       case ' ': {
-        if (state.scrollMode === 'scroll') break;
         e.preventDefault();
+        if (state.scrollMode === 'scroll') {
+          toggleAutoScrollPlay();
+          break;
+        }
         const now = performance.now();
         if (e.repeat && now - (state.lastKeyNavTime || 0) < 105) break;
         state.lastKeyNavTime = now;
