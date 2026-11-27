@@ -46,7 +46,23 @@ function constrainToBindingCircles(fx, fy, ex, ey, pageH) {
  */
 function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
   if (!fromPoint || !curPoint) {
-    return { rotate: 0, pageTranX: 0, maskTranX: 0, maskTranY: 0, frontShadowDistance: 0, shadowRate: 0 };
+    return {
+      rotate: 0,
+      pageTranX: 0,
+      maskTranX: 0,
+      maskTranY: 0,
+      frontShadowDistance: 0,
+      shadowRate: 0,
+      isFlat: true,
+      fx: 0,
+      fy: 0,
+      ex: 0,
+      ey: 0,
+      mx: 0,
+      my: 0,
+      vx: 0,
+      vy: 0,
+    };
   }
 
   const ex = fromPoint.x;
@@ -62,6 +78,15 @@ function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
       maskTranY: 0,
       frontShadowDistance: 0,
       shadowRate: 0,
+      isFlat: true,
+      fx: ex,
+      fy: ey,
+      ex,
+      ey,
+      mx: ex,
+      my: ey,
+      vx: 0,
+      vy: 0,
     };
   }
 
@@ -75,6 +100,15 @@ function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
       maskTranY: 0,
       frontShadowDistance: 0,
       shadowRate: 0,
+      isFlat: true,
+      fx: ex,
+      fy: ey,
+      ex,
+      ey,
+      mx: ex,
+      my: ey,
+      vx: 0,
+      vy: 0,
     };
   }
 
@@ -116,6 +150,15 @@ function computeFoldGeometry(pageW, pageH, maskSize, fromPoint, curPoint) {
     pageTranX: distCenter - pageW / 2,
     maskTranX: projX,
     maskTranY: projY - pageH / 2,
+    isFlat: false,
+    fx,
+    fy,
+    ex,
+    ey,
+    mx,
+    my,
+    vx: fx - ex,
+    vy: fy - ey,
   };
 }
 
@@ -197,18 +240,21 @@ export class FlipBookEngine {
     this._lastLoopTime = null;
     this._lastSpineBlend = 0;
     this.isPointerDown = false;
+    this.activePointerId = null;
     this.pointerMoved = false;
     this.pointerDownPos = null;
     this.lastMovePos = null;
+    this.lastClientPos = null;
     this.moveVelX = 0;
     this.interactionDisabled = false;
+    this._handledPointerEv = null;
 
-    this._onMouseDown = this._handleMouseDown.bind(this);
-    this._onMouseMove = this._handleMouseMove.bind(this);
-    this._onMouseUp = this._handleMouseUp.bind(this);
-    this._onTouchStart = this._handleTouchStart.bind(this);
-    this._onTouchMove = this._handleTouchMove.bind(this);
-    this._onTouchEnd = this._handleTouchEnd.bind(this);
+    this._onPointerDown = this._handlePointerDown.bind(this);
+    this._onPointerMove = this._handlePointerMove.bind(this);
+    this._onPointerUp = this._handlePointerUp.bind(this);
+    this._onPointerCancel = this._handlePointerCancel.bind(this);
+    this._onLostPointerCapture = this._handleLostPointerCapture.bind(this);
+    this._onWindowBlur = this._handleWindowBlur.bind(this);
     this._tick = this._loop.bind(this);
   }
 
@@ -400,23 +446,29 @@ export class FlipBookEngine {
 
   /* ---------- Event Handling ---------- */
   _attachEvents() {
-    this.stage.addEventListener('mousedown', this._onMouseDown);
-    this.stage.addEventListener('touchstart', this._onTouchStart, { passive: true });
-    window.addEventListener('mousemove', this._onMouseMove);
-    window.addEventListener('mouseup', this._onMouseUp);
-    window.addEventListener('touchmove', this._onTouchMove, { passive: false });
-    window.addEventListener('touchend', this._onTouchEnd);
+    this.stage.addEventListener('pointerdown', this._onPointerDown);
+    this.stage.addEventListener('pointermove', this._onPointerMove);
+    this.stage.addEventListener('pointerup', this._onPointerUp);
+    this.stage.addEventListener('pointercancel', this._onPointerCancel);
+    this.stage.addEventListener('lostpointercapture', this._onLostPointerCapture);
+    window.addEventListener('pointermove', this._onPointerMove);
+    window.addEventListener('pointerup', this._onPointerUp);
+    window.addEventListener('pointercancel', this._onPointerCancel);
+    window.addEventListener('blur', this._onWindowBlur);
   }
 
   _detachEvents() {
     if (this.stage) {
-      this.stage.removeEventListener('mousedown', this._onMouseDown);
-      this.stage.removeEventListener('touchstart', this._onTouchStart);
+      this.stage.removeEventListener('pointerdown', this._onPointerDown);
+      this.stage.removeEventListener('pointermove', this._onPointerMove);
+      this.stage.removeEventListener('pointerup', this._onPointerUp);
+      this.stage.removeEventListener('pointercancel', this._onPointerCancel);
+      this.stage.removeEventListener('lostpointercapture', this._onLostPointerCapture);
     }
-    window.removeEventListener('mousemove', this._onMouseMove);
-    window.removeEventListener('mouseup', this._onMouseUp);
-    window.removeEventListener('touchmove', this._onTouchMove);
-    window.removeEventListener('touchend', this._onTouchEnd);
+    window.removeEventListener('pointermove', this._onPointerMove);
+    window.removeEventListener('pointerup', this._onPointerUp);
+    window.removeEventListener('pointercancel', this._onPointerCancel);
+    window.removeEventListener('blur', this._onWindowBlur);
   }
 
   _clientToBook(clientX, clientY) {
@@ -548,9 +600,10 @@ export class FlipBookEngine {
     return { x: constrained.fx, y: constrained.fy };
   }
 
-  _handleMouseDown(e) {
+  _handlePointerDown(e) {
     if (this.interactionDisabled) return;
-    if (e.button !== 0) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.isPrimary === false) return;
     if (['A', 'BUTTON', 'INPUT'].includes(e.target?.tagName)) return;
     const bp = this._clientToBook(e.clientX, e.clientY);
     const side = this._hitEdgeSide(bp);
@@ -571,11 +624,18 @@ export class FlipBookEngine {
 
     e.preventDefault();
     this.isPointerDown = true;
+    this.activePointerId = e.pointerId ?? null;
     this.pointerMoved = false;
     this.pointerDownPos = bp;
     this.lastMovePos = bp;
     this.lastClientPos = { x: e.clientX, y: e.clientY };
     this.moveVelX = 0;
+
+    if (e.pointerId !== undefined && e.pointerId !== null) {
+      try {
+        this.stage?.setPointerCapture?.(e.pointerId);
+      } catch {}
+    }
 
     if (this.flyingFlips.length) {
       this._settleAllFlyingFlips();
@@ -586,6 +646,8 @@ export class FlipBookEngine {
       this.interactiveFlip.wasDragged = true;
       this.interactiveFlip.downMask?.classList.remove('is-hover-curl');
       this.interactiveFlip.upMask?.classList.remove('is-hover-curl');
+      this.interactiveFlip.downTabs?.classList.remove('is-hover-curl');
+      this.interactiveFlip.upTabsWrap?.classList.remove('is-hover-curl');
       this.interactiveFlip.hardCard?.classList.remove('is-hover-curl');
       this.interactiveFlip.grabStartPos = { ...bp };
       this.interactiveFlip.lastClientX = e.clientX;
@@ -604,12 +666,32 @@ export class FlipBookEngine {
       this._emit('activeFlipsChange');
     } else {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
-      this._beginInteractiveTurn(chosenSide, bp, 'drag', { x: e.clientX, y: e.clientY });
+      const began = this._beginInteractiveTurn(chosenSide, bp, 'drag', { x: e.clientX, y: e.clientY });
+      if (!began) {
+        this.isPointerDown = false;
+        this.activePointerId = null;
+        if (e.pointerId !== undefined && e.pointerId !== null) {
+          try { this.stage?.releasePointerCapture?.(e.pointerId); } catch {}
+        }
+      }
     }
   }
 
-  _handleMouseMove(e) {
+  _handlePointerMove(e) {
+    if (this._handledPointerEv === e) return;
+    this._handledPointerEv = e;
     if (this.interactionDisabled && !this.isPointerDown) return;
+
+    if (this.isPointerDown) {
+      if (this.activePointerId !== null && e.pointerId !== undefined && e.pointerId !== this.activePointerId) {
+        return;
+      }
+      if (e.pointerType === 'mouse' && typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
+        this._handlePointerUp(e);
+        return;
+      }
+    }
+
     const bp = this._clientToBook(e.clientX, e.clientY);
 
     if (this.isPointerDown && this.interactiveFlip && this.interactiveFlip.mode === 'drag') {
@@ -668,10 +750,27 @@ export class FlipBookEngine {
     }
   }
 
-  _handleMouseUp(e) {
+  _handlePointerUp(e) {
+    if (this._handledPointerEv === e) return;
+    this._handledPointerEv = e;
     if (!this.isPointerDown) return;
+    if (this.activePointerId !== null && e.pointerId !== undefined && e.pointerId !== this.activePointerId) {
+      return;
+    }
+    const releasedId = this.activePointerId;
     this.isPointerDown = false;
-    const bp = this._clientToBook(e.clientX, e.clientY);
+    this.activePointerId = null;
+    if (releasedId !== null) {
+      try {
+        if (this.stage?.hasPointerCapture?.(releasedId)) {
+          this.stage.releasePointerCapture(releasedId);
+        }
+      } catch {}
+    }
+
+    const cx = Number.isFinite(e?.clientX) ? e.clientX : (this.lastClientPos?.x ?? 0);
+    const cy = Number.isFinite(e?.clientY) ? e.clientY : (this.lastClientPos?.y ?? 0);
+    const bp = this._clientToBook(cx, cy);
 
     if (!this.interactiveFlip) return;
 
@@ -721,23 +820,45 @@ export class FlipBookEngine {
     }
   }
 
-  _handleTouchStart(e) {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    this._handleMouseDown({ button: 0, clientX: t.clientX, clientY: t.clientY, target: e.target, preventDefault() {} });
-  }
-
-  _handleTouchMove(e) {
-    if (!this.isPointerDown || e.touches.length !== 1) return;
-    if (e.cancelable) e.preventDefault();
-    const t = e.touches[0];
-    this._handleMouseMove({ clientX: t.clientX, clientY: t.clientY });
-  }
-
-  _handleTouchEnd(e) {
+  _handlePointerCancel(e) {
     if (!this.isPointerDown) return;
-    const t = e.changedTouches[0];
-    this._handleMouseUp({ clientX: t.clientX, clientY: t.clientY });
+    if (this.activePointerId !== null && e?.pointerId !== undefined && e.pointerId !== this.activePointerId) {
+      return;
+    }
+    this._handlePointerUp({
+      pointerId: this.activePointerId,
+      clientX: Number.isFinite(e?.clientX) ? e.clientX : (this.lastClientPos?.x ?? 0),
+      clientY: Number.isFinite(e?.clientY) ? e.clientY : (this.lastClientPos?.y ?? 0),
+    });
+  }
+
+  _handleLostPointerCapture(e) {
+    // Keep drag alive across capture loss on stage unless button was already released;
+    // window listener continues tracking inside viewport and will finish on pointerup.
+    if (!this.isPointerDown) return;
+    if (e?.pointerId !== undefined && this.activePointerId !== null && e.pointerId !== this.activePointerId) {
+      return;
+    }
+    if (e?.pointerType === 'mouse' && typeof e.buttons === 'number' && (e.buttons & 1) === 0) {
+      this._handlePointerUp({
+        pointerId: this.activePointerId,
+        clientX: this.lastClientPos?.x ?? 0,
+        clientY: this.lastClientPos?.y ?? 0,
+      });
+    }
+  }
+
+  _handleWindowBlur() {
+    if (!this.isPointerDown) return;
+    // If OS focus leaves without pointer capture delivering moves/up, settle smoothly
+    const captured = this.activePointerId !== null && this.stage?.hasPointerCapture?.(this.activePointerId);
+    if (!captured) {
+      this._handlePointerUp({
+        pointerId: this.activePointerId,
+        clientX: this.lastClientPos?.x ?? 0,
+        clientY: this.lastClientPos?.y ?? 0,
+      });
+    }
   }
 
   /* ---------- Interactive Flip Construction & rAF Spring Loop ---------- */
@@ -988,12 +1109,29 @@ export class FlipBookEngine {
     upSide.appendChild(backShade);
     upMask.appendChild(upSide);
 
+    const upTabsWrap = document.createElement('div');
+    upTabsWrap.className = `fh-mask-unclipped ${this.single ? 'fh-mask-single' : 'fh-mask-double'}`;
+    upTabsWrap.style.width = `${this.maskSize}px`;
+    upTabsWrap.style.height = `${this.maskSize}px`;
+    upTabsWrap.style.marginTop = `${-this.maskSize / 2}px`;
+    upTabsWrap.style.zIndex = backZ;
+
     const upTabs = document.createElement('div');
     upTabs.className = 'fh-up-side fh-side-tabs fh-side-tabs-up';
     upTabs.style.width = `${this.pageW}px`;
     upTabs.style.height = `${this.pageH}px`;
     upTabs.style.top = `${this.sideTop}px`;
-    upMask.appendChild(upTabs);
+    upTabsWrap.appendChild(upTabs);
+
+    // Replace masked downTabs with an unclipped flat page-overlay sibling inside flipLayer
+    // so sticky tabs on uncurled regions never bend or slice before the crease reaches them.
+    downTabs.remove();
+    downTabs.className = 'fh-down-tabs fh-side-tabs';
+    downTabs.style.width = `${this.pageW}px`;
+    downTabs.style.height = `${this.pageH}px`;
+    downTabs.style.top = '0px';
+    downTabs.style.left = (!this.single && side === 'right') ? '50%' : '0px';
+    downTabs.style.zIndex = frontZ;
 
     this.settings.onRenderSheetTabs?.({
       isHard: false,
@@ -1004,12 +1142,15 @@ export class FlipBookEngine {
       downTabs,
       upTabs,
     });
+    for (const child of upTabs.children) child.hidden = true;
 
     this.flipLayer.appendChild(castBounds);
     this.flipLayer.appendChild(downMask);
+    this.flipLayer.appendChild(downTabs);
     this.flipLayer.appendChild(flapDropBounds);
     this.flipLayer.appendChild(upMask);
-    els.push(castBounds, downMask, flapDropBounds, upMask);
+    this.flipLayer.appendChild(upTabsWrap);
+    els.push(castBounds, downMask, downTabs, flapDropBounds, upMask, upTabsWrap);
 
     return {
       isHard: false,
@@ -1035,6 +1176,7 @@ export class FlipBookEngine {
       unfurlLip: null,
       upMask,
       upSide,
+      upTabsWrap,
       upTabs,
       underShadow,
       frontHighlight,
@@ -1104,6 +1246,8 @@ export class FlipBookEngine {
     if (mode === 'hover') {
       dom.downMask?.classList.add('is-hover-curl');
       dom.upMask?.classList.add('is-hover-curl');
+      dom.downTabs?.classList.add('is-hover-curl');
+      dom.upTabsWrap?.classList.add('is-hover-curl');
       dom.hardCard?.classList.add('is-hover-curl');
     }
 
@@ -1130,7 +1274,8 @@ export class FlipBookEngine {
       target: this._clampDragTarget(bookPos, fromPoint, side, grabStartPos),
     };
 
-    this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
+      this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
+    this._applyFlipFrame(this.interactiveFlip, fromPoint);
     this._emit('activeFlipsChange');
     this._ensureRaf();
     return true;
@@ -1282,16 +1427,30 @@ export class FlipBookEngine {
     const maskTx = `translate3d(${mTx}px, ${mTy}px, 0px) rotate(${rDeg}deg)`;
     f.downMask.style.transform = maskTx;
     f.upMask.style.transform = maskTx;
+    if (f.upTabsWrap) f.upTabsWrap.style.transform = maskTx;
     f.castMask.style.transform = maskTx;
     f.flapDropMask.style.transform = maskTx;
 
     const downSideTx = `translate3d(${fmtPx(-g.pageTranX)}px, 0px, 0px) rotate(${fmtDeg(-g.rotate)}deg)`;
     const upSideTx = `translate3d(${pTx}px, 0px, 0px) rotate(${rDeg}deg)`;
     f.downSide.style.transform = downSideTx;
-    if (f.downTabs) f.downTabs.style.transform = downSideTx;
     f.upSide.style.transform = upSideTx;
     if (f.upTabs) f.upTabs.style.transform = upSideTx;
     f.flapCaster.style.transform = upSideTx;
+
+    // Show each sticky tab flat on the uncurled departing page until the fold crease crosses
+    // its outer-edge attachment point (ex, tabY), then transfer seamlessly onto the curled flap.
+    const updateSplitTabVisibility = (container, wantCurled) => {
+      if (!container) return;
+      for (const el of container.children) {
+        const topPct = Number(el.dataset.topPct);
+        const tabY = Number.isFinite(topPct) ? (topPct / 100) * this.pageH : this.pageH * 0.5;
+        const hasCurled = !g.isFlat && ((g.ex - g.mx) * g.vx + (tabY - g.my) * g.vy) < 0;
+        el.hidden = wantCurled ? !hasCurled : hasCurled;
+      }
+    };
+    updateSplitTabVisibility(f.downTabs, false);
+    updateSplitTabVisibility(f.upTabs, true);
 
     // Align cylindrical curl highlight & trough strictly parallel to the diagonal fold crease
     f.frontHighlight.style.transform = `rotate(${rDeg}deg) translate3d(${dCx}px, 0px, 0px)`;
@@ -1332,6 +1491,8 @@ export class FlipBookEngine {
         layerOpacity = 1 - clamp((travel - 0.24) / 0.30, 0, 1);
         f.downMask.style.opacity = String(layerOpacity);
         f.upMask.style.opacity = String(layerOpacity);
+        if (f.downTabs) f.downTabs.style.opacity = String(layerOpacity);
+        if (f.upTabsWrap) f.upTabsWrap.style.opacity = String(layerOpacity);
         f.castBounds.style.opacity = String(layerOpacity);
         f.flapDropBounds.style.opacity = String(layerOpacity);
         f.singleDragLifting = liftRatio > 0.01;
@@ -1351,6 +1512,8 @@ export class FlipBookEngine {
         layerOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.34) / 0.08, 0, 1);
         f.downMask.style.opacity = String(layerOpacity);
         f.upMask.style.opacity = String(layerOpacity);
+        if (f.downTabs) f.downTabs.style.opacity = String(layerOpacity);
+        if (f.upTabsWrap) f.upTabsWrap.style.opacity = String(layerOpacity);
         f.castBounds.style.opacity = String(layerOpacity);
         f.flapDropBounds.style.opacity = String(layerOpacity);
       }

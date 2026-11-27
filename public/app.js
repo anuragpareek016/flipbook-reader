@@ -744,6 +744,7 @@ function initPageFlip(startIndex = 0) {
   els.bookShell.style.height = `${sh}px`;
   els.bookContainer.style.width = `${totalBookW}px`;
   els.bookContainer.style.height = `${sh}px`;
+  syncStickyTabScale(sw);
 
   host.appendChild(buildPageElements());
 
@@ -1864,6 +1865,7 @@ function commitZoomLayout() {
   els.bookShell.style.height = `${sh}px`;
   els.bookContainer.style.width = `${totalBookW}px`;
   els.bookContainer.style.height = `${sh}px`;
+  syncStickyTabScale(sw);
   state.pageFlip?.resize?.(sw, sh);
 
   // Reset CSS scale to exact 1 and snap pan to device pixels so WebKit/Blink paints native 4K+ Retina text cleanly
@@ -2328,9 +2330,17 @@ function getTurningTabPages() {
   return activePages;
 }
 
+function syncStickyTabScale(pageWidthPx) {
+  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.58, 4.5);
+  const val = scale.toFixed(4);
+  els.bookShell?.style.setProperty('--tab-zoom', val);
+  els.singleFlightLayer?.style.setProperty('--tab-zoom', val);
+}
+
 function createAttachedTurningTabEl(tab, topPct, sideDir) {
   const el = document.createElement('div');
   el.className = `sticky-edge-tab tab-${tab.color} tab-side-${sideDir}`;
+  el.dataset.topPct = String(topPct);
   el.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
   el.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
   return el;
@@ -6067,7 +6077,7 @@ function wireEvents() {
     return !!state.pageFlip?.isPointInFlipZone?.(clientX, clientY, onTextSpan);
   };
   const guardPageFlipPointer = (e) => {
-    if (e.type === 'mousedown' && e.button !== 0) return;
+    if ((e.type === 'mousedown' || e.type === 'pointerdown') && e.button !== 0) return;
     if (state.zoom > 1.01) {
       return;
     }
@@ -6082,16 +6092,22 @@ function wireEvents() {
       isSelectingText = false;
     }
   };
+  els.bookContainer.addEventListener('pointerdown', guardPageFlipPointer, true);
   els.bookContainer.addEventListener('mousedown', guardPageFlipPointer, true);
   els.bookContainer.addEventListener('touchstart', guardPageFlipPointer, true);
-  window.addEventListener('mousemove', (e) => {
+  const stopMoveIfSelecting = (e) => {
     if (state.zoom <= 1.01 && isSelectingText) {
       e.stopPropagation();
     }
-  }, true);
-  window.addEventListener('mouseup', () => {
+  };
+  const endTextSelecting = () => {
     isSelectingText = false;
-  }, true);
+  };
+  window.addEventListener('pointermove', stopMoveIfSelecting, true);
+  window.addEventListener('mousemove', stopMoveIfSelecting, true);
+  window.addEventListener('pointerup', endTextSelecting, true);
+  window.addEventListener('pointercancel', endTextSelecting, true);
+  window.addEventListener('mouseup', endTextSelecting, true);
 
   // Keep Web Audio unlocked & recover automatically after sleep, audio-route change, or focus loss
   const keepAudioActive = () => {
