@@ -43,6 +43,10 @@ const els = {
   bookStackRight: document.getElementById('bookStackRight'),
   bookContainer: document.getElementById('bookContainer'),
   bookSpineShadow: document.getElementById('bookSpineShadow'),
+  singleCollectedStack: document.getElementById('singleCollectedStack'),
+  scsTopCard: document.getElementById('scsTopCard'),
+  scsBadge: document.getElementById('scsBadge'),
+  singleFlightLayer: document.getElementById('singleFlightLayer'),
 
   btnPrevArrow: document.getElementById('btnPrevArrow'),
   btnNextArrow: document.getElementById('btnNextArrow'),
@@ -355,6 +359,8 @@ function disposeBook() {
   els.scrollPages.innerHTML = '';
   els.scrollViewport.hidden = true;
   document.body.classList.remove('mode-scroll');
+  clearSingleFlights();
+  updateSingleCollectedStack();
   els.thumbScroller.innerHTML = '';
   els.tocList.innerHTML = '';
   els.searchResults.innerHTML = '';
@@ -421,6 +427,8 @@ function initScrollView(startIndex = 0) {
   els.bookShell.hidden = true;
   els.zoomViewport.hidden = true;
   document.body.classList.add('mode-scroll');
+  clearSingleFlights();
+  updateSingleCollectedStack();
 
   computeBookGeometry(true);
   state.committedZoom = state.zoom;
@@ -553,8 +561,16 @@ function initPageFlip(startIndex = 0) {
     hideHighlightPopover();
     if (Number.isFinite(e.data?.page)) {
       const fromIdx = clamp(e.data?.from ?? state.currentIndex, 0, state.totalPages - 1);
-      state.currentIndex = clamp(e.data.page, 0, state.totalPages - 1);
-      onSpreadChanged(false, 6);
+      const nextIdx = clamp(e.data.page, 0, state.totalPages - 1);
+      state.currentIndex = nextIdx;
+      const handledByFlight =
+        !e.data?.reversed &&
+        fromIdx !== nextIdx &&
+        spawnSingleCollectedFlight({ fromIdx, toIdx: nextIdx });
+      if (!handledByFlight) {
+        clearSingleFlights();
+      }
+      onSpreadChanged(false, 6, { skipSingleStackSwap: handledByFlight && nextIdx > fromIdx });
       const vis = getVisibleIndices();
       const touchingCover =
         state.showCover &&
@@ -994,7 +1010,231 @@ function updateBookDepthChrome() {
   }
 }
 
-function onSpreadChanged(persist = true, renderRadius = 5) {
+const singleStackMeta = {
+  renderedIdx: null,
+  renderToken: 0,
+  activeFlights: 0,
+};
+
+function clearSingleFlights() {
+  singleStackMeta.activeFlights = 0;
+  if (els.singleFlightLayer) {
+    els.singleFlightLayer.innerHTML = '';
+  }
+  els.singleCollectedStack?.classList.remove('is-waiting', 'is-landing');
+}
+
+function getSingleStackMetrics() {
+  const stageW = els.stage?.clientWidth || 0;
+  const w = clamp(Math.round(stageW * 0.072), 68, 94);
+  const aspect = clamp(state.pageAspect || 0.72, 0.45, 1.45);
+  const h = Math.round(w / aspect);
+  return { w, h, stageW };
+}
+
+function canShowSingleCollectedStack(collectedIdx = state.currentIndex - 1) {
+  if (!state.pdfDoc || state.scrollMode !== 'flip') return false;
+  if (!(isEffectiveSingleMode() || state.orientation === 'portrait')) return false;
+  if (state.zoom > 1.05) return false;
+  if (collectedIdx < 0 || collectedIdx >= state.totalPages) return false;
+  const { w, stageW } = getSingleStackMetrics();
+  const bookLeft = Math.round((stageW - state.pageW) / 2);
+  return bookLeft >= w + 34;
+}
+
+function createFlightSnapshotCanvas(pageIdx, targetW, targetH, className) {
+  const srcCanvas = state.pageNodes[pageIdx]?.querySelector('canvas.fb-canvas');
+  const mini = document.createElement('canvas');
+  mini.className = className;
+  mini.width = Math.max(2, Math.round(targetW));
+  mini.height = Math.max(2, Math.round(targetH));
+  if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+    const ctx = mini.getContext('2d', { alpha: false });
+    ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
+    return mini;
+  }
+  return null;
+}
+
+function paintSingleStackTopCard(pageIdx) {
+  if (!els.singleCollectedStack || !els.scsTopCard || !els.scsBadge) return;
+  if (pageIdx < 0 || pageIdx >= state.totalPages || !state.pdfDoc) return;
+
+  const { w, h } = getSingleStackMetrics();
+  els.scsBadge.textContent = `Pg ${pageIdx + 1}`;
+  els.singleCollectedStack.title = `Page ${pageIdx + 1} — Click to pull back (←)`;
+
+  const depth = pageIdx >= 30 ? '4' : pageIdx >= 10 ? '3' : pageIdx >= 3 ? '2' : '1';
+  els.singleCollectedStack.dataset.depth = depth;
+
+  if (singleStackMeta.renderedIdx === pageIdx && els.scsTopCard.firstChild) {
+    return;
+  }
+  singleStackMeta.renderedIdx = pageIdx;
+  const token = ++singleStackMeta.renderToken;
+
+  const fastCanvas = createFlightSnapshotCanvas(pageIdx, w * 2, h * 2, 'scs-mini-canvas');
+  if (fastCanvas) {
+    els.scsTopCard.innerHTML = '';
+    els.scsTopCard.appendChild(fastCanvas);
+    return;
+  }
+
+  els.scsTopCard.innerHTML = `<div class="fb-page-num-placeholder">${pageIdx + 1}</div>`;
+  state.pdfDoc.getPage(pageIdx + 1).then((pdfPage) => {
+    if (singleStackMeta.renderToken !== token || singleStackMeta.renderedIdx !== pageIdx) return null;
+    const rawVp = pdfPage.getViewport({ scale: 1 });
+    const vp = pdfPage.getViewport({ scale: (w * 2) / Math.max(1, rawVp.width) });
+    const canvas = document.createElement('canvas');
+    canvas.className = 'scs-mini-canvas';
+    canvas.width = Math.max(2, Math.floor(vp.width));
+    canvas.height = Math.max(2, Math.floor(vp.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    return pdfPage.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
+      if (singleStackMeta.renderToken !== token || singleStackMeta.renderedIdx !== pageIdx) return;
+      els.scsTopCard.innerHTML = '';
+      els.scsTopCard.appendChild(canvas);
+    });
+  }).catch(() => {});
+}
+
+function updateSingleCollectedStack({ skipSwap = false } = {}) {
+  if (!els.singleCollectedStack) return;
+  const collectedIdx = state.currentIndex - 1;
+  if (!canShowSingleCollectedStack(collectedIdx)) {
+    if (!singleStackMeta.activeFlights) {
+      els.singleCollectedStack.hidden = true;
+      els.singleCollectedStack.classList.remove('is-waiting');
+    }
+    return;
+  }
+
+  const { w, h } = getSingleStackMetrics();
+  els.singleCollectedStack.style.width = `${w}px`;
+  els.singleCollectedStack.style.height = `${h}px`;
+  els.singleCollectedStack.hidden = false;
+  if (!skipSwap && singleStackMeta.activeFlights === 0) {
+    els.singleCollectedStack.classList.remove('is-waiting');
+    paintSingleStackTopCard(collectedIdx);
+  }
+}
+
+function spawnSingleCollectedFlight({ fromIdx, toIdx }) {
+  if (!els.singleCollectedStack || !els.singleFlightLayer || !els.stage || !els.bookContainer) {
+    return false;
+  }
+  const goingNext = toIdx > fromIdx;
+  const checkIdx = goingNext ? fromIdx : toIdx;
+  if (!canShowSingleCollectedStack(checkIdx)) return false;
+
+  const { w, h } = getSingleStackMetrics();
+  const stageRect = els.stage.getBoundingClientRect();
+  const bookRect = els.bookContainer.getBoundingClientRect();
+  if (!stageRect.width || !bookRect.width || !bookRect.height) return false;
+
+  // Ensure destination stack has layout rect without flashing empty on Page 1->2 before arrival
+  els.singleCollectedStack.style.width = `${w}px`;
+  els.singleCollectedStack.style.height = `${h}px`;
+  if (goingNext) {
+    if (fromIdx === 0) {
+      els.singleCollectedStack.classList.add('is-waiting');
+    } else {
+      paintSingleStackTopCard(fromIdx - 1);
+    }
+    els.singleCollectedStack.hidden = false;
+  } else {
+    // Lifting toIdx back off the top-left stack immediately reveals toIdx - 1 underneath
+    if (toIdx - 1 >= 0) {
+      paintSingleStackTopCard(toIdx - 1);
+      els.singleCollectedStack.hidden = false;
+    } else {
+      els.singleCollectedStack.classList.add('is-waiting');
+    }
+  }
+
+  const destRect = els.singleCollectedStack.getBoundingClientRect();
+  if (!destRect.width || !destRect.height) return false;
+
+  // Cap concurrent rapid flights so spamming arrows stays 60fps
+  while (els.singleFlightLayer.children.length >= 3) {
+    els.singleFlightLayer.firstElementChild?.remove();
+  }
+
+  const flyingPageIdx = goingNext ? fromIdx : toIdx;
+  const card = document.createElement('div');
+  card.className = 'scs-flying-card';
+  card.style.width = `${bookRect.width}px`;
+  card.style.height = `${bookRect.height}px`;
+
+  const snapCanvas = createFlightSnapshotCanvas(
+    flyingPageIdx,
+    Math.min(bookRect.width * 1.5, 640),
+    Math.min(bookRect.height * 1.5, 900),
+    'scs-flying-canvas'
+  );
+  if (snapCanvas) {
+    card.appendChild(snapCanvas);
+  } else {
+    card.innerHTML = `<div class="fb-page-num-placeholder">${flyingPageIdx + 1}</div>`;
+  }
+  const shade = document.createElement('div');
+  shade.className = 'scs-flying-shade';
+  card.appendChild(shade);
+  els.singleFlightLayer.appendChild(card);
+
+  const srcX = bookRect.left - stageRect.left;
+  const srcY = bookRect.top - stageRect.top;
+  const dstX = destRect.left - stageRect.left;
+  const dstY = destRect.top - stageRect.top;
+  const sx = destRect.width / bookRect.width;
+  const sy = destRect.height / bookRect.height;
+  const midX = (srcX + dstX) / 2 - 22;
+  const midY = Math.min(srcY, dstY) - 18;
+  const midScale = (1 + sx) * 0.52;
+
+  singleStackMeta.activeFlights += 1;
+
+  const keyframes = goingNext
+    ? [
+        { transform: `translate3d(${srcX - 24}px, ${srcY}px, 0) rotateY(-14deg) rotateZ(-2deg) scale(0.94)`, opacity: 0, offset: 0 },
+        { transform: `translate3d(${srcX - 36}px, ${srcY - 8}px, 0) rotateY(-22deg) rotateZ(-4deg) scale(0.84)`, opacity: 0.96, offset: 0.22 },
+        { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.98, offset: 0.56 },
+        { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+      ]
+    : [
+        { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 0 },
+        { transform: `translate3d(${(dstX + srcX) * 0.36}px, ${midY}px, 0) rotateY(22deg) rotateZ(2deg) scale(${midScale})`, opacity: 0.96, offset: 0.36 },
+        { transform: `translate3d(${srcX - 18}px, ${srcY + 6}px, 0) rotateY(10deg) rotateZ(0.5deg) scale(0.82)`, opacity: 0.22, offset: 0.65 },
+        { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 0.80 },
+        { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateZ(0deg) scale(0.92)`, opacity: 0, offset: 1 },
+      ];
+
+  const anim = card.animate(keyframes, {
+    duration: goingNext ? 440 : 380,
+    easing: 'cubic-bezier(0.25, 0.80, 0.35, 1)',
+    fill: 'forwards',
+  });
+
+  const finishFlight = () => {
+    card.remove();
+    singleStackMeta.activeFlights = Math.max(0, singleStackMeta.activeFlights - 1);
+    if (singleStackMeta.activeFlights === 0) {
+      updateSingleCollectedStack();
+      if (goingNext && !els.singleCollectedStack.hidden) {
+        els.singleCollectedStack.classList.remove('is-landing');
+        void els.singleCollectedStack.offsetWidth;
+        els.singleCollectedStack.classList.add('is-landing');
+      }
+    }
+  };
+  anim.addEventListener('finish', finishFlight, { once: true });
+  anim.addEventListener('cancel', finishFlight, { once: true });
+  return true;
+}
+
+function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap = false } = {}) {
   const visible = getVisibleIndices();
   const label = formatSpreadLabel(visible);
   if (document.activeElement !== els.pageInput) {
@@ -1013,6 +1253,7 @@ function onSpreadChanged(persist = true, renderRadius = 5) {
 
   updateCenterShift();
   updateBookDepthChrome();
+  updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
   updateBookmarkUi();
   if (els.valPageNotesCount || (els.sideDrawer && !els.sideDrawer.hidden)) {
     updateHighlightsUi();
@@ -1069,6 +1310,7 @@ function jumpToPage(oneBasedPage, animate = false) {
   if (animate && Math.abs(targetIdx - state.currentIndex) <= 2) {
     state.pageFlip.flip(targetIdx, 'bottom');
   } else {
+    clearSingleFlights();
     state.pageFlip.turnToPage(targetIdx);
   }
 }
@@ -1092,6 +1334,8 @@ function commitZoomLayout() {
   els.zoomViewport.style.transform = `translate3d(${state.panX}px, ${state.panY}px, 0)`;
   updateCenterShift();
   updateBookDepthChrome();
+  if (state.zoom > 1.05) clearSingleFlights();
+  updateSingleCollectedStack();
 
   for (const idx of getVisibleIndices()) {
     renderPageNode(idx);
@@ -2355,6 +2599,7 @@ function toggleFullscreen() {
 function wireEvents() {
   els.btnPrevArrow.addEventListener('click', goPrev);
   els.btnNextArrow.addEventListener('click', goNext);
+  els.singleCollectedStack?.addEventListener('click', goPrev);
   els.btnFirstPage.addEventListener('click', () => jumpToPage(1, false));
   els.btnLastPage.addEventListener('click', () => jumpToPage(state.totalPages, false));
 

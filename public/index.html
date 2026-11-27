@@ -101,6 +101,16 @@
         <div class="scroll-pages" id="scrollPages"></div>
       </div>
 
+      <!-- Top-Left Collected Read Pages Stack (Single-Page Book Flip mode) -->
+      <button id="singleCollectedStack" class="single-collected-stack" hidden title="Click to pull back previous page (←)" aria-label="Collected read pages stack">
+        <span class="scs-layer scs-layer-3"></span>
+        <span class="scs-layer scs-layer-2"></span>
+        <span class="scs-layer scs-layer-1"></span>
+        <div class="scs-top-card" id="scsTopCard"></div>
+        <span class="scs-badge" id="scsBadge">Pg 1</span>
+      </button>
+      <div id="singleFlightLayer" class="single-flight-layer" aria-hidden="true"></div>
+
       <!-- Mid-height side chevron arrows (FlipHTML5 style) -->
       <button id="btnPrevArrow" class="side-nav side-nav-left" title="Previous Page (←)" aria-label="Previous Page" hidden>
         <svg width="34" height="58" viewBox="0 0 24 44" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
