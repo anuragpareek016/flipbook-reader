@@ -24,6 +24,7 @@
           <button id="btnZoomOut" title="Zoom Out (-)">−</button>
           <span id="zoomLabel">100%</span>
           <button id="btnZoomInPill" title="Zoom In (+)">+</button>
+          <button id="btnZoomPanMode" class="zoom-pill-toggle active" title="Enable/Disable two-finger drag pan while zoomed">2F Pan</button>
           <button id="btnZoomReset" title="Reset Zoom (0)">Reset</button>
         </div>
         <button id="btnMagnifier" class="icon-chip" title="Magnifying Glass (M)" aria-label="Toggle magnifying glass">
@@ -260,6 +261,10 @@
       <button class="menu-item" id="menuAutoHideBars">
         <span>Auto-Hide Toolbars</span>
         <span class="menu-val" id="valAutoHideBars">On</span>
+      </button>
+      <button class="menu-item" id="menuTwoFingerPan">
+        <span>Two-Finger Zoom Pan</span>
+        <span class="menu-val" id="valTwoFingerPan">On</span>
       </button>
       <div class="menu-divider"></div>
       <div class="menu-auto-block" id="menuAutoBlock">

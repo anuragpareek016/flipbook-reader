@@ -37,6 +37,7 @@ const els = {
   zoomLabel: document.getElementById('zoomLabel'),
   btnZoomOut: document.getElementById('btnZoomOut'),
   btnZoomInPill: document.getElementById('btnZoomInPill'),
+  btnZoomPanMode: document.getElementById('btnZoomPanMode'),
   btnZoomReset: document.getElementById('btnZoomReset'),
 
   stage: document.getElementById('stage'),
@@ -83,6 +84,8 @@ const els = {
   valClickMode: document.getElementById('valClickMode'),
   menuAutoHideBars: document.getElementById('menuAutoHideBars'),
   valAutoHideBars: document.getElementById('valAutoHideBars'),
+  menuTwoFingerPan: document.getElementById('menuTwoFingerPan'),
+  valTwoFingerPan: document.getElementById('valTwoFingerPan'),
   menuAutoBlock: document.getElementById('menuAutoBlock'),
   menuAutoFlipGroup: document.getElementById('menuAutoFlipGroup'),
   menuAutoFlip: document.getElementById('menuAutoFlip'),
@@ -197,6 +200,7 @@ const state = {
 
   zoom: 1,
   committedZoom: 1,
+  twoFingerPan: true,
   panX: 0,
   panY: 0,
   isPanning: false,
@@ -312,6 +316,7 @@ function applySavedSettings(settings) {
   if (settings.theme) setTheme(settings.theme, false);
   if (typeof settings.readDark === 'boolean') setReadDark(settings.readDark, false);
   if (typeof settings.autoHideBars === 'boolean') state.autoHideBars = settings.autoHideBars;
+  if (typeof settings.twoFingerPan === 'boolean') state.twoFingerPan = settings.twoFingerPan;
   if (settings.soundPreset) {
     state.soundPreset = settings.soundPreset;
   }
@@ -358,6 +363,7 @@ function schedulePersistState() {
         theme: state.theme,
         readDark: state.readDark,
         autoHideBars: state.autoHideBars,
+        twoFingerPan: state.twoFingerPan,
         scrollMode: state.scrollMode,
         soundEnabled: state.soundEnabled,
         soundPreset: state.soundPreset,
@@ -1666,6 +1672,27 @@ function applyZoomTransform(rerender = true, immediate = false) {
   }
 }
 
+function clampZoomPan(nextX, nextY) {
+  const sw = Math.max(120, Math.round(state.pageW * state.zoom));
+  const sh = Math.max(160, Math.round(state.pageH * state.zoom));
+  const single = isEffectiveSingleMode();
+  const bookW = single ? sw : sw * 2;
+  const maxX = Math.max(120, Math.round(bookW * 0.55 + 64));
+  const maxY = Math.max(120, Math.round(sh * 0.55 + 64));
+  return {
+    x: clamp(nextX, -maxX, maxX),
+    y: clamp(nextY, -maxY, maxY),
+  };
+}
+
+function panZoomBy(dx, dy) {
+  if (state.zoom <= 1.01) return;
+  const clamped = clampZoomPan(state.panX + dx, state.panY + dy);
+  state.panX = clamped.x;
+  state.panY = clamped.y;
+  applyZoomTransform(false);
+}
+
 function setZoom(nextZoom, immediate = false, anchor = null) {
   const prevZoom = state.zoom || 1;
   const z = clamp(Number(nextZoom) || 1, 1, 3.5);
@@ -1743,8 +1770,12 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         dy = anchor.clientY - cy0;
       }
     }
-    state.panX = dx + (state.panX - dx) * ratio;
-    state.panY = dy + (state.panY - dy) * ratio;
+    const clamped = clampZoomPan(
+      dx + (state.panX - dx) * ratio,
+      dy + (state.panY - dy) * ratio
+    );
+    state.panX = clamped.x;
+    state.panY = clamped.y;
   }
   applyZoomTransform(true, immediate || state.zoom === 1);
 }
@@ -3255,7 +3286,22 @@ function updateMenuValues() {
   if (els.valAutoHideBars) {
     els.valAutoHideBars.textContent = state.autoHideBars ? 'On' : 'Off';
   }
+  if (els.valTwoFingerPan) {
+    els.valTwoFingerPan.textContent = state.twoFingerPan ? 'On' : 'Off';
+  }
+  if (els.btnZoomPanMode) {
+    els.btnZoomPanMode.classList.toggle('active', state.twoFingerPan);
+    els.btnZoomPanMode.title = state.twoFingerPan
+      ? 'Two-Finger Pan: On (Click to disable)'
+      : 'Two-Finger Pan: Off (Click to enable)';
+  }
   updatePlaybackUi();
+}
+
+function toggleTwoFingerPan() {
+  state.twoFingerPan = !state.twoFingerPan;
+  updateMenuValues();
+  schedulePersistState();
 }
 
 function setAutoFlipSeconds(seconds, { persist = true, reschedule = true, syncInputText = true } = {}) {
@@ -3918,6 +3964,11 @@ function wireEvents() {
       showBars(false);
     }
   });
+  els.menuTwoFingerPan?.addEventListener('click', toggleTwoFingerPan);
+  els.btnZoomPanMode?.addEventListener('click', () => {
+    toggleTwoFingerPan();
+    els.btnZoomPanMode.blur();
+  });
 
   if (els.soundPresetPills) {
     els.soundPresetPills.querySelectorAll('.sound-pill').forEach((btn) => {
@@ -4261,8 +4312,9 @@ function wireEvents() {
     if (panDownPos && Math.hypot(e.clientX - panDownPos.x, e.clientY - panDownPos.y) > 4) {
       state.panMoved = true;
     }
-    state.panX = e.clientX - state.panStart.x;
-    state.panY = e.clientY - state.panStart.y;
+    const clamped = clampZoomPan(e.clientX - state.panStart.x, e.clientY - state.panStart.y);
+    state.panX = clamped.x;
+    state.panY = clamped.y;
     applyZoomTransform(false);
   });
   window.addEventListener('mouseup', (e) => {
@@ -4284,7 +4336,7 @@ function wireEvents() {
     }
   });
 
-  // Trackpad pinch / Ctrl+Wheel zoom anchored at cursor
+  // Trackpad two-finger drag pan + pinch/Ctrl+Wheel zoom anchored at cursor
   els.stage.addEventListener('wheel', (e) => {
     if (!state.pdfDoc) return;
     if (e.ctrlKey || e.metaKey) {
@@ -4293,8 +4345,48 @@ function wireEvents() {
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
       const nextZoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.003), 1, 3.5);
       setZoom(nextZoom, false, { clientX: e.clientX, clientY: e.clientY });
+      return;
+    }
+    if (state.twoFingerPan && state.zoom > 1.01 && state.scrollMode === 'flip') {
+      if (e.target.closest('#sideDrawer, #thumbnailsStrip, #moreMenu, #libraryModal')) return;
+      e.preventDefault();
+      const unit = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? Math.max(240, els.stage.clientHeight * 0.85) : 1;
+      const dx = (e.deltaX || 0) * unit;
+      const dy = (e.deltaY || 0) * unit;
+      if (dx || dy) {
+        panZoomBy(-dx, -dy);
+      }
     }
   }, { passive: false });
+
+  // Touchscreen two-finger drag pan when zoomed in Book Flip mode
+  let touchPanMid = null;
+  els.zoomViewport.addEventListener('touchstart', (e) => {
+    if (!state.twoFingerPan || state.zoom <= 1.01 || state.scrollMode !== 'flip') return;
+    if (e.touches.length === 2) {
+      touchPanMid = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+    } else {
+      touchPanMid = null;
+    }
+  }, { passive: true });
+  els.zoomViewport.addEventListener('touchmove', (e) => {
+    if (!state.twoFingerPan || state.zoom <= 1.01 || state.scrollMode !== 'flip') return;
+    if (e.touches.length === 2) {
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      if (touchPanMid) {
+        e.preventDefault();
+        panZoomBy(mx - touchPanMid.x, my - touchPanMid.y);
+      }
+      touchPanMid = { x: mx, y: my };
+    }
+  }, { passive: false });
+  els.zoomViewport.addEventListener('touchend', () => {
+    touchPanMid = null;
+  }, { passive: true });
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {

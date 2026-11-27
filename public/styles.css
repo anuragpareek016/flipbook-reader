@@ -193,6 +193,11 @@ body.header-hidden .top-bar-right {
   background: rgba(255, 255, 255, 0.14);
 }
 
+.zoom-pill button.zoom-pill-toggle.active {
+  background: rgba(138, 180, 248, 0.28);
+  color: #ffffff;
+}
+
 /* Main Stage */
 .stage {
   position: relative;
