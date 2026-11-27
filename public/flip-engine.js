@@ -583,6 +583,10 @@ export class FlipBookEngine {
     if (this.interactiveFlip && this.interactiveFlip.side === chosenSide) {
       // Grabbed already-curled hover/fallback corner cleanly without sudden angle jump
       this.interactiveFlip.mode = 'drag';
+      this.interactiveFlip.wasDragged = true;
+      this.interactiveFlip.downMask?.classList.remove('is-hover-curl');
+      this.interactiveFlip.upMask?.classList.remove('is-hover-curl');
+      this.interactiveFlip.hardCard?.classList.remove('is-hover-curl');
       this.interactiveFlip.grabStartPos = { ...bp };
       this.interactiveFlip.lastClientX = e.clientX;
       this.interactiveFlip.lastClientY = e.clientY;
@@ -597,6 +601,7 @@ export class FlipBookEngine {
       const coordAsBook = this.single ? { ...this.interactiveFlip.coord } : { x: this.interactiveFlip.coord.x + this.pageW, y: this.interactiveFlip.coord.y };
       this.interactiveFlip.coord = this._clampDragTarget(coordAsBook, this.interactiveFlip.from, chosenSide);
       this._setState('user_fold');
+      this._emit('activeFlipsChange');
     } else {
       if (this.interactiveFlip) this._cancelInteractiveFlipImmediate();
       this._beginInteractiveTurn(chosenSide, bp, 'drag', { x: e.clientX, y: e.clientY });
@@ -1096,6 +1101,11 @@ export class FlipBookEngine {
       toHasSpine,
       singlePrev,
     });
+    if (mode === 'hover') {
+      dom.downMask?.classList.add('is-hover-curl');
+      dom.upMask?.classList.add('is-hover-curl');
+      dom.hardCard?.classList.add('is-hover-curl');
+    }
 
     if (this.single || side === 'right') this.rightSlot.style.visibility = 'hidden';
     else this.leftSlot.style.visibility = 'hidden';
@@ -1109,6 +1119,7 @@ export class FlipBookEngine {
       prevSpread,
       nextSpread,
       mode,
+      wasDragged: mode === 'drag',
       stackBackedPrev,
       grabStartPos,
       lastClientX: clientPos?.x ?? 0,
@@ -1194,13 +1205,15 @@ export class FlipBookEngine {
     const pageTranX = -dCenter - centerX;
     const distCenter = pageTranX + centerX;
 
-    const maskTx = `translate3d(${maskTranX}px, ${maskTranY}px, 0px) rotate(${deg}deg)`;
+    const fmtPx = (v) => (Math.abs(v) < 0.005 ? 0 : +v.toFixed(2));
+    const fmtDeg = (v) => (Math.abs(v) < 0.0005 ? 0 : +v.toFixed(3));
+    const maskTx = `translate3d(${fmtPx(maskTranX)}px, ${fmtPx(maskTranY)}px, 0px) rotate(${fmtDeg(deg)}deg)`;
     f.downMask.style.transform = maskTx;
     f.castMask.style.transform = maskTx;
-    const downSideTx = `translate3d(${-pageTranX}px, 0px, 0px) rotate(${-deg}deg)`;
+    const downSideTx = `translate3d(${fmtPx(-pageTranX)}px, 0px, 0px) rotate(${fmtDeg(-deg)}deg)`;
     f.downSide.style.transform = downSideTx;
     if (f.downTabs) f.downTabs.style.transform = downSideTx;
-    f.frontHighlight.style.transform = `rotate(${deg}deg) translate3d(${distCenter}px, 0px, 0px)`;
+    f.frontHighlight.style.transform = `rotate(${fmtDeg(deg)}deg) translate3d(${fmtPx(distCenter)}px, 0px, 0px)`;
 
     const appear = t < 0.06 ? t / 0.06 : 1;
     const settleFade = t > 0.84 ? clamp((1 - t) / 0.16, 0, 1) : 1;
@@ -1258,14 +1271,22 @@ export class FlipBookEngine {
     const g = computeFoldGeometry(this.pageW, this.pageH, this.maskSize, f.from, coord);
     const distCenter = g.pageTranX + this.pageW / 2;
 
-    const maskTx = `translate3d(${g.maskTranX}px, ${g.maskTranY}px, 0px) rotate(${g.rotate}deg)`;
+    const fmtPx = (v) => (Math.abs(v) < 0.005 ? 0 : +v.toFixed(2));
+    const fmtDeg = (v) => (Math.abs(v) < 0.0005 ? 0 : +v.toFixed(3));
+    const mTx = fmtPx(g.maskTranX);
+    const mTy = fmtPx(g.maskTranY);
+    const rDeg = fmtDeg(g.rotate);
+    const pTx = fmtPx(g.pageTranX);
+    const dCx = fmtPx(distCenter);
+
+    const maskTx = `translate3d(${mTx}px, ${mTy}px, 0px) rotate(${rDeg}deg)`;
     f.downMask.style.transform = maskTx;
     f.upMask.style.transform = maskTx;
     f.castMask.style.transform = maskTx;
     f.flapDropMask.style.transform = maskTx;
 
-    const downSideTx = `translate3d(${-g.pageTranX}px, 0px, 0px) rotate(${-g.rotate}deg)`;
-    const upSideTx = `translate3d(${g.pageTranX}px, 0px, 0px) rotate(${g.rotate}deg)`;
+    const downSideTx = `translate3d(${fmtPx(-g.pageTranX)}px, 0px, 0px) rotate(${fmtDeg(-g.rotate)}deg)`;
+    const upSideTx = `translate3d(${pTx}px, 0px, 0px) rotate(${rDeg}deg)`;
     f.downSide.style.transform = downSideTx;
     if (f.downTabs) f.downTabs.style.transform = downSideTx;
     f.upSide.style.transform = upSideTx;
@@ -1273,8 +1294,8 @@ export class FlipBookEngine {
     f.flapCaster.style.transform = upSideTx;
 
     // Align cylindrical curl highlight & trough strictly parallel to the diagonal fold crease
-    f.frontHighlight.style.transform = `rotate(${g.rotate}deg) translate3d(${distCenter}px, 0px, 0px)`;
-    f.backShade.style.transform = `rotate(${-g.rotate}deg) translate3d(${-distCenter}px, 0px, 0px)`;
+    f.frontHighlight.style.transform = `rotate(${rDeg}deg) translate3d(${dCx}px, 0px, 0px)`;
+    f.backShade.style.transform = `rotate(${fmtDeg(-g.rotate)}deg) translate3d(${fmtPx(-distCenter)}px, 0px, 0px)`;
 
     // Dynamic curl shadow envelope (FlipHTML5 PageHighlightsFlipShadow profile)
     const rate = g.shadowRate;

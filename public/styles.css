@@ -3034,7 +3034,6 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
   z-index: 4;
   pointer-events: none;
   overflow: visible;
-  transition: left 0.34s cubic-bezier(0.22, 1, 0.36, 1), right 0.34s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .book-edge-tabs-left {
@@ -3050,25 +3049,33 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
   background: transparent;
   pointer-events: none;
   z-index: 6;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.is-hover-curl .fh-side-tabs,
+.fh-hard-card.is-hover-curl .sticky-edge-tab {
+  display: none;
 }
 
 .sticky-edge-tab {
-  --tab-bg: #f5c142;
-  --tab-bg-deep: #dfa520;
-  --tab-border: rgba(255, 248, 220, 0.72);
-  --tab-ink: #2b1e04;
-  --tab-shadow: rgba(0, 0, 0, 0.36);
+  --tab-bg: #efcb68;
+  --tab-bg-deep: #d7ae42;
+  --tab-ink: #2c1f04;
+  --tab-shadow: rgba(0, 0, 0, 0.32);
+  --tab-nudge: 0px;
 
   position: absolute;
   top: var(--tab-top, 18%);
-  transform: translateY(-50%);
   pointer-events: auto;
   cursor: pointer;
-  height: 28px;
+  height: 27px;
   min-width: 44px;
-  max-width: calc(var(--tab-stack-span, 0px) + 98px);
+  max-width: 102px;
   padding: 0 10px 0 8px;
-  border: 1px solid var(--tab-border);
+  border: none;
+  outline: none;
   color: var(--tab-ink);
   font-size: 11px;
   font-weight: 700;
@@ -3079,67 +3086,104 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   transition:
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.16s ease,
-    box-shadow 0.2s ease,
-    left 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    right 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    padding 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    max-width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.22s ease;
 }
 
-.sticky-edge-tab.tab-coral  { --tab-bg: #f67c70; --tab-bg-deep: #dc584c; --tab-border: rgba(255, 224, 220, 0.72); --tab-ink: #2a0c09; }
-.sticky-edge-tab.tab-amber  { --tab-bg: #f7c952; --tab-bg-deep: #dd9f1f; --tab-border: rgba(255, 248, 214, 0.78); --tab-ink: #2b1d03; }
-.sticky-edge-tab.tab-mint   { --tab-bg: #58d39c; --tab-bg-deep: #32ab75; --tab-border: rgba(220, 255, 238, 0.72); --tab-ink: #072316; }
-.sticky-edge-tab.tab-sky    { --tab-bg: #6cb8fa; --tab-bg-deep: #3f91de; --tab-border: rgba(225, 244, 255, 0.75); --tab-ink: #081e36; }
-.sticky-edge-tab.tab-violet { --tab-bg: #b39bf9; --tab-bg-deep: #8b6fe0; --tab-border: rgba(242, 235, 255, 0.74); --tab-ink: #1a0d38; }
+.sticky-edge-tab.tab-coral  { --tab-bg: #eb7d71; --tab-bg-deep: #d46559; --tab-ink: #2b0f0b; }
+.sticky-edge-tab.tab-amber  { --tab-bg: #efcb68; --tab-bg-deep: #d7ae42; --tab-ink: #2c1f04; }
+.sticky-edge-tab.tab-mint   { --tab-bg: #6ed2a4; --tab-bg-deep: #4db485; --tab-ink: #082518; }
+.sticky-edge-tab.tab-sky    { --tab-bg: #79bbf2; --tab-bg-deep: #5397d4; --tab-ink: #091f36; }
+.sticky-edge-tab.tab-violet { --tab-bg: #b49ef2; --tab-bg-deep: #9077d8; --tab-ink: #1c1039; }
+
+.sticky-tab-tail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  opacity: 0.88;
+  transition: width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
 
 .book-edge-tabs-right .sticky-edge-tab,
 .sticky-edge-tab.tab-side-right {
-  left: calc(var(--tab-depth, 0px) - 3px);
-  padding: 0 11px 0 calc(var(--tab-stack-span, 0px) + 9px);
-  border-radius: 0 6px 6px 0;
-  border-left: none;
+  left: -4px;
+  padding: 0 11px 0 8px;
+  border-radius: 0 3.5px 3.5px 0;
   transform-origin: left center;
+  transform: translate3d(calc(var(--tab-x, 0px) + var(--tab-nudge, 0px)), -50%, 0);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.05) 48%, rgba(0, 0, 0, 0.08) 100%),
-    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) 16px, var(--tab-bg) 100%);
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.024) 0px,
+      rgba(0, 0, 0, 0.018) 2px,
+      transparent 4px
+    ),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
+    linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) 12px, var(--tab-bg) 100%);
   box-shadow:
-    inset 4px 0 6px -2px rgba(0, 0, 0, 0.44),
-    -1px 0 1px rgba(0, 0, 0, 0.24),
-    inset -1px 1px 0 rgba(255, 255, 255, 0.42),
-    2px 4px 10px var(--tab-shadow);
+    inset 3px 0 5px -2px rgba(0, 0, 0, 0.24),
+    2px 3px 8px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.book-edge-tabs-right .sticky-tab-tail {
+  right: calc(100% - 1px);
+  width: calc(var(--tab-tail, 0px) + var(--tab-nudge, 0px) + 1px);
+  border-radius: 1px 0 0 1px;
+  background:
+    linear-gradient(178deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.08) 100%),
+    var(--tab-bg-deep);
+  box-shadow: inset 2px 0 3px -1px rgba(0, 0, 0, 0.30);
 }
 
 .sticky-edge-tab.tab-side-right {
   left: calc(100% - 4px);
   right: auto;
-  padding: 0 11px 0 9px;
+  transform: translate3d(0, -50%, 0);
 }
 
 .book-edge-tabs-left .sticky-edge-tab,
 .sticky-edge-tab.tab-side-left {
-  right: calc(var(--tab-depth, 0px) - 3px);
-  padding: 0 calc(var(--tab-stack-span, 0px) + 9px) 0 11px;
-  border-radius: 6px 0 0 6px;
-  border-right: none;
+  right: -4px;
+  padding: 0 8px 0 11px;
+  border-radius: 3.5px 0 0 3.5px;
   transform-origin: right center;
+  transform: translate3d(calc(-1 * (var(--tab-x, 0px) + var(--tab-nudge, 0px))), -50%, 0);
   flex-direction: row-reverse;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.05) 48%, rgba(0, 0, 0, 0.08) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 16px, var(--tab-bg) 100%);
+    repeating-linear-gradient(
+      270deg,
+      rgba(255, 255, 255, 0.024) 0px,
+      rgba(0, 0, 0, 0.018) 2px,
+      transparent 4px
+    ),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 12px, var(--tab-bg) 100%);
   box-shadow:
-    inset -4px 0 6px -2px rgba(0, 0, 0, 0.44),
-    1px 0 1px rgba(0, 0, 0, 0.24),
-    inset 1px 1px 0 rgba(255, 255, 255, 0.42),
-    -2px 4px 10px var(--tab-shadow);
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.24),
+    -2px 3px 8px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.book-edge-tabs-left .sticky-tab-tail {
+  left: calc(100% - 1px);
+  width: calc(var(--tab-tail, 0px) + var(--tab-nudge, 0px) + 1px);
+  border-radius: 0 1px 1px 0;
+  background:
+    linear-gradient(178deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.08) 100%),
+    var(--tab-bg-deep);
+  box-shadow: inset -2px 0 3px -1px rgba(0, 0, 0, 0.30);
 }
 
 .sticky-edge-tab.tab-side-left {
   right: calc(100% - 4px);
   left: auto;
-  padding: 0 9px 0 11px;
+  transform: translate3d(0, -50%, 0);
 }
 
 .fh-side-tabs .sticky-edge-tab,
@@ -3147,30 +3191,29 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
 .scs-flying-card .sticky-edge-tab {
   pointer-events: none;
   transition: none;
+  will-change: auto;
 }
 
 .book-edge-tabs-right .sticky-edge-tab.is-current {
-  left: -5px;
-  padding: 0 11px 0 calc(var(--tab-stack-span, 0px) + 11px);
-  transform: translateY(-50%) translateX(3px);
+  --tab-nudge: 4px;
   box-shadow:
-    inset 4px 0 5px -2px rgba(0, 0, 0, 0.22),
-    inset -1px 1px 0 rgba(255, 255, 255, 0.62),
-    0 0 0 1.5px rgba(255, 255, 255, 0.78),
-    3px 5px 14px rgba(0, 0, 0, 0.46);
+    inset 3px 0 5px -2px rgba(0, 0, 0, 0.16),
+    3px 5px 12px rgba(0, 0, 0, 0.40),
+    0 1px 3px rgba(0, 0, 0, 0.22);
   z-index: 250;
 }
 
 .book-edge-tabs-left .sticky-edge-tab.is-current {
-  right: -5px;
-  padding: 0 calc(var(--tab-stack-span, 0px) + 11px) 0 11px;
-  transform: translateY(-50%) translateX(-3px);
+  --tab-nudge: 4px;
   box-shadow:
-    inset -4px 0 5px -2px rgba(0, 0, 0, 0.22),
-    inset 1px 1px 0 rgba(255, 255, 255, 0.62),
-    0 0 0 1.5px rgba(255, 255, 255, 0.78),
-    -3px 5px 14px rgba(0, 0, 0, 0.46);
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.16),
+    -3px 5px 12px rgba(0, 0, 0, 0.40),
+    0 1px 3px rgba(0, 0, 0, 0.22);
   z-index: 250;
+}
+
+.sticky-edge-tab.is-current .sticky-tab-dot {
+  opacity: 0.78;
 }
 
 .sticky-tab-text {
@@ -3180,24 +3223,30 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
 }
 
 .sticky-tab-dot {
-  width: 5px;
-  height: 5px;
+  width: 4.5px;
+  height: 4.5px;
   border-radius: 50%;
   background: currentColor;
-  opacity: 0.48;
+  opacity: 0.44;
   flex-shrink: 0;
 }
 
-.book-edge-tabs-right .sticky-edge-tab:hover {
-  transform: translateY(-50%) translateX(5px) scale(1.03);
-  filter: brightness(1.04);
+.book-edge-tabs-right .sticky-edge-tab:hover,
+.book-edge-tabs-left .sticky-edge-tab:hover {
+  --tab-nudge: 7px;
   z-index: 260 !important;
 }
 
+.book-edge-tabs-right .sticky-edge-tab:hover {
+  box-shadow:
+    inset 3px 0 5px -2px rgba(0, 0, 0, 0.14),
+    4px 6px 14px rgba(0, 0, 0, 0.42);
+}
+
 .book-edge-tabs-left .sticky-edge-tab:hover {
-  transform: translateY(-50%) translateX(-5px) scale(1.03);
-  filter: brightness(1.04);
-  z-index: 260 !important;
+  box-shadow:
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.14),
+    -4px 6px 14px rgba(0, 0, 0, 0.42);
 }
 
 /* Scroll Mode Right Quick-Jump Rail for Sticky Tabs */
@@ -3218,23 +3267,27 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
 
 .scroll-tabs-rail .sticky-edge-tab {
   position: static;
-  transform: none;
-  border-radius: 6px 0 0 6px;
-  border-right: none;
-  padding: 0 10px 0 10px;
-  box-shadow: -2px 4px 12px rgba(0, 0, 0, 0.42), inset 1px 1px 0 rgba(255, 255, 255, 0.4);
+  transform: translate3d(0, 0, 0);
+  border-radius: 3.5px 0 0 3.5px;
+  border: none;
+  padding: 0 10px 0 9px;
+  box-shadow:
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.22),
+    -2px 3px 10px rgba(0, 0, 0, 0.36);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0.04) 48%, rgba(0, 0, 0, 0.08) 100%),
-    var(--tab-bg);
+    linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 12px, var(--tab-bg) 100%);
 }
 
 .scroll-tabs-rail .sticky-edge-tab:hover {
-  transform: translateX(-4px) scale(1.03);
+  transform: translate3d(-4px, 0, 0);
 }
 
 .scroll-tabs-rail .sticky-edge-tab.is-current {
-  transform: translateX(-4px);
-  box-shadow: -3px 5px 14px rgba(0, 0, 0, 0.48), 0 0 0 1.5px rgba(255, 255, 255, 0.82);
+  transform: translate3d(-5px, 0, 0);
+  box-shadow:
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.16),
+    -4px 5px 14px rgba(0, 0, 0, 0.46);
 }
 
 /* Sticky Tab Popover Editor */
@@ -3344,11 +3397,11 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
   transition: transform 0.14s ease, border-color 0.14s ease;
 }
 
-.sticky-color-dot.color-coral  { background: #f67c70; }
-.sticky-color-dot.color-amber  { background: #f7c952; }
-.sticky-color-dot.color-mint   { background: #58d39c; }
-.sticky-color-dot.color-sky    { background: #6cb8fa; }
-.sticky-color-dot.color-violet { background: #b39bf9; }
+.sticky-color-dot.color-coral  { background: #eb7d71; }
+.sticky-color-dot.color-amber  { background: #efcb68; }
+.sticky-color-dot.color-mint   { background: #6ed2a4; }
+.sticky-color-dot.color-sky    { background: #79bbf2; }
+.sticky-color-dot.color-violet { background: #b49ef2; }
 
 .sticky-color-dot:hover {
   transform: scale(1.1);

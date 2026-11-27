@@ -2322,7 +2322,7 @@ function getTurningTabPages() {
   const pf = state.pageFlip;
   if (pf) {
     const flips = [
-      ...(pf.interactiveFlip ? [pf.interactiveFlip] : []),
+      ...(pf.interactiveFlip && pf.interactiveFlip.mode !== 'hover' && pf.interactiveFlip.wasDragged ? [pf.interactiveFlip] : []),
       ...(Array.isArray(pf.flyingFlips) ? pf.flyingFlips : []),
     ];
     for (const f of flips) {
@@ -2374,33 +2374,112 @@ function renderTurningSheetTabs({ isHard, singlePrev, side, fromIdx, toIdx, down
   }
 }
 
-function createStickyEdgeTabElement(tab, topPct, isCurrent, { depthPx = 0, stackSpan = 0, zIndex = null } = {}) {
+function updateStickyEdgeTabElement(btn, tab, topPct, isCurrent, { stackOutPx = 0, stackSpan = 0, zIndex = null, withTail = true } = {}) {
+  const nextClass = `sticky-edge-tab tab-${tab.color}${isCurrent ? ' is-current' : ''}`;
+  if (btn.className !== nextClass) btn.className = nextClass;
+
+  const nextTop = `${topPct.toFixed(2)}%`;
+  if (btn.style.getPropertyValue('--tab-top') !== nextTop) {
+    btn.style.setProperty('--tab-top', nextTop);
+  }
+  const nextX = `${stackOutPx}px`;
+  if (btn.style.getPropertyValue('--tab-x') !== nextX) {
+    btn.style.setProperty('--tab-x', nextX);
+  }
+  const nextTail = `${stackSpan}px`;
+  if (btn.style.getPropertyValue('--tab-tail') !== nextTail) {
+    btn.style.setProperty('--tab-tail', nextTail);
+  }
+
+  const nextZ = zIndex !== null ? String(zIndex) : '';
+  if (btn.style.zIndex !== nextZ) btn.style.zIndex = nextZ;
+
+  const pageStr = String(tab.page);
+  if (btn.dataset.page !== pageStr) btn.dataset.page = pageStr;
+
+  const nextTitle = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
+  if (btn.title !== nextTitle) btn.title = nextTitle;
+
+  const tailEl = btn.querySelector('.sticky-tab-tail');
+  if (tailEl) tailEl.hidden = !withTail;
+  const textEl = btn.querySelector('.sticky-tab-text');
+  if (textEl && textEl.textContent !== tab.label) textEl.textContent = tab.label;
+}
+
+function createStickyEdgeTabElement(tab, topPct, isCurrent, opts = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = `sticky-edge-tab tab-${tab.color}${isCurrent ? ' is-current' : ''}`;
-  btn.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
-  btn.style.setProperty('--tab-depth', `${depthPx}px`);
-  btn.style.setProperty('--tab-stack-span', `${stackSpan}px`);
-  if (zIndex !== null) btn.style.zIndex = String(zIndex);
-  btn.dataset.page = String(tab.page);
-  btn.title = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
-  btn.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
+  btn.dataset.tabKey = String(tab.page);
+  btn.innerHTML = `<span class="sticky-tab-tail" aria-hidden="true"></span><span class="sticky-tab-dot"></span><span class="sticky-tab-text"></span>`;
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    jumpToPage(tab.page, false, { reason: 'sticky-tab' });
+    const p = Number(btn.dataset.page);
+    if (Number.isInteger(p)) jumpToPage(p, false, { reason: 'sticky-tab' });
   });
   btn.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    openStickyTabPopover(tab.page, { x: e.clientX, y: e.clientY });
+    const p = Number(btn.dataset.page);
+    if (Number.isInteger(p)) openStickyTabPopover(p, { x: e.clientX, y: e.clientY });
   });
+  updateStickyEdgeTabElement(btn, tab, topPct, isCurrent, opts);
   return btn;
+}
+
+function reconcileEdgeTabContainer(containerEl, entries, posMap, visible1Based, stackThick, isRightSide) {
+  if (!containerEl) return;
+  const existing = new Map();
+  for (const child of Array.from(containerEl.children)) {
+    const k = child.dataset?.tabKey;
+    if (k) existing.set(k, child);
+  }
+  const keepKeys = new Set(entries.map((e) => String(e.page)));
+  for (const [k, child] of existing) {
+    if (!keepKeys.has(k)) {
+      child.remove();
+      existing.delete(k);
+    }
+  }
+
+  const ordered = [];
+  for (let rank = 0; rank < entries.length; rank++) {
+    const tab = entries[rank];
+    const key = String(tab.page);
+    const isCur = visible1Based.has(tab.page);
+    const ratio = isRightSide
+      ? (isCur || state.totalPages <= tab.curLast ? 0 : clamp((tab.page - tab.curLast) / Math.max(1, state.totalPages - tab.curLast), 0, 1))
+      : (isCur || tab.curFirst <= 1 ? 0 : clamp((tab.curFirst - tab.page) / Math.max(1, tab.curFirst - 1), 0, 1));
+    const depthPx = Math.round(ratio * stackThick);
+    const stackSpan = Math.max(0, stackThick - depthPx);
+    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
+    const opts = {
+      stackOutPx: stackThick,
+      stackSpan,
+      zIndex,
+      withTail: true,
+    };
+
+    let btn = existing.get(key);
+    if (btn) {
+      updateStickyEdgeTabElement(btn, tab, posMap.get(tab.page) ?? 20, isCur, opts);
+    } else {
+      btn = createStickyEdgeTabElement(tab, posMap.get(tab.page) ?? 20, isCur, opts);
+    }
+    ordered.push(btn);
+  }
+
+  // Reorder or append only when actual DOM sequence differs so resting tabs stay undisturbed
+  for (let i = 0; i < ordered.length; i++) {
+    const desired = ordered[i];
+    const currentAtIdx = containerEl.children[i];
+    if (currentAtIdx !== desired) {
+      containerEl.insertBefore(desired, currentAtIdx || null);
+    }
+  }
 }
 
 function renderBookEdgeTabs() {
   if (!els.bookEdgeTabsLeft || !els.bookEdgeTabsRight) return;
-  els.bookEdgeTabsLeft.innerHTML = '';
-  els.bookEdgeTabsRight.innerHTML = '';
 
   const tabs = [...state.stickyTabs].sort((a, b) => a.page - b.page);
   const posMap = computeGlobalTabPositionsMap(tabs);
@@ -2408,11 +2487,15 @@ function renderBookEdgeTabs() {
   const visible1Based = new Set(visible.map((i) => i + 1));
 
   if (state.scrollMode === 'scroll') {
+    els.bookEdgeTabsLeft.innerHTML = '';
+    els.bookEdgeTabsRight.innerHTML = '';
     if (els.scrollTabsRail) {
       els.scrollTabsRail.innerHTML = '';
       els.scrollTabsRail.hidden = tabs.length === 0 || !state.pdfDoc;
       for (const tab of tabs) {
-        els.scrollTabsRail.appendChild(createStickyEdgeTabElement(tab, 50, visible1Based.has(tab.page)));
+        els.scrollTabsRail.appendChild(
+          createStickyEdgeTabElement(tab, 50, visible1Based.has(tab.page), { withTail: false })
+        );
       }
     }
     return;
@@ -2422,7 +2505,11 @@ function renderBookEdgeTabs() {
     els.scrollTabsRail.innerHTML = '';
     els.scrollTabsRail.hidden = true;
   }
-  if (!state.pdfDoc || !tabs.length) return;
+  if (!state.pdfDoc || !tabs.length) {
+    els.bookEdgeTabsLeft.innerHTML = '';
+    els.bookEdgeTabsRight.innerHTML = '';
+    return;
+  }
 
   const turningPages = getTurningTabPages();
   const single = isEffectiveSingleMode() || state.orientation === 'portrait';
@@ -2442,33 +2529,15 @@ function renderBookEdgeTabs() {
     rightTabs = tabs.filter((t) => !turningPages.has(t.page) && t.page > leftCutoff);
   }
 
-  // Left stack: descending page order so closer-to-surface pages sit visually higher (z-index)
   const leftThick = state.leftStackThick || 0;
-  [...leftTabs].sort((a, b) => b.page - a.page).forEach((tab, rank) => {
-    const isCur = visible1Based.has(tab.page);
-    const ratio = isCur || curFirst <= 1 ? 0 : clamp((curFirst - tab.page) / Math.max(1, curFirst - 1), 0, 1);
-    const depthPx = Math.round(ratio * leftThick);
-    const stackSpan = Math.max(0, leftThick - depthPx);
-    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
-    els.bookEdgeTabsLeft.appendChild(
-      createStickyEdgeTabElement(tab, posMap.get(tab.page) ?? 20, isCur, { depthPx, stackSpan, zIndex })
-    );
-  });
-
-  // Right stack: ascending page order so shallower pages sit closer to open page (depth = 0 -> outward)
   const rightThick = state.rightStackThick || 0;
-  [...rightTabs].sort((a, b) => a.page - b.page).forEach((tab, rank) => {
-    const isCur = visible1Based.has(tab.page);
-    const ratio = isCur || state.totalPages <= curLast
-      ? 0
-      : clamp((tab.page - curLast) / Math.max(1, state.totalPages - curLast), 0, 1);
-    const depthPx = Math.round(ratio * rightThick);
-    const stackSpan = Math.max(0, rightThick - depthPx);
-    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
-    els.bookEdgeTabsRight.appendChild(
-      createStickyEdgeTabElement(tab, posMap.get(tab.page) ?? 20, isCur, { depthPx, stackSpan, zIndex })
-    );
-  });
+
+  // Left stack: descending page order; Right stack: ascending page order (closer-to-open pages above)
+  const leftSorted = [...leftTabs].sort((a, b) => b.page - a.page).map((t) => ({ ...t, curFirst, curLast }));
+  const rightSorted = [...rightTabs].sort((a, b) => a.page - b.page).map((t) => ({ ...t, curFirst, curLast }));
+
+  reconcileEdgeTabContainer(els.bookEdgeTabsLeft, leftSorted, posMap, visible1Based, leftThick, false);
+  reconcileEdgeTabContainer(els.bookEdgeTabsRight, rightSorted, posMap, visible1Based, rightThick, true);
 }
 
 function syncStickyPopoverPageFields(targetPage) {
