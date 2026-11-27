@@ -7,6 +7,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs
 const MAX_CACHED_CANVASES = 18;
 const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 const STICKY_TAB_COLORS = ['coral', 'amber', 'mint', 'sky', 'violet'];
+const PAPER_GRAIN_STYLES = ['cotton', 'linen', 'parchment', 'kraft'];
+const PAPER_GRAIN_SCALES = { fine: 110, medium: 160, coarse: 235 };
 
 const els = {
   app: document.getElementById('app'),
@@ -153,6 +155,13 @@ const els = {
   btnPaperWarmInc: document.getElementById('btnPaperWarmInc'),
   paperWarmthPresets: document.getElementById('paperWarmthPresets'),
   menuPaperGrain: document.getElementById('menuPaperGrain'),
+  valPaperGrain: document.getElementById('valPaperGrain'),
+  paperFiberControls: document.getElementById('paperFiberControls'),
+  btnPaperGrainDec: document.getElementById('btnPaperGrainDec'),
+  paperGrainRange: document.getElementById('paperGrainRange'),
+  btnPaperGrainInc: document.getElementById('btnPaperGrainInc'),
+  paperGrainStylePills: document.getElementById('paperGrainStylePills'),
+  paperGrainScalePills: document.getElementById('paperGrainScalePills'),
   highlightsSummary: document.getElementById('highlightsSummary'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
   btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
@@ -206,6 +215,9 @@ const state = {
   readDark: false,
   paperWarmth: 0, // 0..100 sepia/warmth eye-comfort slider
   paperGrain: false, // subtle cellulose fiber paper texture
+  paperGrainStrength: 50, // 10..100 texture intensity %
+  paperGrainStyle: 'cotton', // 'cotton' | 'linen' | 'parchment' | 'kraft'
+  paperGrainScale: 'medium', // 'fine' | 'medium' | 'coarse'
   autoHideBars: true,
   soundEnabled: true,
   soundPreset: DEFAULT_SOUND_PRESET,
@@ -372,6 +384,15 @@ function applySavedSettings(settings) {
   if (Number.isFinite(Number(settings.paperWarmth))) {
     setPaperWarmth(Number(settings.paperWarmth), false);
   }
+  if (Number.isFinite(Number(settings.paperGrainStrength))) {
+    state.paperGrainStrength = clamp(Math.round(Number(settings.paperGrainStrength)), 10, 100);
+  }
+  if (PAPER_GRAIN_STYLES.includes(settings.paperGrainStyle)) {
+    state.paperGrainStyle = settings.paperGrainStyle;
+  }
+  if (settings.paperGrainScale && PAPER_GRAIN_SCALES[settings.paperGrainScale]) {
+    state.paperGrainScale = settings.paperGrainScale;
+  }
   if (typeof settings.paperGrain === 'boolean') {
     setPaperGrain(settings.paperGrain, false);
   }
@@ -424,6 +445,9 @@ function schedulePersistState() {
         readDark: state.readDark,
         paperWarmth: state.paperWarmth,
         paperGrain: state.paperGrain,
+        paperGrainStrength: state.paperGrainStrength,
+        paperGrainStyle: state.paperGrainStyle,
+        paperGrainScale: state.paperGrainScale,
         autoHideBars: state.autoHideBars,
         twoFingerPan: state.twoFingerPan,
         scrollMode: state.scrollMode,
@@ -4247,8 +4271,7 @@ const PAPER_REVERSE_STOPS = [
   [100, 214, 193, 154],
 ];
 
-let paperGrainCanvas = null;
-let paperGrainPattern = null;
+const paperGrainTileCache = new Map(); // style -> { canvas, url, pattern }
 
 function interpolatePaperRgb(stops, val) {
   const v = clamp(Number(val) || 0, 0, 100);
@@ -4271,72 +4294,146 @@ function getPaperSurfaceColor(reverseBack = false) {
   return interpolatePaperRgb(reverseBack ? PAPER_REVERSE_STOPS : PAPER_WARM_STOPS, state.paperWarmth);
 }
 
-function initPaperGrainTexture() {
-  if (paperGrainCanvas) return paperGrainCanvas;
+function createPrng(seedInit) {
+  let seed = seedInit >>> 0;
+  return () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+}
+
+function strokeWrappedLine(gctx, size, x1, y1, x2, y2) {
+  for (const ox of [-size, 0, size]) {
+    for (const oy of [-size, 0, size]) {
+      gctx.beginPath();
+      gctx.moveTo(x1 + ox, y1 + oy);
+      gctx.lineTo(x2 + ox, y2 + oy);
+      gctx.stroke();
+    }
+  }
+}
+
+function buildPaperGrainTile(styleKey) {
+  const style = PAPER_GRAIN_STYLES.includes(styleKey) ? styleKey : 'cotton';
+  if (paperGrainTileCache.has(style)) return paperGrainTileCache.get(style);
+
   const size = 160;
   const c = document.createElement('canvas');
   c.width = size;
   c.height = size;
   const gctx = c.getContext('2d');
-  gctx.fillStyle = '#ffffff';
-  gctx.fillRect(0, 0, size, size);
+  const rand = createPrng(
+    style === 'linen' ? 0x2c1b4715 : style === 'parchment' ? 0x7f4a7c15 : style === 'kraft' ? 0x9e3779b9 : 0x517cc1b7
+  );
 
-  // Deterministic PRNG for organic matte cellulose specks & short cross-fibers
-  let seed = 0x517cc1b7;
-  const rand = () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-
-  const img = gctx.getImageData(0, 0, size, size);
+  const img = gctx.createImageData(size, size);
   const data = img.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const tone = 244 + Math.floor(rand() * 12); // 244..255 very fine tooth
-    data[i] = tone;
-    data[i + 1] = tone - Math.floor(rand() * 2);
-    data[i + 2] = tone - Math.floor(rand() * 4);
-    data[i + 3] = 255;
+  const twoPi = Math.PI * 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = (y * size + x) * 4;
+      let tone = 248 + Math.floor(rand() * 8);
+      if (style === 'linen') {
+        const warp = Math.sin((x / 4) * twoPi) * 3.5;
+        const weft = Math.sin((y / 4) * twoPi) * 3.5;
+        const weave = ((Math.floor(x / 2) + Math.floor(y / 2)) % 2 === 0 ? warp : weft);
+        tone = clamp(Math.round(249 + weave + (rand() - 0.5) * 6), 232, 255);
+      } else if (style === 'parchment') {
+        const cloud =
+          Math.sin((x * twoPi) / size + Math.cos((y * twoPi) / size)) * 5.5 +
+          Math.cos((y * twoPi * 2) / size - (x * twoPi) / size) * 4.0 +
+          Math.sin(((x + y) * twoPi * 3) / size) * 2.5;
+        tone = clamp(Math.round(247 + cloud + (rand() - 0.5) * 8), 224, 255);
+      } else if (style === 'kraft') {
+        tone = clamp(Math.round(238 + rand() * 17), 220, 255);
+      } else {
+        tone = 244 + Math.floor(rand() * 12);
+      }
+      data[idx] = tone;
+      data[idx + 1] = clamp(tone - Math.floor(rand() * (style === 'kraft' ? 5 : 2)), 0, 255);
+      data[idx + 2] = clamp(tone - Math.floor(rand() * (style === 'kraft' ? 10 : 4)), 0, 255);
+      data[idx + 3] = 255;
+    }
   }
   gctx.putImageData(img, 0, 0);
 
-  gctx.lineWidth = 0.65;
-  for (let i = 0; i < 165; i++) {
-    const x = rand() * size;
-    const y = rand() * size;
-    const len = 3 + rand() * 8;
-    const ang = rand() * Math.PI * 2;
-    const shade = 212 + Math.floor(rand() * 26);
-    gctx.strokeStyle = `rgba(${shade}, ${shade - 4}, ${shade - 10}, 0.22)`;
-    gctx.beginPath();
-    gctx.moveTo(x, y);
-    gctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
-    gctx.stroke();
+  if (style === 'linen') {
+    gctx.lineWidth = 0.7;
+    for (let y = 0; y < size; y += 5) {
+      gctx.strokeStyle = 'rgba(186, 178, 162, 0.14)';
+      strokeWrappedLine(gctx, size, 0, y, size, y);
+    }
+    for (let x = 0; x < size; x += 5) {
+      gctx.strokeStyle = 'rgba(192, 184, 168, 0.12)';
+      strokeWrappedLine(gctx, size, x, 0, x, size);
+    }
+  } else {
+    const fiberCount = style === 'kraft' ? 270 : style === 'parchment' ? 120 : 175;
+    gctx.lineWidth = style === 'kraft' ? 0.95 : 0.65;
+    for (let i = 0; i < fiberCount; i++) {
+      const x = rand() * size;
+      const y = rand() * size;
+      const len = style === 'kraft' ? 4 + rand() * 12 : 3 + rand() * 8;
+      const ang = rand() * Math.PI * 2;
+      const shade = style === 'kraft' ? 175 + Math.floor(rand() * 44) : 208 + Math.floor(rand() * 28);
+      const alpha = style === 'kraft' ? 0.28 : 0.22;
+      gctx.strokeStyle = `rgba(${shade}, ${shade - 5}, ${shade - 12}, ${alpha})`;
+      strokeWrappedLine(gctx, size, x, y, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    }
+    if (style === 'kraft' || style === 'parchment') {
+      const speckCount = style === 'kraft' ? 120 : 55;
+      for (let i = 0; i < speckCount; i++) {
+        const sx = rand() * size;
+        const sy = rand() * size;
+        const r = style === 'kraft' ? 0.65 + rand() * 0.9 : 0.55 + rand() * 0.7;
+        gctx.fillStyle = style === 'kraft' ? 'rgba(155, 134, 108, 0.25)' : 'rgba(186, 165, 132, 0.18)';
+        gctx.beginPath();
+        gctx.arc(sx, sy, r, 0, Math.PI * 2);
+        gctx.fill();
+      }
+    }
   }
 
-  paperGrainCanvas = c;
+  let url = '';
   try {
-    document.documentElement.style.setProperty('--paper-grain-url', `url("${c.toDataURL('image/png')}")`);
+    url = `url("${c.toDataURL('image/png')}")`;
   } catch {
-    // ignore
+    url = '';
   }
-  return c;
+  const entry = { canvas: c, url, pattern: null };
+  paperGrainTileCache.set(style, entry);
+  return entry;
+}
+
+function initPaperGrainTexture() {
+  const entry = buildPaperGrainTile(state.paperGrainStyle);
+  if (entry.url) {
+    document.documentElement.style.setProperty('--paper-grain-url', entry.url);
+  }
+  return entry.canvas;
 }
 
 function drawMagPaperGrain(ctx, x, y, w, h) {
   if (state.readDark || !state.paperGrain || w <= 0 || h <= 0) return;
-  const tile = initPaperGrainTexture();
-  if (!paperGrainPattern) {
+  const entry = buildPaperGrainTile(state.paperGrainStyle);
+  if (!entry.pattern) {
     try {
-      paperGrainPattern = ctx.createPattern(tile, 'repeat');
+      entry.pattern = ctx.createPattern(entry.canvas, 'repeat');
     } catch {
-      paperGrainPattern = null;
+      entry.pattern = null;
     }
   }
-  if (!paperGrainPattern) return;
+  if (!entry.pattern) return;
+  const tilePx = PAPER_GRAIN_SCALES[state.paperGrainScale] || 160;
+  const scaleMult = tilePx / 160;
+  if (typeof entry.pattern.setTransform === 'function') {
+    entry.pattern.setTransform(new DOMMatrix().scale(scaleMult, scaleMult));
+  }
+  const strengthAlpha = (clamp(state.paperGrainStrength, 10, 100) / 100) * 0.85;
   ctx.save();
   ctx.globalCompositeOperation = 'multiply';
-  ctx.globalAlpha *= 0.42;
-  ctx.fillStyle = paperGrainPattern;
+  ctx.globalAlpha *= strengthAlpha;
+  ctx.fillStyle = entry.pattern;
   ctx.fillRect(x, y, w, h);
   ctx.restore();
 }
@@ -4349,14 +4446,28 @@ function formatPaperWarmthLabel(val) {
   return `Sepia · ${v}%`;
 }
 
+function formatPaperStyleName(style) {
+  if (style === 'linen') return 'Linen';
+  if (style === 'parchment') return 'Parchment';
+  if (style === 'kraft') return 'Kraft';
+  return 'Cotton';
+}
+
 function updatePaperComfortUi() {
   const v = clamp(Math.round(state.paperWarmth), 0, 100);
+  const strength = clamp(Math.round(state.paperGrainStrength), 10, 100);
+  const style = PAPER_GRAIN_STYLES.includes(state.paperGrainStyle) ? state.paperGrainStyle : 'cotton';
+  const scaleKey = PAPER_GRAIN_SCALES[state.paperGrainScale] ? state.paperGrainScale : 'medium';
+  const tilePx = PAPER_GRAIN_SCALES[scaleKey];
+
   const bg = interpolatePaperRgb(PAPER_WARM_STOPS, v);
   const revBg = interpolatePaperRgb(PAPER_REVERSE_STOPS, v);
   const rootStyle = document.documentElement.style;
   rootStyle.setProperty('--paper-bg', bg);
   rootStyle.setProperty('--paper-reverse-bg', revBg);
   rootStyle.setProperty('--paper-warmth', (v / 100).toFixed(2));
+  rootStyle.setProperty('--paper-grain-opacity', ((strength / 100) * 0.85).toFixed(3));
+  rootStyle.setProperty('--paper-grain-size', `${tilePx}px`);
 
   if (state.paperGrain) initPaperGrainTexture();
   document.body.classList.toggle('has-warm-paper', v > 0);
@@ -4373,6 +4484,23 @@ function updatePaperComfortUi() {
     els.menuPaperGrain.classList.toggle('is-on', !!state.paperGrain);
     els.menuPaperGrain.setAttribute('aria-pressed', String(!!state.paperGrain));
   }
+  if (els.valPaperGrain) {
+    els.valPaperGrain.textContent = state.paperGrain ? `${formatPaperStyleName(style)} · ${strength}%` : '';
+  }
+  if (els.paperFiberControls) {
+    els.paperFiberControls.classList.toggle('is-dimmed', !state.paperGrain);
+  }
+  if (els.paperGrainRange) els.paperGrainRange.value = String(strength);
+  if (els.paperGrainStylePills) {
+    els.paperGrainStylePills.querySelectorAll('.auto-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.style === style);
+    });
+  }
+  if (els.paperGrainScalePills) {
+    els.paperGrainScalePills.querySelectorAll('.auto-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.scale === scaleKey);
+    });
+  }
 }
 
 function setPaperWarmth(val, persist = true) {
@@ -4385,6 +4513,31 @@ function setPaperWarmth(val, persist = true) {
 
 function setPaperGrain(enabled, persist = true) {
   state.paperGrain = !!enabled;
+  updatePaperComfortUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (persist) schedulePersistState();
+}
+
+function setPaperGrainStrength(val, persist = true) {
+  const num = Number(val);
+  state.paperGrainStrength = Number.isFinite(num) ? clamp(Math.round(num / 5) * 5, 10, 100) : 50;
+  state.paperGrain = true;
+  updatePaperComfortUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (persist) schedulePersistState();
+}
+
+function setPaperGrainStyle(style, persist = true) {
+  state.paperGrainStyle = PAPER_GRAIN_STYLES.includes(style) ? style : 'cotton';
+  state.paperGrain = true;
+  updatePaperComfortUi();
+  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (persist) schedulePersistState();
+}
+
+function setPaperGrainScale(scale, persist = true) {
+  state.paperGrainScale = PAPER_GRAIN_SCALES[scale] ? scale : 'medium';
+  state.paperGrain = true;
   updatePaperComfortUi();
   if (state.magEnabled) scheduleMagnifierRedraw();
   if (persist) schedulePersistState();
@@ -5346,6 +5499,17 @@ function wireEvents() {
     btn.addEventListener('click', () => setPaperWarmth(Number(btn.dataset.warm)));
   });
   els.menuPaperGrain?.addEventListener('click', () => setPaperGrain(!state.paperGrain));
+  els.btnPaperGrainDec?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength - 10));
+  els.btnPaperGrainInc?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength + 10));
+  els.paperGrainRange?.addEventListener('input', () => setPaperGrainStrength(els.paperGrainRange.value));
+  els.paperGrainRange?.addEventListener('change', () => els.paperGrainRange.blur());
+  els.paperGrainRange?.addEventListener('pointerup', () => els.paperGrainRange.blur());
+  els.paperGrainStylePills?.querySelectorAll('.auto-pill').forEach((btn) => {
+    btn.addEventListener('click', () => setPaperGrainStyle(btn.dataset.style));
+  });
+  els.paperGrainScalePills?.querySelectorAll('.auto-pill').forEach((btn) => {
+    btn.addEventListener('click', () => setPaperGrainScale(btn.dataset.scale));
+  });
 
   // File Pickers & Drag-Drop
   els.btnWelcomePick.addEventListener('click', pickFileViaHost);

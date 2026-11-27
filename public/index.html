@@ -404,8 +404,32 @@
         </div>
         <button type="button" class="menu-item menu-paper-grain-btn" id="menuPaperGrain" aria-pressed="false">
           <span>Paper Fiber Texture</span>
-          <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+          <span class="menu-toggle-end">
+            <span class="menu-val" id="valPaperGrain"></span>
+            <span class="menu-switch" aria-hidden="true"><span class="menu-switch-thumb"></span></span>
+          </span>
         </button>
+        <div class="paper-fiber-controls is-dimmed" id="paperFiberControls">
+          <div class="auto-control-row menu-paper-row">
+            <button type="button" class="auto-step-btn" id="btnPaperGrainDec" title="Softer paper fiber (−)" aria-label="Decrease paper fiber intensity">−</button>
+            <input id="paperGrainRange" class="auto-range" type="range" min="10" max="100" step="5" value="50" aria-label="Paper fiber intensity" />
+            <button type="button" class="auto-step-btn" id="btnPaperGrainInc" title="Stronger paper fiber (+)" aria-label="Increase paper fiber intensity">+</button>
+          </div>
+          <div class="auto-pills paper-presets" id="paperGrainStylePills" role="group" aria-label="Paper fiber stock style">
+            <button type="button" class="auto-pill active" data-style="cotton">Cotton</button>
+            <button type="button" class="auto-pill" data-style="linen">Linen</button>
+            <button type="button" class="auto-pill" data-style="parchment">Parchment</button>
+            <button type="button" class="auto-pill" data-style="kraft">Kraft</button>
+          </div>
+          <div class="paper-scale-row">
+            <span class="paper-sub-label">Grain Scale</span>
+            <div class="auto-pills paper-scale-pills" id="paperGrainScalePills" role="group" aria-label="Paper grain scale">
+              <button type="button" class="auto-pill" data-scale="fine">Fine</button>
+              <button type="button" class="auto-pill active" data-scale="medium">Med</button>
+              <button type="button" class="auto-pill" data-scale="coarse">Coarse</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="menu-divider"></div>
       <div class="menu-theme-row">

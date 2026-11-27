@@ -12,6 +12,7 @@
   --paper-reverse-bg: #f8f7f3;
   --paper-warmth: 0;
   --paper-grain-opacity: 0.42;
+  --paper-grain-size: 160px;
 }
 
 body.theme-charcoal { --bg-stage: #4c4c4c; }
@@ -2524,7 +2525,7 @@ body.has-paper-grain:not(.read-dark) .fh-snap::after {
   pointer-events: none;
   background-image: var(--paper-grain-url);
   background-repeat: repeat;
-  background-size: 160px 160px;
+  background-size: var(--paper-grain-size, 160px) var(--paper-grain-size, 160px);
   mix-blend-mode: multiply;
   opacity: var(--paper-grain-opacity, 0.42);
 }
@@ -3459,6 +3460,38 @@ body:has(#zoomPill:not([hidden])) .mag-controls-pill {
 
 .menu-paper-grain-btn {
   padding: 7px 8px;
+}
+
+.paper-fiber-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 2px 4px;
+  transition: opacity 0.16s ease;
+}
+
+.paper-fiber-controls.is-dimmed {
+  opacity: 0.54;
+}
+
+.paper-scale-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.paper-sub-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.paper-scale-pills {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 148px;
+  padding: 0;
 }
 
 /* ---------- 3. Navigation Jump-Back Stack Floating Pill ---------- */
