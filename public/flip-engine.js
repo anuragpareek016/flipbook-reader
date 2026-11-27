@@ -168,6 +168,7 @@ export class FlipBookEngine {
       showPageCorners: true,
       disableFlipByClick: true,
       hasCollectedStack: null,
+      onRenderSheetTabs: null,
       ...settings,
     };
 
@@ -795,6 +796,15 @@ export class FlipBookEngine {
       hardCard.appendChild(hardFront);
       hardCard.appendChild(hardBack);
       hardCard.appendChild(hardShade);
+      this.settings.onRenderSheetTabs?.({
+        isHard: true,
+        singlePrev,
+        side,
+        fromIdx,
+        toIdx,
+        hardFront,
+        hardBack,
+      });
       this.flipLayer.appendChild(hardCard);
       els.push(hardCard);
 
@@ -867,7 +877,23 @@ export class FlipBookEngine {
     downSide.appendChild(frontHighlight);
     downMask.appendChild(downSide);
 
+    const downTabs = document.createElement('div');
+    downTabs.className = 'fh-down-side fh-side-tabs';
+    downTabs.style.width = `${this.pageW}px`;
+    downTabs.style.height = `${this.pageH}px`;
+    downTabs.style.top = `${this.sideTop}px`;
+    downMask.appendChild(downTabs);
+
     if (singlePrev) {
+      this.settings.onRenderSheetTabs?.({
+        isHard: false,
+        singlePrev: true,
+        side,
+        fromIdx,
+        toIdx,
+        downTabs,
+        upTabs: null,
+      });
       this.flipLayer.appendChild(castBounds);
       this.flipLayer.appendChild(downMask);
       els.push(castBounds, downMask);
@@ -892,8 +918,10 @@ export class FlipBookEngine {
         flapCaster: null,
         downMask,
         downSide,
+        downTabs,
         upMask: null,
         upSide: null,
+        upTabs: null,
         underShadow,
         frontHighlight,
         backShade: null,
@@ -955,6 +983,23 @@ export class FlipBookEngine {
     upSide.appendChild(backShade);
     upMask.appendChild(upSide);
 
+    const upTabs = document.createElement('div');
+    upTabs.className = 'fh-up-side fh-side-tabs fh-side-tabs-up';
+    upTabs.style.width = `${this.pageW}px`;
+    upTabs.style.height = `${this.pageH}px`;
+    upTabs.style.top = `${this.sideTop}px`;
+    upMask.appendChild(upTabs);
+
+    this.settings.onRenderSheetTabs?.({
+      isHard: false,
+      singlePrev: false,
+      side,
+      fromIdx,
+      toIdx,
+      downTabs,
+      upTabs,
+    });
+
     this.flipLayer.appendChild(castBounds);
     this.flipLayer.appendChild(downMask);
     this.flipLayer.appendChild(flapDropBounds);
@@ -981,9 +1026,11 @@ export class FlipBookEngine {
       flapCaster,
       downMask,
       downSide,
+      downTabs,
       unfurlLip: null,
       upMask,
       upSide,
+      upTabs,
       underShadow,
       frontHighlight,
       backShade,
@@ -1073,6 +1120,7 @@ export class FlipBookEngine {
     };
 
     this._setState(mode === 'hover' ? 'fold_corner' : 'user_fold');
+    this._emit('activeFlipsChange');
     this._ensureRaf();
     return true;
   }
@@ -1149,7 +1197,9 @@ export class FlipBookEngine {
     const maskTx = `translate3d(${maskTranX}px, ${maskTranY}px, 0px) rotate(${deg}deg)`;
     f.downMask.style.transform = maskTx;
     f.castMask.style.transform = maskTx;
-    f.downSide.style.transform = `translate3d(${-pageTranX}px, 0px, 0px) rotate(${-deg}deg)`;
+    const downSideTx = `translate3d(${-pageTranX}px, 0px, 0px) rotate(${-deg}deg)`;
+    f.downSide.style.transform = downSideTx;
+    if (f.downTabs) f.downTabs.style.transform = downSideTx;
     f.frontHighlight.style.transform = `rotate(${deg}deg) translate3d(${distCenter}px, 0px, 0px)`;
 
     const appear = t < 0.06 ? t / 0.06 : 1;
@@ -1214,9 +1264,13 @@ export class FlipBookEngine {
     f.castMask.style.transform = maskTx;
     f.flapDropMask.style.transform = maskTx;
 
-    f.downSide.style.transform = `translate3d(${-g.pageTranX}px, 0px, 0px) rotate(${-g.rotate}deg)`;
-    f.upSide.style.transform = `translate3d(${g.pageTranX}px, 0px, 0px) rotate(${g.rotate}deg)`;
-    f.flapCaster.style.transform = `translate3d(${g.pageTranX}px, 0px, 0px) rotate(${g.rotate}deg)`;
+    const downSideTx = `translate3d(${-g.pageTranX}px, 0px, 0px) rotate(${-g.rotate}deg)`;
+    const upSideTx = `translate3d(${g.pageTranX}px, 0px, 0px) rotate(${g.rotate}deg)`;
+    f.downSide.style.transform = downSideTx;
+    if (f.downTabs) f.downTabs.style.transform = downSideTx;
+    f.upSide.style.transform = upSideTx;
+    if (f.upTabs) f.upTabs.style.transform = upSideTx;
+    f.flapCaster.style.transform = upSideTx;
 
     // Align cylindrical curl highlight & trough strictly parallel to the diagonal fold crease
     f.frontHighlight.style.transform = `rotate(${g.rotate}deg) translate3d(${distCenter}px, 0px, 0px)`;
@@ -1342,6 +1396,7 @@ export class FlipBookEngine {
 
     this.flyingFlips.push(f);
     this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: f.side, fromDragLift });
+    this._emit('activeFlipsChange');
     this._setState('flipping');
     this._ensureRaf();
   }
@@ -1440,6 +1495,7 @@ export class FlipBookEngine {
           if (!this.interactiveFlip) {
             this._setState('read');
           }
+          this._emit('activeFlipsChange');
           this._emit('flip', this.currentPageIndex);
         } else {
           // Update the trailing slot to the page just landed underneath remaining flying sheets
@@ -1451,6 +1507,7 @@ export class FlipBookEngine {
           } else if (lastDone.singlePrev) {
             this._setSlotPage(this.rightSlot, slots.right);
           }
+          this._emit('activeFlipsChange');
         }
       }
     }
@@ -1506,6 +1563,7 @@ export class FlipBookEngine {
     if (!this.interactiveFlip) {
       this._setState('read');
     }
+    this._emit('activeFlipsChange');
     this._emit('flip', this.currentPageIndex);
   }
 
@@ -1521,6 +1579,7 @@ export class FlipBookEngine {
       this._renderStaticSpread();
       this._setState('read');
     }
+    this._emit('activeFlipsChange');
   }
 
   _cancelAllFlipsImmediate() {
@@ -1532,6 +1591,7 @@ export class FlipBookEngine {
     this._renderStaticSpread();
     this._updateLandingSpineBlend();
     this._setState('read');
+    this._emit('activeFlipsChange');
   }
 
   /* ---------- Public Navigation API ---------- */
@@ -1714,6 +1774,7 @@ export class FlipBookEngine {
     this.flyingFlips.push(flipObj);
     this._applyFlipFrame(flipObj, delayMs > 0 ? fromPoint : initCoord);
     this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side });
+    this._emit('activeFlipsChange');
     this._setState('flipping');
     this._ensureRaf();
   }
@@ -1781,6 +1842,7 @@ export class FlipBookEngine {
     this.flyingFlips.push(flipObj);
     this._applyFlipFrame(flipObj, flipObj.coord);
     this._emit('flipStart', { from: fromPage, page: this.currentPageIndex, side: 'left', fromDragLift: true });
+    this._emit('activeFlipsChange');
     this._setState('flipping');
     this._ensureRaf();
   }

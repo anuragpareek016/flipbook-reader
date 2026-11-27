@@ -93,6 +93,27 @@
       </div>
     </div>
 
+    <!-- Page Right-Click Context Menu -->
+    <div id="pageContextMenu" class="popover-panel page-context-menu" hidden role="menu" aria-label="Page actions">
+      <div class="ctx-menu-head" id="ctxPageHeading">Page 1</div>
+      <button type="button" class="menu-item" id="ctxStickyTab" role="menuitem">
+        <span id="ctxStickyTabLabel">Add Sticky Tab…</span>
+        <kbd>⇧B</kbd>
+      </button>
+      <button type="button" class="menu-item ctx-danger-item" id="ctxStickyRemove" hidden role="menuitem">
+        <span>Remove Sticky Tab</span>
+      </button>
+      <button type="button" class="menu-item" id="ctxBookmark" role="menuitem">
+        <span id="ctxBookmarkLabel">Bookmark Page</span>
+        <kbd>B</kbd>
+      </button>
+      <div class="menu-divider" id="ctxSelDivider" hidden></div>
+      <button type="button" class="menu-item" id="ctxCopyText" hidden role="menuitem">
+        <span>Copy Selected Text</span>
+        <kbd>⌘C</kbd>
+      </button>
+    </div>
+
     <!-- Main FlipBook Stage -->
     <main class="stage" id="stage">
       <!-- Empty / Welcome Dropzone State -->
@@ -414,6 +435,10 @@
             <button type="button" class="auto-step-btn" id="btnPaperGrainDec" title="Softer paper fiber (−)" aria-label="Decrease paper fiber intensity">−</button>
             <input id="paperGrainRange" class="auto-range" type="range" min="10" max="100" step="5" value="50" aria-label="Paper fiber intensity" />
             <button type="button" class="auto-step-btn" id="btnPaperGrainInc" title="Stronger paper fiber (+)" aria-label="Increase paper fiber intensity">+</button>
+            <label class="auto-num-wrap" title="Fiber intensity (10–100%)">
+              <input id="paperGrainInput" class="auto-num-input" type="number" min="10" max="100" step="5" value="50" aria-label="Paper fiber intensity percentage" />
+              <span>%</span>
+            </label>
           </div>
           <div class="auto-pills paper-presets" id="paperGrainStylePills" role="group" aria-label="Paper fiber stock style">
             <button type="button" class="auto-pill active" data-style="cotton">Cotton</button>
@@ -421,13 +446,23 @@
             <button type="button" class="auto-pill" data-style="parchment">Parchment</button>
             <button type="button" class="auto-pill" data-style="kraft">Kraft</button>
           </div>
-          <div class="paper-scale-row">
-            <span class="paper-sub-label">Grain Scale</span>
-            <div class="auto-pills paper-scale-pills" id="paperGrainScalePills" role="group" aria-label="Paper grain scale">
-              <button type="button" class="auto-pill" data-scale="fine">Fine</button>
-              <button type="button" class="auto-pill active" data-scale="medium">Med</button>
-              <button type="button" class="auto-pill" data-scale="coarse">Coarse</button>
-            </div>
+          <div class="menu-sound-head menu-grain-scale-head">
+            <span>Grain Scale</span>
+            <span class="menu-val" id="valPaperScale">160px</span>
+          </div>
+          <div class="auto-control-row menu-paper-row">
+            <button type="button" class="auto-step-btn" id="btnPaperScaleDec" title="Finer grain scale (−)" aria-label="Decrease paper grain scale">−</button>
+            <input id="paperGrainScaleRange" class="auto-range" type="range" min="90" max="280" step="5" value="160" aria-label="Paper grain size in pixels" />
+            <button type="button" class="auto-step-btn" id="btnPaperScaleInc" title="Coarser grain scale (+)" aria-label="Increase paper grain scale">+</button>
+            <label class="auto-num-wrap" title="Grain tile scale (90–280px)">
+              <input id="paperGrainScaleInput" class="auto-num-input" type="number" min="90" max="280" step="5" value="160" aria-label="Paper grain scale pixels" />
+              <span>px</span>
+            </label>
+          </div>
+          <div class="auto-pills paper-scale-pills" id="paperGrainScalePills" role="group" aria-label="Paper grain scale presets">
+            <button type="button" class="auto-pill" data-scale="110">Fine</button>
+            <button type="button" class="auto-pill active" data-scale="160">Med</button>
+            <button type="button" class="auto-pill" data-scale="235">Coarse</button>
           </div>
         </div>
       </div>

@@ -8,7 +8,7 @@ const MAX_CACHED_CANVASES = 18;
 const HIGHLIGHT_COLORS = ['yellow', 'green', 'blue', 'pink', 'orange'];
 const STICKY_TAB_COLORS = ['coral', 'amber', 'mint', 'sky', 'violet'];
 const PAPER_GRAIN_STYLES = ['cotton', 'linen', 'parchment', 'kraft'];
-const PAPER_GRAIN_SCALES = { fine: 110, medium: 160, coarse: 235 };
+const PAPER_GRAIN_PRESETS = { fine: 110, medium: 160, coarse: 235 };
 
 const els = {
   app: document.getElementById('app'),
@@ -47,6 +47,15 @@ const els = {
   stickyColorSwatches: document.getElementById('stickyColorSwatches'),
   btnStickyTabRemove: document.getElementById('btnStickyTabRemove'),
   btnStickyTabSave: document.getElementById('btnStickyTabSave'),
+  pageContextMenu: document.getElementById('pageContextMenu'),
+  ctxPageHeading: document.getElementById('ctxPageHeading'),
+  ctxStickyTab: document.getElementById('ctxStickyTab'),
+  ctxStickyTabLabel: document.getElementById('ctxStickyTabLabel'),
+  ctxStickyRemove: document.getElementById('ctxStickyRemove'),
+  ctxBookmark: document.getElementById('ctxBookmark'),
+  ctxBookmarkLabel: document.getElementById('ctxBookmarkLabel'),
+  ctxSelDivider: document.getElementById('ctxSelDivider'),
+  ctxCopyText: document.getElementById('ctxCopyText'),
   zoomPill: document.getElementById('zoomPill'),
   zoomLabel: document.getElementById('zoomLabel'),
   btnZoomOut: document.getElementById('btnZoomOut'),
@@ -160,7 +169,13 @@ const els = {
   btnPaperGrainDec: document.getElementById('btnPaperGrainDec'),
   paperGrainRange: document.getElementById('paperGrainRange'),
   btnPaperGrainInc: document.getElementById('btnPaperGrainInc'),
+  paperGrainInput: document.getElementById('paperGrainInput'),
   paperGrainStylePills: document.getElementById('paperGrainStylePills'),
+  valPaperScale: document.getElementById('valPaperScale'),
+  btnPaperScaleDec: document.getElementById('btnPaperScaleDec'),
+  paperGrainScaleRange: document.getElementById('paperGrainScaleRange'),
+  btnPaperScaleInc: document.getElementById('btnPaperScaleInc'),
+  paperGrainScaleInput: document.getElementById('paperGrainScaleInput'),
   paperGrainScalePills: document.getElementById('paperGrainScalePills'),
   highlightsSummary: document.getElementById('highlightsSummary'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
@@ -217,7 +232,9 @@ const state = {
   paperGrain: false, // subtle cellulose fiber paper texture
   paperGrainStrength: 50, // 10..100 texture intensity %
   paperGrainStyle: 'cotton', // 'cotton' | 'linen' | 'parchment' | 'kraft'
-  paperGrainScale: 'medium', // 'fine' | 'medium' | 'coarse'
+  paperGrainScalePx: 160, // 90..280px tile size
+  leftStackThick: 0,
+  rightStackThick: 0,
   autoHideBars: true,
   soundEnabled: true,
   soundPreset: DEFAULT_SOUND_PRESET,
@@ -256,6 +273,8 @@ const state = {
   stickyTabs: [], // [{ id, page, label, color }]
   stickyEditPage: null,
   stickyEditColor: 'coral',
+  ctxTargetPage: null,
+  ctxPos: null,
   navHistory: [], // [{ page, reason }]
   highlights: [],
   hlFilterMode: 'all', // 'all' | 'current' | 'page'
@@ -390,8 +409,10 @@ function applySavedSettings(settings) {
   if (PAPER_GRAIN_STYLES.includes(settings.paperGrainStyle)) {
     state.paperGrainStyle = settings.paperGrainStyle;
   }
-  if (settings.paperGrainScale && PAPER_GRAIN_SCALES[settings.paperGrainScale]) {
-    state.paperGrainScale = settings.paperGrainScale;
+  if (Number.isFinite(Number(settings.paperGrainScalePx))) {
+    state.paperGrainScalePx = clamp(Math.round(Number(settings.paperGrainScalePx)), 90, 280);
+  } else if (settings.paperGrainScale && PAPER_GRAIN_PRESETS[settings.paperGrainScale]) {
+    state.paperGrainScalePx = PAPER_GRAIN_PRESETS[settings.paperGrainScale];
   }
   if (typeof settings.paperGrain === 'boolean') {
     setPaperGrain(settings.paperGrain, false);
@@ -447,7 +468,7 @@ function schedulePersistState() {
         paperGrain: state.paperGrain,
         paperGrainStrength: state.paperGrainStrength,
         paperGrainStyle: state.paperGrainStyle,
-        paperGrainScale: state.paperGrainScale,
+        paperGrainScalePx: state.paperGrainScalePx,
         autoHideBars: state.autoHideBars,
         twoFingerPan: state.twoFingerPan,
         scrollMode: state.scrollMode,
@@ -554,6 +575,7 @@ function disposeBook() {
     els.scrollTabsRail.hidden = true;
   }
   if (els.stickyTabPopover) els.stickyTabPopover.hidden = true;
+  if (els.pageContextMenu) els.pageContextMenu.hidden = true;
   clearNavHistory();
   els.scrollPages.innerHTML = '';
   els.scrollViewport.hidden = true;
@@ -744,6 +766,7 @@ function initPageFlip(startIndex = 0) {
     showPageCorners: true,
     disableFlipByClick: !single && state.clickMode === 'smart',
     hasCollectedStack: () => canShowSingleCollectedStack(0),
+    onRenderSheetTabs: renderTurningSheetTabs,
   });
 
   pf.setInteractionDisabled(state.zoom > 1.01);
@@ -761,6 +784,10 @@ function initPageFlip(startIndex = 0) {
     state.orientation = pf.getOrientation();
     state.currentIndex = clamp(e.data?.page ?? safeStart, 0, state.totalPages - 1);
     onSpreadChanged(false);
+  });
+
+  pf.on('activeFlipsChange', () => {
+    renderBookEdgeTabs();
   });
 
   pf.on('frame', () => {
@@ -1234,6 +1261,9 @@ function updateBookDepthChrome() {
     ? clamp(Math.round((rightRemain / denom) * maxStack), minLeaf, maxStack)
     : 0;
 
+  state.leftStackThick = single ? 0 : (state.showCover && visible.length === 1 && visible[0] === 0 ? 0 : leftThick);
+  state.rightStackThick = state.showCover && visible.length === 1 && visible[0] > 0 && !single ? 0 : rightThick;
+
   if (single) {
     // In single-page mode, read pages collect onto the top-left preview stack; the left edge is the
     // binding hinge, while the right stack represents remaining unread pages (0px once all pages end).
@@ -1249,7 +1279,7 @@ function updateBookDepthChrome() {
     els.bookDropShadow.style.right = `${-rightThick}px`;
     els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
     els.bookShell.style.setProperty('--tabs-offset-left', '0px');
-    els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
+    els.bookShell.style.setProperty('--tabs-offset-right', '0px');
     return;
   }
 
@@ -1268,7 +1298,7 @@ function updateBookDepthChrome() {
       els.bookDropShadow.style.right = `${-rightThick}px`;
       els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
       els.bookShell.style.setProperty('--tabs-offset-left', `${sw}px`);
-      els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
+      els.bookShell.style.setProperty('--tabs-offset-right', '0px');
     } else {
       // Back cover sits on left half of 2*pageW
       setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
@@ -1277,7 +1307,7 @@ function updateBookDepthChrome() {
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
       els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(-leftThick * 0.25)}px`);
-      els.bookShell.style.setProperty('--tabs-offset-left', `${-leftThick}px`);
+      els.bookShell.style.setProperty('--tabs-offset-left', '0px');
       els.bookShell.style.setProperty('--tabs-offset-right', `${sw}px`);
     }
   } else {
@@ -1290,8 +1320,8 @@ function updateBookDepthChrome() {
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
     els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round((rightThick - leftThick) * 0.25)}px`);
-    els.bookShell.style.setProperty('--tabs-offset-left', `${-leftThick}px`);
-    els.bookShell.style.setProperty('--tabs-offset-right', `${-rightThick}px`);
+    els.bookShell.style.setProperty('--tabs-offset-left', '0px');
+    els.bookShell.style.setProperty('--tabs-offset-right', '0px');
   }
 }
 
@@ -1594,6 +1624,14 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   const shade = document.createElement('div');
   shade.className = 'scs-flying-shade';
   card.appendChild(shade);
+
+  const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
+  const flyingTab = state.stickyTabs.find((t) => t.page === flyingPageIdx + 1);
+  if (flyingTab) {
+    const topPct = posMap.get(flyingTab.page) ?? 20;
+    card.appendChild(createAttachedTurningTabEl(flyingTab, topPct, goingNext ? 'right' : 'left'));
+  }
+
   els.singleFlightLayer.appendChild(card);
 
   const { srcX, srcY, dstX, dstY, sx, sy } = getSingleStackCenterCoords(bookRect, stageRect);
@@ -1659,11 +1697,12 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
 
   const finishFlight = () => {
     singleStackMeta.activeFlights = Math.max(0, singleStackMeta.activeFlights - 1);
+    card.remove();
     if (singleStackMeta.activeFlights === 0) {
       updateSingleCollectedStack();
     }
+    renderBookEdgeTabs();
     requestAnimationFrame(() => {
-      card.remove();
       if (state.magEnabled) scheduleMagnifierRedraw();
     });
   };
@@ -2252,38 +2291,99 @@ function normalizeStickyTabs(list) {
   return [...byPage.values()].sort((a, b) => a.page - b.page).slice(0, 200);
 }
 
-function computeEdgeTabPositions(tabs) {
-  if (!tabs.length) return [];
+function computeGlobalTabPositionsMap(tabs) {
+  const map = new Map();
+  if (!tabs.length) return map;
+  const sorted = [...tabs].sort((a, b) => a.page - b.page);
   const minY = 11;
   const maxY = 87;
   const span = maxY - minY;
-  const gap = Math.min(8.4, span / Math.max(1, tabs.length));
+  const gap = Math.min(8.4, span / Math.max(1, sorted.length));
   const totalPagesDenom = Math.max(1, state.totalPages - 1);
 
-  const ys = tabs.map((t, i) => {
-    const ratio = state.totalPages > 1 ? (t.page - 1) / totalPagesDenom : (tabs.length > 1 ? i / (tabs.length - 1) : 0.5);
+  const ys = sorted.map((t, i) => {
+    const ratio = state.totalPages > 1 ? (t.page - 1) / totalPagesDenom : (sorted.length > 1 ? i / (sorted.length - 1) : 0.5);
     return clamp(minY + ratio * span, minY, maxY);
   });
 
-  // Forward pass prevents overlapping downward
   for (let i = 1; i < ys.length; i++) {
     if (ys[i] - ys[i - 1] < gap) ys[i] = ys[i - 1] + gap;
   }
-  // Overflow above maxY? Push upward uniformly
   if (ys[ys.length - 1] > maxY) {
     ys[ys.length - 1] = maxY;
     for (let i = ys.length - 2; i >= 0; i--) {
       if (ys[i + 1] - ys[i] < gap) ys[i] = ys[i + 1] - gap;
     }
   }
-  return tabs.map((tab, i) => ({ tab, topPct: clamp(ys[i], minY, maxY) }));
+  sorted.forEach((tab, i) => map.set(tab.page, clamp(ys[i], minY, maxY)));
+  return map;
 }
 
-function createStickyEdgeTabElement(tab, topPct, isCurrent) {
+function getTurningTabPages() {
+  const activePages = new Set();
+  const pf = state.pageFlip;
+  if (pf) {
+    const flips = [
+      ...(pf.interactiveFlip ? [pf.interactiveFlip] : []),
+      ...(Array.isArray(pf.flyingFlips) ? pf.flyingFlips : []),
+    ];
+    for (const f of flips) {
+      if (Number.isInteger(f.fromIdx)) activePages.add(f.fromIdx + 1);
+      if (Number.isInteger(f.toIdx)) activePages.add(f.toIdx + 1);
+    }
+  }
+  if (els.singleFlightLayer?.children?.length) {
+    for (const card of els.singleFlightLayer.children) {
+      const idx = Number(card.dataset.pageIdx);
+      if (Number.isInteger(idx)) activePages.add(idx + 1);
+    }
+  }
+  return activePages;
+}
+
+function createAttachedTurningTabEl(tab, topPct, sideDir) {
+  const el = document.createElement('div');
+  el.className = `sticky-edge-tab tab-${tab.color} tab-side-${sideDir}`;
+  el.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
+  el.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
+  return el;
+}
+
+function renderTurningSheetTabs({ isHard, singlePrev, side, fromIdx, toIdx, downTabs, upTabs, hardFront, hardBack }) {
+  if (!state.stickyTabs.length) return;
+  const sheetPages = new Set();
+  if (Number.isInteger(fromIdx)) sheetPages.add(fromIdx + 1);
+  if (Number.isInteger(toIdx)) sheetPages.add(toIdx + 1);
+  const matching = state.stickyTabs.filter((t) => sheetPages.has(t.page));
+  if (!matching.length) return;
+
+  const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
+  const single = isEffectiveSingleMode() || state.orientation === 'portrait';
+  const frontSide = single ? 'right' : side;
+  const backSide = single ? 'left' : (side === 'right' ? 'left' : 'right');
+
+  for (const tab of matching) {
+    const topPct = posMap.get(tab.page) ?? 20;
+    if (isHard) {
+      if (hardFront) hardFront.appendChild(createAttachedTurningTabEl(tab, topPct, frontSide));
+      if (hardBack) hardBack.appendChild(createAttachedTurningTabEl(tab, topPct, backSide));
+    } else if (singlePrev) {
+      if (downTabs) downTabs.appendChild(createAttachedTurningTabEl(tab, topPct, 'right'));
+    } else {
+      if (downTabs) downTabs.appendChild(createAttachedTurningTabEl(tab, topPct, frontSide));
+      if (upTabs) upTabs.appendChild(createAttachedTurningTabEl(tab, topPct, backSide));
+    }
+  }
+}
+
+function createStickyEdgeTabElement(tab, topPct, isCurrent, { depthPx = 0, stackSpan = 0, zIndex = null } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = `sticky-edge-tab tab-${tab.color}${isCurrent ? ' is-current' : ''}`;
   btn.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
+  btn.style.setProperty('--tab-depth', `${depthPx}px`);
+  btn.style.setProperty('--tab-stack-span', `${stackSpan}px`);
+  if (zIndex !== null) btn.style.zIndex = String(zIndex);
   btn.dataset.page = String(tab.page);
   btn.title = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
   btn.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
@@ -2294,7 +2394,7 @@ function createStickyEdgeTabElement(tab, topPct, isCurrent) {
   btn.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    openStickyTabPopover(tab.page);
+    openStickyTabPopover(tab.page, { x: e.clientX, y: e.clientY });
   });
   return btn;
 }
@@ -2305,7 +2405,9 @@ function renderBookEdgeTabs() {
   els.bookEdgeTabsRight.innerHTML = '';
 
   const tabs = [...state.stickyTabs].sort((a, b) => a.page - b.page);
-  const visible1Based = new Set(getVisibleIndices().map((i) => i + 1));
+  const posMap = computeGlobalTabPositionsMap(tabs);
+  const visible = getVisibleIndices();
+  const visible1Based = new Set(visible.map((i) => i + 1));
 
   if (state.scrollMode === 'scroll') {
     if (els.scrollTabsRail) {
@@ -2324,30 +2426,51 @@ function renderBookEdgeTabs() {
   }
   if (!state.pdfDoc || !tabs.length) return;
 
-  const visible = getVisibleIndices();
+  const turningPages = getTurningTabPages();
   const single = isEffectiveSingleMode() || state.orientation === 'portrait';
   const curFirst = (visible[0] ?? 0) + 1;
+  const curLast = (visible[visible.length - 1] ?? 0) + 1;
 
-  // Match real open book split: pages on left half or already turned belong on left stack edge
   let leftTabs = [];
   let rightTabs = [];
   if (single) {
-    leftTabs = tabs.filter((t) => t.page < curFirst);
-    rightTabs = tabs.filter((t) => t.page >= curFirst);
+    leftTabs = tabs.filter((t) => !turningPages.has(t.page) && t.page < curFirst);
+    rightTabs = tabs.filter((t) => !turningPages.has(t.page) && t.page >= curFirst);
   } else {
     const leftCutoff = visible.length === 2
       ? curFirst
       : (visible[0] === state.totalPages - 1 && state.totalPages > 1 ? state.totalPages : 0);
-    leftTabs = tabs.filter((t) => t.page <= leftCutoff);
-    rightTabs = tabs.filter((t) => t.page > leftCutoff);
+    leftTabs = tabs.filter((t) => !turningPages.has(t.page) && t.page <= leftCutoff);
+    rightTabs = tabs.filter((t) => !turningPages.has(t.page) && t.page > leftCutoff);
   }
 
-  for (const { tab, topPct } of computeEdgeTabPositions(leftTabs)) {
-    els.bookEdgeTabsLeft.appendChild(createStickyEdgeTabElement(tab, topPct, visible1Based.has(tab.page)));
-  }
-  for (const { tab, topPct } of computeEdgeTabPositions(rightTabs)) {
-    els.bookEdgeTabsRight.appendChild(createStickyEdgeTabElement(tab, topPct, visible1Based.has(tab.page)));
-  }
+  // Left stack: descending page order so closer-to-surface pages sit visually higher (z-index)
+  const leftThick = state.leftStackThick || 0;
+  [...leftTabs].sort((a, b) => b.page - a.page).forEach((tab, rank) => {
+    const isCur = visible1Based.has(tab.page);
+    const ratio = isCur || curFirst <= 1 ? 0 : clamp((curFirst - tab.page) / Math.max(1, curFirst - 1), 0, 1);
+    const depthPx = Math.round(ratio * leftThick);
+    const stackSpan = Math.max(0, leftThick - depthPx);
+    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
+    els.bookEdgeTabsLeft.appendChild(
+      createStickyEdgeTabElement(tab, posMap.get(tab.page) ?? 20, isCur, { depthPx, stackSpan, zIndex })
+    );
+  });
+
+  // Right stack: ascending page order so shallower pages sit closer to open page (depth = 0 -> outward)
+  const rightThick = state.rightStackThick || 0;
+  [...rightTabs].sort((a, b) => a.page - b.page).forEach((tab, rank) => {
+    const isCur = visible1Based.has(tab.page);
+    const ratio = isCur || state.totalPages <= curLast
+      ? 0
+      : clamp((tab.page - curLast) / Math.max(1, state.totalPages - curLast), 0, 1);
+    const depthPx = Math.round(ratio * rightThick);
+    const stackSpan = Math.max(0, rightThick - depthPx);
+    const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
+    els.bookEdgeTabsRight.appendChild(
+      createStickyEdgeTabElement(tab, posMap.get(tab.page) ?? 20, isCur, { depthPx, stackSpan, zIndex })
+    );
+  });
 }
 
 function updateStickyTabButtonUi() {
@@ -2401,12 +2524,29 @@ function syncStickyPopoverPageFields(targetPage) {
   }
 }
 
-function openStickyTabPopover(explicitPage = null) {
+function positionFloatingBoxAt(el, x, y, boxW, boxH) {
+  const pad = 12;
+  const maxX = Math.max(pad, window.innerWidth - boxW - pad);
+  const maxY = Math.max(pad, window.innerHeight - boxH - pad);
+  el.style.left = `${clamp(Math.round(x), pad, maxX)}px`;
+  el.style.top = `${clamp(Math.round(y), pad, maxY)}px`;
+  el.style.right = 'auto';
+}
+
+function openStickyTabPopover(explicitPage = null, anchorPos = null) {
   if (!state.pdfDoc || !els.stickyTabPopover) return;
+  closePageContextMenu();
   const visible = getVisibleIndices().map((i) => i + 1);
   const existingOnSpread = visible.find((p) => state.stickyTabs.some((t) => t.page === p));
   const initialPage = explicitPage ?? existingOnSpread ?? visible[0] ?? 1;
   syncStickyPopoverPageFields(initialPage);
+  if (anchorPos && Number.isFinite(anchorPos.x) && Number.isFinite(anchorPos.y)) {
+    positionFloatingBoxAt(els.stickyTabPopover, anchorPos.x + 8, anchorPos.y + 8, 256, 265);
+  } else {
+    els.stickyTabPopover.style.left = '';
+    els.stickyTabPopover.style.top = '';
+    els.stickyTabPopover.style.right = '';
+  }
   els.stickyTabPopover.hidden = false;
   updateStickyTabButtonUi();
   showBar('header', false);
@@ -2420,6 +2560,38 @@ function closeStickyTabPopover() {
   if (!els.stickyTabPopover || els.stickyTabPopover.hidden) return;
   els.stickyTabPopover.hidden = true;
   updateStickyTabButtonUi();
+}
+
+function openPageContextMenu(clientX, clientY, pageNum) {
+  if (!state.pdfDoc || !els.pageContextMenu) return;
+  closeStickyTabPopover();
+  const p = clamp(Math.floor(pageNum) || 1, 1, state.totalPages);
+  state.ctxTargetPage = p;
+  state.ctxPos = { x: clientX, y: clientY };
+
+  const existingTab = state.stickyTabs.find((t) => t.page === p);
+  const isBm = state.bookmarks.includes(p);
+  const selText = window.getSelection()?.toString()?.trim() || '';
+
+  if (els.ctxPageHeading) els.ctxPageHeading.textContent = `Page ${p}`;
+  if (els.ctxStickyTabLabel) {
+    els.ctxStickyTabLabel.textContent = existingTab ? `Edit Tab "${existingTab.label}"…` : 'Add Sticky Tab…';
+  }
+  if (els.ctxStickyRemove) els.ctxStickyRemove.hidden = !existingTab;
+  if (els.ctxBookmarkLabel) {
+    els.ctxBookmarkLabel.textContent = isBm ? `Remove Bookmark (p. ${p})` : `Bookmark Page ${p}`;
+  }
+  if (els.ctxSelDivider) els.ctxSelDivider.hidden = !selText;
+  if (els.ctxCopyText) els.ctxCopyText.hidden = !selText;
+
+  const estH = selText ? 175 : existingTab ? 142 : 112;
+  positionFloatingBoxAt(els.pageContextMenu, clientX + 4, clientY + 4, 224, estH);
+  els.pageContextMenu.hidden = false;
+}
+
+function closePageContextMenu() {
+  if (!els.pageContextMenu || els.pageContextMenu.hidden) return;
+  els.pageContextMenu.hidden = true;
 }
 
 function saveStickyTabFromPopover() {
@@ -4424,7 +4596,7 @@ function drawMagPaperGrain(ctx, x, y, w, h) {
     }
   }
   if (!entry.pattern) return;
-  const tilePx = PAPER_GRAIN_SCALES[state.paperGrainScale] || 160;
+  const tilePx = clamp(Number(state.paperGrainScalePx) || 160, 90, 280);
   const scaleMult = tilePx / 160;
   if (typeof entry.pattern.setTransform === 'function') {
     entry.pattern.setTransform(new DOMMatrix().scale(scaleMult, scaleMult));
@@ -4457,8 +4629,7 @@ function updatePaperComfortUi() {
   const v = clamp(Math.round(state.paperWarmth), 0, 100);
   const strength = clamp(Math.round(state.paperGrainStrength), 10, 100);
   const style = PAPER_GRAIN_STYLES.includes(state.paperGrainStyle) ? state.paperGrainStyle : 'cotton';
-  const scaleKey = PAPER_GRAIN_SCALES[state.paperGrainScale] ? state.paperGrainScale : 'medium';
-  const tilePx = PAPER_GRAIN_SCALES[scaleKey];
+  const tilePx = clamp(Math.round(Number(state.paperGrainScalePx) || 160), 90, 280);
 
   const bg = interpolatePaperRgb(PAPER_WARM_STOPS, v);
   const revBg = interpolatePaperRgb(PAPER_REVERSE_STOPS, v);
@@ -4491,14 +4662,23 @@ function updatePaperComfortUi() {
     els.paperFiberControls.classList.toggle('is-dimmed', !state.paperGrain);
   }
   if (els.paperGrainRange) els.paperGrainRange.value = String(strength);
+  if (els.paperGrainInput && document.activeElement !== els.paperGrainInput) {
+    els.paperGrainInput.value = String(strength);
+  }
   if (els.paperGrainStylePills) {
     els.paperGrainStylePills.querySelectorAll('.auto-pill').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.style === style);
     });
   }
+  if (els.valPaperScale) els.valPaperScale.textContent = `${tilePx}px`;
+  if (els.paperGrainScaleRange) els.paperGrainScaleRange.value = String(tilePx);
+  if (els.paperGrainScaleInput && document.activeElement !== els.paperGrainScaleInput) {
+    els.paperGrainScaleInput.value = String(tilePx);
+  }
   if (els.paperGrainScalePills) {
     els.paperGrainScalePills.querySelectorAll('.auto-pill').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.scale === scaleKey);
+      const targetPx = Number(btn.dataset.scale);
+      btn.classList.toggle('active', Math.abs(targetPx - tilePx) <= 10);
     });
   }
 }
@@ -4520,7 +4700,7 @@ function setPaperGrain(enabled, persist = true) {
 
 function setPaperGrainStrength(val, persist = true) {
   const num = Number(val);
-  state.paperGrainStrength = Number.isFinite(num) ? clamp(Math.round(num / 5) * 5, 10, 100) : 50;
+  state.paperGrainStrength = Number.isFinite(num) ? clamp(Math.round(num), 10, 100) : 50;
   state.paperGrain = true;
   updatePaperComfortUi();
   if (state.magEnabled) scheduleMagnifierRedraw();
@@ -4535,8 +4715,9 @@ function setPaperGrainStyle(style, persist = true) {
   if (persist) schedulePersistState();
 }
 
-function setPaperGrainScale(scale, persist = true) {
-  state.paperGrainScale = PAPER_GRAIN_SCALES[scale] ? scale : 'medium';
+function setPaperGrainScalePx(val, persist = true) {
+  const num = Number(val);
+  state.paperGrainScalePx = Number.isFinite(num) ? clamp(Math.round(num), 90, 280) : 160;
   state.paperGrain = true;
   updatePaperComfortUi();
   if (state.magEnabled) scheduleMagnifierRedraw();
@@ -5499,16 +5680,90 @@ function wireEvents() {
     btn.addEventListener('click', () => setPaperWarmth(Number(btn.dataset.warm)));
   });
   els.menuPaperGrain?.addEventListener('click', () => setPaperGrain(!state.paperGrain));
-  els.btnPaperGrainDec?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength - 10));
-  els.btnPaperGrainInc?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength + 10));
+  els.btnPaperGrainDec?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength - 5));
+  els.btnPaperGrainInc?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength + 5));
   els.paperGrainRange?.addEventListener('input', () => setPaperGrainStrength(els.paperGrainRange.value));
   els.paperGrainRange?.addEventListener('change', () => els.paperGrainRange.blur());
   els.paperGrainRange?.addEventListener('pointerup', () => els.paperGrainRange.blur());
+  els.paperGrainInput?.addEventListener('input', () => {
+    const v = Number(els.paperGrainInput.value);
+    if (Number.isFinite(v) && v >= 10 && v <= 100) setPaperGrainStrength(v);
+  });
+  els.paperGrainInput?.addEventListener('change', () => setPaperGrainStrength(els.paperGrainInput.value));
+  els.paperGrainInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      setPaperGrainStrength(els.paperGrainInput.value);
+      els.paperGrainInput.blur();
+    }
+  });
   els.paperGrainStylePills?.querySelectorAll('.auto-pill').forEach((btn) => {
     btn.addEventListener('click', () => setPaperGrainStyle(btn.dataset.style));
   });
+  els.btnPaperScaleDec?.addEventListener('click', () => setPaperGrainScalePx(state.paperGrainScalePx - 15));
+  els.btnPaperScaleInc?.addEventListener('click', () => setPaperGrainScalePx(state.paperGrainScalePx + 15));
+  els.paperGrainScaleRange?.addEventListener('input', () => setPaperGrainScalePx(els.paperGrainScaleRange.value));
+  els.paperGrainScaleRange?.addEventListener('change', () => els.paperGrainScaleRange.blur());
+  els.paperGrainScaleRange?.addEventListener('pointerup', () => els.paperGrainScaleRange.blur());
+  els.paperGrainScaleInput?.addEventListener('input', () => {
+    const v = Number(els.paperGrainScaleInput.value);
+    if (Number.isFinite(v) && v >= 90 && v <= 280) setPaperGrainScalePx(v);
+  });
+  els.paperGrainScaleInput?.addEventListener('change', () => setPaperGrainScalePx(els.paperGrainScaleInput.value));
+  els.paperGrainScaleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      setPaperGrainScalePx(els.paperGrainScaleInput.value);
+      els.paperGrainScaleInput.blur();
+    }
+  });
   els.paperGrainScalePills?.querySelectorAll('.auto-pill').forEach((btn) => {
-    btn.addEventListener('click', () => setPaperGrainScale(btn.dataset.scale));
+    btn.addEventListener('click', () => setPaperGrainScalePx(Number(btn.dataset.scale)));
+  });
+
+  // Page Right-Click Context Menu for quick Sticky Tabs / Bookmarks
+  els.stage?.addEventListener('contextmenu', (e) => {
+    if (!state.pdfDoc) return;
+    if (e.target.closest('#btnSound, .sticky-edge-tab, .popover-panel, #moreMenu, .side-drawer, .nav-back-pill, .mag-controls-pill, .auto-playback-hud')) {
+      return;
+    }
+    const pageEl = e.target.closest('.fb-page');
+    const stackEl = e.target.closest('.book-shell, .scroll-page-wrap');
+    if (!pageEl && !stackEl) return;
+    e.preventDefault();
+    const rawIdx = pageEl?.dataset?.pageIndex;
+    const p = rawIdx !== undefined && Number.isFinite(Number(rawIdx))
+      ? Number(rawIdx) + 1
+      : (getVisibleIndices()[0] ?? 0) + 1;
+    openPageContextMenu(e.clientX, e.clientY, p);
+  });
+  els.ctxStickyTab?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const p = state.ctxTargetPage;
+    const pos = state.ctxPos;
+    closePageContextMenu();
+    if (p) openStickyTabPopover(p, pos);
+  });
+  els.ctxStickyRemove?.addEventListener('click', () => {
+    const p = state.ctxTargetPage;
+    closePageContextMenu();
+    if (p) removeStickyTabForPage(p);
+  });
+  els.ctxBookmark?.addEventListener('click', () => {
+    const p = state.ctxTargetPage;
+    closePageContextMenu();
+    if (!p) return;
+    if (state.bookmarks.includes(p)) {
+      state.bookmarks = state.bookmarks.filter((b) => b !== p);
+    } else {
+      state.bookmarks.push(p);
+    }
+    updateBookmarkUi();
+    schedulePersistState();
+  });
+  els.ctxCopyText?.addEventListener('click', async () => {
+    const txt = window.getSelection()?.toString()?.trim() || '';
+    closePageContextMenu();
+    if (!txt) return;
+    try { await navigator.clipboard.writeText(txt); } catch {}
   });
 
   // File Pickers & Drag-Drop
@@ -5550,6 +5805,9 @@ function wireEvents() {
       !e.target.closest('#btnAddStickyTabDrawer')
     ) {
       closeStickyTabPopover();
+    }
+    if (els.pageContextMenu && !els.pageContextMenu.hidden && !e.target.closest('#pageContextMenu')) {
+      closePageContextMenu();
     }
 
     const sel = window.getSelection();
@@ -5799,6 +6057,7 @@ function wireEvents() {
     return !!state.pageFlip?.isPointInFlipZone?.(clientX, clientY, onTextSpan);
   };
   const guardPageFlipPointer = (e) => {
+    if (e.type === 'mousedown' && e.button !== 0) return;
     if (state.zoom > 1.01) {
       return;
     }
@@ -6047,7 +6306,8 @@ function wireEvents() {
         showBar('header', true, 1400);
         break;
       case 'Escape':
-        if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
+        if (els.pageContextMenu && !els.pageContextMenu.hidden) closePageContextMenu();
+        else if (els.stickyTabPopover && !els.stickyTabPopover.hidden) closeStickyTabPopover();
         else if (!els.hlPopover.hidden) hideHighlightPopover();
         else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
