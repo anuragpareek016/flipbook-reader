@@ -2176,15 +2176,6 @@ body.bars-hidden .single-collected-stack {
   pointer-events: none;
 }
 
-.single-collected-stack.is-landing {
-  animation: scsLandPulse 0.24s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes scsLandPulse {
-  0% { transform: rotate(-1.5deg) scale(1.05); }
-  100% { transform: rotate(-1.5deg) scale(1); }
-}
-
 .scs-layer {
   position: absolute;
   inset: 0;
@@ -2263,7 +2254,7 @@ body.bars-hidden .single-collected-stack {
   position: absolute;
   left: 0;
   top: 0;
-  transform-origin: top left;
+  transform-origin: center center;
   transform-style: preserve-3d;
   border-radius: 3px;
   overflow: hidden;

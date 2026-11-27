@@ -1236,7 +1236,11 @@ export class FlipBookEngine {
           clientY: f.lastClientY || 0,
         });
       } else if (f.mode === 'animate') {
-        const handOffOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.42) / 0.28, 0, 1);
+        if (!f.reversed && travel >= 0.34 && !f.singleNextLiftFired) {
+          f.singleNextLiftFired = true;
+          this._emit('nextLiftStart', { fromIdx: f.fromIdx, toIdx: f.toIdx });
+        }
+        const handOffOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.34) / 0.08, 0, 1);
         f.downMask.style.opacity = String(handOffOpacity);
         f.upMask.style.opacity = String(handOffOpacity);
         f.castBounds.style.opacity = String(handOffOpacity);

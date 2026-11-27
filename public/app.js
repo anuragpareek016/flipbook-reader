@@ -564,14 +564,31 @@ function initPageFlip(startIndex = 0) {
       const fromIdx = clamp(e.data?.from ?? state.currentIndex, 0, state.totalPages - 1);
       const nextIdx = clamp(e.data.page, 0, state.totalPages - 1);
       state.currentIndex = nextIdx;
-      const handledByFlight =
-        !e.data?.reversed &&
-        fromIdx !== nextIdx &&
-        spawnSingleCollectedFlight({ fromIdx, toIdx: nextIdx, fromDragLift: !!e.data?.fromDragLift });
-      if (!handledByFlight) {
+
+      let skipSingleStackSwap = false;
+      if (e.data?.reversed || fromIdx === nextIdx) {
         clearSingleFlights();
+      } else if (nextIdx > fromIdx && !e.data?.fromDragLift) {
+        if (canShowSingleCollectedStack(fromIdx)) {
+          singleStackMeta.pendingNextFlight = { fromIdx, toIdx: nextIdx };
+          skipSingleStackSwap = true;
+        } else {
+          clearSingleFlights();
+        }
+      } else {
+        const launched = spawnSingleCollectedFlight({
+          fromIdx,
+          toIdx: nextIdx,
+          fromDragLift: !!e.data?.fromDragLift,
+        });
+        if (!launched) {
+          clearSingleFlights();
+        } else if (nextIdx > fromIdx) {
+          skipSingleStackSwap = true;
+        }
       }
-      onSpreadChanged(false, 6, { skipSingleStackSwap: handledByFlight && nextIdx > fromIdx });
+
+      onSpreadChanged(false, 6, { skipSingleStackSwap });
       const vis = getVisibleIndices();
       const touchingCover =
         state.showCover &&
@@ -585,6 +602,14 @@ function initPageFlip(startIndex = 0) {
     }
   });
 
+  pf.on('nextLiftStart', (e) => {
+    const p = singleStackMeta.pendingNextFlight;
+    if (!p) return;
+    if (Number.isFinite(e.data?.fromIdx) && e.data.fromIdx !== p.fromIdx) return;
+    singleStackMeta.pendingNextFlight = null;
+    spawnSingleCollectedFlight({ fromIdx: p.fromIdx, toIdx: p.toIdx, fromPeelRelay: true });
+  });
+
   pf.on('dragLift', (e) => {
     updateSingleDragPickup(e.data);
   });
@@ -592,7 +617,8 @@ function initPageFlip(startIndex = 0) {
   pf.on('flip', (e) => {
     const nextIdx = clamp(e.data, 0, state.totalPages - 1);
     state.currentIndex = nextIdx;
-    onSpreadChanged(true, 6);
+    singleStackMeta.pendingNextFlight = null;
+    onSpreadChanged(true, 6, { skipSingleStackSwap: singleStackMeta.activeFlights > 0 });
   });
 
   pf.on('changeState', (e) => {
@@ -1019,6 +1045,7 @@ const singleStackMeta = {
   renderedIdx: null,
   renderToken: 0,
   activeFlights: 0,
+  pendingNextFlight: null,
   dragCard: null,
   dragPose: null,
 };
@@ -1035,10 +1062,11 @@ function clearSingleDragCard() {
 function clearSingleFlights() {
   clearSingleDragCard();
   singleStackMeta.activeFlights = 0;
+  singleStackMeta.pendingNextFlight = null;
   if (els.singleFlightLayer) {
     els.singleFlightLayer.innerHTML = '';
   }
-  els.singleCollectedStack?.classList.remove('is-waiting', 'is-landing', 'is-drop-ready');
+  els.singleCollectedStack?.classList.remove('is-waiting', 'is-drop-ready');
 }
 
 function getSingleStackMetrics() {
@@ -1121,7 +1149,7 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
   if (!els.singleCollectedStack) return;
   const collectedIdx = state.currentIndex - 1;
   if (!canShowSingleCollectedStack(collectedIdx)) {
-    if (!singleStackMeta.activeFlights) {
+    if (!singleStackMeta.activeFlights && !singleStackMeta.pendingNextFlight) {
       els.singleCollectedStack.hidden = true;
       els.singleCollectedStack.classList.remove('is-waiting');
     }
@@ -1132,10 +1160,24 @@ function updateSingleCollectedStack({ skipSwap = false } = {}) {
   els.singleCollectedStack.style.width = `${w}px`;
   els.singleCollectedStack.style.height = `${h}px`;
   els.singleCollectedStack.hidden = false;
-  if (!skipSwap && singleStackMeta.activeFlights === 0) {
+  if (!skipSwap && singleStackMeta.activeFlights === 0 && !singleStackMeta.pendingNextFlight) {
     els.singleCollectedStack.classList.remove('is-waiting');
     paintSingleStackTopCard(collectedIdx);
   }
+}
+
+function getSingleStackCenterCoords(bookRect, stageRect) {
+  const stackW = els.singleCollectedStack.offsetWidth;
+  const stackH = els.singleCollectedStack.offsetHeight;
+  const dstCenterX = els.singleCollectedStack.offsetLeft + stackW / 2;
+  const dstCenterY = els.singleCollectedStack.offsetTop + stackH / 2;
+  const srcX = bookRect.left - stageRect.left;
+  const srcY = bookRect.top - stageRect.top;
+  const dstX = dstCenterX - bookRect.width / 2;
+  const dstY = dstCenterY - bookRect.height / 2;
+  const sx = stackW / bookRect.width;
+  const sy = stackH / bookRect.height;
+  return { srcX, srcY, dstX, dstY, sx, sy, stackW, stackH };
 }
 
 function updateSingleDragPickup(data) {
@@ -1164,8 +1206,7 @@ function updateSingleDragPickup(data) {
 
   const stageRect = els.stage.getBoundingClientRect();
   const bookRect = els.bookContainer.getBoundingClientRect();
-  const destRect = els.singleCollectedStack.getBoundingClientRect();
-  if (!stageRect.width || !bookRect.width || !destRect.width) return;
+  if (!stageRect.width || !bookRect.width || !els.singleCollectedStack.offsetWidth) return;
 
   let card = singleStackMeta.dragCard;
   if (!card || Number(card.dataset.pageIdx) !== pageToDraw) {
@@ -1192,11 +1233,7 @@ function updateSingleDragPickup(data) {
   }
 
   const r = clamp(data.liftRatio || 0, 0, 1);
-  const srcX = bookRect.left - stageRect.left;
-  const srcY = bookRect.top - stageRect.top;
-  const dstX = destRect.left - stageRect.left;
-  const dstY = destRect.top - stageRect.top;
-  const minScale = destRect.width / bookRect.width;
+  const { srcX, srcY, dstX, dstY, sx } = getSingleStackCenterCoords(bookRect, stageRect);
 
   let x;
   let y;
@@ -1206,10 +1243,9 @@ function updateSingleDragPickup(data) {
   let op;
 
   if (isPrev) {
-    // Lifting from top-left stack (r=0) -> expanding smoothly down onto center book (r=1)
-    scale = minScale + r * (0.94 - minScale);
-    const ptrX = (data.clientX ? data.clientX - stageRect.left : (dstX + (srcX - dstX) * r)) - (bookRect.width * scale) / 2;
-    const ptrY = (data.clientY ? data.clientY - stageRect.top : (dstY + (srcY - dstY) * r)) - (bookRect.height * scale) / 2;
+    scale = sx + r * (0.94 - sx);
+    const ptrX = (data.clientX ? data.clientX - stageRect.left : (dstX + (srcX - dstX) * r + bookRect.width / 2)) - bookRect.width / 2;
+    const ptrY = (data.clientY ? data.clientY - stageRect.top : (dstY + (srcY - dstY) * r + bookRect.height / 2)) - bookRect.height / 2;
     const targetX = dstX + (srcX - dstX) * r;
     const targetY = dstY + (srcY - dstY) * r;
     x = targetX + (ptrX - targetX) * Math.sin(r * Math.PI) * 0.55;
@@ -1219,9 +1255,9 @@ function updateSingleDragPickup(data) {
     op = 1;
     els.singleCollectedStack.classList.remove('is-drop-ready');
   } else {
-    scale = 0.88 - r * (0.88 - Math.max(minScale * 1.12, 0.36));
-    const ptrX = (data.clientX ? data.clientX - stageRect.left : srcX) - (bookRect.width * scale) / 2;
-    const ptrY = (data.clientY ? data.clientY - stageRect.top : srcY) - (bookRect.height * scale) / 2;
+    scale = 0.88 - r * (0.88 - Math.max(sx * 1.12, 0.36));
+    const ptrX = (data.clientX ? data.clientX - stageRect.left : srcX + bookRect.width / 2) - bookRect.width / 2;
+    const ptrY = (data.clientY ? data.clientY - stageRect.top : srcY + bookRect.height / 2) - bookRect.height / 2;
     const follow = clamp(r * 1.2, 0, 1);
     x = (srcX - 24) + (ptrX - (srcX - 24)) * follow * 0.72 + (dstX - (srcX - 24)) * Math.max(0, r - 0.35) * 0.45;
     y = (srcY - 8) + (ptrY - (srcY - 8)) * follow * 0.72 + (dstY - (srcY - 8)) * Math.max(0, r - 0.35) * 0.45;
@@ -1237,7 +1273,7 @@ function updateSingleDragPickup(data) {
   singleStackMeta.dragPose = { transform: transformStr, opacity: op, x, y, scale, rotY, rotZ };
 }
 
-function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
+function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, fromPeelRelay = false }) {
   if (!els.singleCollectedStack || !els.singleFlightLayer || !els.stage || !els.bookContainer) {
     clearSingleDragCard();
     return false;
@@ -1274,8 +1310,7 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
     }
   }
 
-  const destRect = els.singleCollectedStack.getBoundingClientRect();
-  if (!destRect.width || !destRect.height) return false;
+  if (!els.singleCollectedStack.offsetWidth || !els.singleCollectedStack.offsetHeight) return false;
 
   // Cap concurrent rapid flights so spamming arrows stays 60fps
   while (els.singleFlightLayer.children.length >= 3) {
@@ -1304,14 +1339,9 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
   card.appendChild(shade);
   els.singleFlightLayer.appendChild(card);
 
-  const srcX = bookRect.left - stageRect.left;
-  const srcY = bookRect.top - stageRect.top;
-  const dstX = destRect.left - stageRect.left;
-  const dstY = destRect.top - stageRect.top;
-  const sx = destRect.width / bookRect.width;
-  const sy = destRect.height / bookRect.height;
+  const { srcX, srcY, dstX, dstY, sx, sy } = getSingleStackCenterCoords(bookRect, stageRect);
   const midX = (srcX + dstX) / 2 - 22;
-  const midY = Math.min(srcY, dstY) - 18;
+  const midY = (srcY + dstY) * 0.5 - 12;
   const midScale = (1 + sx) * 0.52;
 
   singleStackMeta.activeFlights += 1;
@@ -1319,18 +1349,18 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
   let keyframes;
   let duration;
   if (goingNext && dragPose) {
-    const mx = (dragPose.x + dstX) * 0.5 - 12;
-    const my = Math.min(dragPose.y, dstY) - 14;
+    const mx = (dragPose.x + dstX) * 0.5 - 10;
+    const my = (dragPose.y + dstY) * 0.5 - 8;
     const ms = (dragPose.scale + sx) * 0.5;
     keyframes = [
-      { transform: dragPose.transform, opacity: Math.max(0.9, dragPose.opacity), offset: 0 },
-      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-14deg) rotateZ(-3deg) scale(${ms})`, opacity: 0.98, offset: 0.5 },
+      { transform: dragPose.transform, opacity: Math.max(0.92, dragPose.opacity), offset: 0 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-12deg) rotateZ(-2.5deg) scale(${ms})`, opacity: 0.99, offset: 0.5 },
       { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
     ];
-    duration = 280;
+    duration = 270;
   } else if (!goingNext && dragPose) {
     const mx = (dragPose.x + srcX) * 0.5 - 6;
-    const my = Math.min(dragPose.y, srcY) - 8;
+    const my = (dragPose.y + srcY) * 0.5 - 8;
     const ms = (dragPose.scale + 1) * 0.5;
     keyframes = [
       { transform: dragPose.transform, opacity: 1, offset: 0 },
@@ -1338,12 +1368,21 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
       { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
     ];
     duration = 285;
+  } else if (goingNext && fromPeelRelay) {
+    const mx = (srcX + dstX) * 0.46 - 20;
+    const my = (srcY + dstY) * 0.5 - 12;
+    keyframes = [
+      { transform: `translate3d(${srcX - 24}px, ${srcY - 6}px, 0) rotateY(-20deg) rotateZ(-2.5deg) scale(0.88)`, opacity: 0.18, offset: 0 },
+      { transform: `translate3d(${srcX - 42}px, ${srcY - 14}px, 0) rotateY(-22deg) rotateZ(-3.5deg) scale(0.81)`, opacity: 0.98, offset: 0.14 },
+      { transform: `translate3d(${mx}px, ${my}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.99, offset: 0.48 },
+      { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
+    ];
+    duration = 310;
   } else {
     keyframes = goingNext
       ? [
-          { transform: `translate3d(${srcX - 24}px, ${srcY}px, 0) rotateY(-14deg) rotateZ(-2deg) scale(0.94)`, opacity: 0, offset: 0 },
-          { transform: `translate3d(${srcX - 36}px, ${srcY - 8}px, 0) rotateY(-22deg) rotateZ(-4deg) scale(0.84)`, opacity: 0.96, offset: 0.22 },
-          { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.98, offset: 0.56 },
+          { transform: `translate3d(${srcX - 28}px, ${srcY - 6}px, 0) rotateY(-20deg) rotateZ(-3deg) scale(0.86)`, opacity: 0.94, offset: 0 },
+          { transform: `translate3d(${midX}px, ${midY}px, 0) rotateY(-24deg) rotateZ(-5deg) scale(${midScale})`, opacity: 0.99, offset: 0.46 },
           { transform: `translate3d(${dstX}px, ${dstY}px, 0) rotateY(0deg) rotateZ(-1.5deg) scale(${sx}, ${sy})`, opacity: 1, offset: 1 },
         ]
       : [
@@ -1352,7 +1391,7 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
           { transform: `translate3d(${srcX - 10}px, ${srcY - 4}px, 0) rotateY(15deg) rotateX(2deg) rotateZ(1deg) scale(0.95)`, opacity: 1, offset: 0.72 },
           { transform: `translate3d(${srcX}px, ${srcY}px, 0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1)`, opacity: 1, offset: 1 },
         ];
-    duration = goingNext ? 440 : 430;
+    duration = goingNext ? 340 : 430;
   }
 
   const anim = card.animate(keyframes, {
@@ -1362,16 +1401,13 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false }) {
   });
 
   const finishFlight = () => {
-    card.remove();
     singleStackMeta.activeFlights = Math.max(0, singleStackMeta.activeFlights - 1);
     if (singleStackMeta.activeFlights === 0) {
       updateSingleCollectedStack();
-      if (goingNext && !els.singleCollectedStack.hidden) {
-        els.singleCollectedStack.classList.remove('is-landing');
-        void els.singleCollectedStack.offsetWidth;
-        els.singleCollectedStack.classList.add('is-landing');
-      }
     }
+    requestAnimationFrame(() => {
+      card.remove();
+    });
   };
   anim.addEventListener('finish', finishFlight, { once: true });
   anim.addEventListener('cancel', finishFlight, { once: true });
@@ -2822,9 +2858,11 @@ function wireEvents() {
   els.pageScrubber.addEventListener('change', () => {
     els.scrubberTooltip.hidden = true;
     jumpToPage(Number(els.pageScrubber.value), false);
+    els.pageScrubber.blur();
   });
   els.pageScrubber.addEventListener('pointerup', () => {
     els.scrubberTooltip.hidden = true;
+    els.pageScrubber.blur();
   });
 
   // Toolbar Buttons
