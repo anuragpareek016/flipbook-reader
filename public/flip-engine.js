@@ -280,6 +280,16 @@ function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = fa
       if (userHl && userHl.children.length > 0) {
         wrap.appendChild(userHl.cloneNode(true));
       }
+      const marginNotes = pageNode.querySelector('.fb-margin-notes');
+      if (marginNotes && marginNotes.children.length > 0) {
+        const clonedNotes = marginNotes.cloneNode(true);
+        clonedNotes.querySelectorAll('.fb-margin-note-pin').forEach((p) => {
+          p.disabled = true;
+          p.tabIndex = -1;
+          p.classList.remove('is-dragging');
+        });
+        wrap.appendChild(clonedNotes);
+      }
     }
   } else {
     if (!reverseBack) {

@@ -205,6 +205,7 @@ const els = {
   searchResults: document.getElementById('searchResults'),
   btnToggleCurrentBookmark: document.getElementById('btnToggleCurrentBookmark'),
   btnAddStickyTabDrawer: document.getElementById('btnAddStickyTabDrawer'),
+  btnAddMarginNoteDrawer: document.getElementById('btnAddMarginNoteDrawer'),
   bookmarksList: document.getElementById('bookmarksList'),
   valPaperWarmth: document.getElementById('valPaperWarmth'),
   btnPaperWarmDec: document.getElementById('btnPaperWarmDec'),
@@ -225,7 +226,9 @@ const els = {
   btnPaperScaleInc: document.getElementById('btnPaperScaleInc'),
   paperGrainScaleInput: document.getElementById('paperGrainScaleInput'),
   paperGrainScalePills: document.getElementById('paperGrainScalePills'),
-  highlightsSummary: document.getElementById('highlightsSummary'),
+  savesSummary: document.getElementById('savesSummary'),
+  savesCategoryChips: document.getElementById('savesCategoryChips'),
+  savesClearRow: document.getElementById('savesClearRow'),
   btnToggleNotesView: document.getElementById('btnToggleNotesView'),
   btnCopyPageNotes: document.getElementById('btnCopyPageNotes'),
   btnExportMarkdown: document.getElementById('btnExportMarkdown'),
@@ -233,7 +236,6 @@ const els = {
   btnClearHighlights: document.getElementById('btnClearHighlights'),
   hlPageChips: document.getElementById('hlPageChips'),
   hlPageSelect: document.getElementById('hlPageSelect'),
-  highlightsList: document.getElementById('highlightsList'),
   hlNotesSheet: document.getElementById('hlNotesSheet'),
   hlPopover: document.getElementById('hlPopover'),
   hlPopoverDivider: document.getElementById('hlPopoverDivider'),
@@ -340,6 +342,7 @@ const state = {
   ctxPageCoords: null,
   snipActive: false,
   snipCapture: null, // { page, rect, canvas }
+  savesCategory: 'all', // 'all' | 'sticky' | 'highlights' | 'bookmarks'
   hlFilterMode: 'all', // 'all' | 'current' | 'page'
   hlFilterPage: null,
   hlNotesView: false,
@@ -716,6 +719,7 @@ function disposeBook() {
   els.searchStatus.textContent = '';
   state.pageNodes = [];
   state.highlights = [];
+  state.savesCategory = 'all';
   state.hlFilterMode = 'all';
   state.hlFilterPage = null;
   hideHighlightPopover();
@@ -1597,6 +1601,30 @@ function createFlightSnapshotCanvas(pageIdx, targetW, targetH, className) {
   return null;
 }
 
+function appendMiniPageOverlays(containerEl, pageIdx, { tinyStack = false } = {}) {
+  if (!containerEl || !Number.isInteger(pageIdx)) return;
+  containerEl.querySelectorAll('.fb-user-highlights, .fb-margin-notes').forEach((n) => n.remove());
+  const srcNode = state.pageNodes[pageIdx];
+  const srcHl = srcNode?.querySelector('.fb-user-highlights');
+  if (srcHl && srcHl.children.length > 0) {
+    containerEl.appendChild(srcHl.cloneNode(true));
+  }
+  const pageNotes = state.marginNotes.filter((n) => n.page === pageIdx + 1);
+  if (pageNotes.length) {
+    const layer = document.createElement('div');
+    layer.className = `fb-margin-notes${tinyStack ? ' is-tiny-stack' : ''}`;
+    for (const note of pageNotes) {
+      const pin = document.createElement('div');
+      pin.className = `fb-margin-note-pin color-${note.color}${note.snipRect ? ' has-snip' : ''}${tinyStack ? ' is-tiny-stack' : ''}`;
+      pin.style.left = `${note.xPct}%`;
+      pin.style.top = `${note.yPct}%`;
+      pin.innerHTML = `<span class="margin-pin-sheet"><span class="margin-pin-fold"></span></span>`;
+      layer.appendChild(pin);
+    }
+    containerEl.appendChild(layer);
+  }
+}
+
 function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
   if (!els.singleCollectedStack || !els.scsTopCard || !els.scsBadge) return;
   if (pageIdx < 0 || pageIdx >= state.totalPages || !state.pdfDoc) return;
@@ -1610,6 +1638,7 @@ function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
   els.singleCollectedStack.dataset.depth = depth;
 
   if (!force && singleStackMeta.renderedIdx === pageIdx && els.scsTopCard.firstChild) {
+    appendMiniPageOverlays(els.scsTopCard, pageIdx, { tinyStack: true });
     return;
   }
   singleStackMeta.renderedIdx = pageIdx;
@@ -1619,10 +1648,12 @@ function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
   if (fastCanvas) {
     els.scsTopCard.innerHTML = '';
     els.scsTopCard.appendChild(fastCanvas);
+    appendMiniPageOverlays(els.scsTopCard, pageIdx, { tinyStack: true });
     return;
   }
 
   els.scsTopCard.innerHTML = `<div class="fb-page-num-placeholder">${pageIdx + 1}</div>`;
+  appendMiniPageOverlays(els.scsTopCard, pageIdx, { tinyStack: true });
   state.pdfDoc.getPage(pageIdx + 1).then((pdfPage) => {
     if (singleStackMeta.renderToken !== token || singleStackMeta.renderedIdx !== pageIdx) return null;
     const rawVp = pdfPage.getViewport({ scale: 1 });
@@ -1642,6 +1673,7 @@ function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
       }
       els.scsTopCard.innerHTML = '';
       els.scsTopCard.appendChild(canvas);
+      appendMiniPageOverlays(els.scsTopCard, pageIdx, { tinyStack: true });
     });
   }).catch(() => {});
 }
@@ -1730,6 +1762,7 @@ function updateSingleDragPickup(data) {
     const shade = document.createElement('div');
     shade.className = 'scs-flying-shade';
     card.appendChild(shade);
+    appendMiniPageOverlays(card, pageToDraw, { tinyStack: false });
     const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
     const dragTab = state.stickyTabs.find((t) => t.page === pageToDraw + 1);
     if (dragTab) {
@@ -1851,6 +1884,7 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   const shade = document.createElement('div');
   shade.className = 'scs-flying-shade';
   card.appendChild(shade);
+  appendMiniPageOverlays(card, flyingPageIdx, { tinyStack: false });
 
   const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
   const flyingTab = state.stickyTabs.find((t) => t.page === flyingPageIdx + 1);
@@ -3003,69 +3037,7 @@ function removeStickyTabForPage(page) {
 
 function updateBookmarkUi() {
   renderBookEdgeTabs();
-  const drawerOpen = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
-  const savesPaneActive = Boolean(document.getElementById('paneBookmarks')?.classList.contains('active'));
-  if (!drawerOpen || !savesPaneActive) {
-    state.bookmarksUiDirty = true;
-    return;
-  }
-  state.bookmarksUiDirty = false;
-  const visible = getVisibleIndices().map((i) => i + 1);
-  const isBookmarked = visible.some((p) => state.bookmarks.includes(p));
-  els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark Page';
-
-  els.bookmarksList.innerHTML = '';
-  const hasTabs = state.stickyTabs.length > 0;
-  const hasBookmarks = state.bookmarks.length > 0;
-  if (!hasTabs && !hasBookmarks) {
-    els.bookmarksList.innerHTML = '<div class="search-status">No saves yet — right-click a page to bookmark or add a sticky tab.</div>';
-    return;
-  }
-
-  for (const tab of [...state.stickyTabs].sort((a, b) => a.page - b.page)) {
-    const row = document.createElement('div');
-    row.className = 'toc-item';
-    row.innerHTML = `
-      <span class="drawer-tab-pill">
-        <span class="drawer-tab-swatch color-${tab.color}"></span>
-        <span>${escapeHtml(tab.label)} — p. ${tab.page}</span>
-      </span>
-      <span class="drawer-item-actions">
-        <button class="drawer-edit-btn" data-action="edit" title="Edit sticky tab">✎</button>
-        <button class="drawer-close" data-action="remove" title="Remove">✕</button>
-      </span>
-    `;
-    row.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (btn?.dataset.action === 'remove') {
-        removeStickyTabForPage(tab.page);
-        return;
-      }
-      if (btn?.dataset.action === 'edit') {
-        openStickyTabPopover(tab.page);
-        return;
-      }
-      jumpToPage(tab.page, false, { reason: 'sticky-tab' });
-    });
-    els.bookmarksList.appendChild(row);
-  }
-
-  const sorted = [...state.bookmarks].sort((a, b) => a - b);
-  for (const p of sorted) {
-    const row = document.createElement('div');
-    row.className = 'toc-item';
-    row.innerHTML = `<span>★ Bookmark — Page ${p}</span><button class="drawer-close" title="Remove">✕</button>`;
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('button')) {
-        state.bookmarks = state.bookmarks.filter((x) => x !== p);
-        updateBookmarkUi();
-        schedulePersistState();
-        return;
-      }
-      jumpToPage(p, false, { reason: 'bookmark' });
-    });
-    els.bookmarksList.appendChild(row);
-  }
+  renderSavesDrawerPane();
 }
 
 function toggleBookmarkCurrent() {
@@ -3692,6 +3664,32 @@ function hideMarginNoteHoverCard() {
   if (els.marginNoteHoverCard) els.marginNoteHoverCard.hidden = true;
 }
 
+function findVisiblePageNodeAtClient(clientX, clientY) {
+  const candidates = [];
+  for (const idx of getVisibleIndices()) {
+    const pageEl = state.pageNodes[idx];
+    if (!pageEl || !pageEl.isConnected) continue;
+    const r = pageEl.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) candidates.push({ idx, pageEl, r });
+  }
+  const exact = candidates.find(
+    (c) => clientX >= c.r.left && clientX <= c.r.right && clientY >= c.r.top && clientY <= c.r.bottom
+  );
+  if (exact) return exact;
+  let best = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const dx = Math.max(c.r.left - clientX, 0, clientX - c.r.right);
+    const dy = Math.max(c.r.top - clientY, 0, clientY - c.r.bottom);
+    const dist = Math.hypot(dx, dy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = c;
+    }
+  }
+  return best;
+}
+
 function paintMarginNotesOnPage(idx) {
   const node = state.pageNodes[idx];
   if (!node) return;
@@ -3703,51 +3701,106 @@ function paintMarginNotesOnPage(idx) {
     if (note.page !== pageNum) continue;
     const pin = document.createElement('button');
     pin.type = 'button';
+    pin.draggable = false;
     pin.className = `fb-margin-note-pin color-${note.color}${note.snipRect ? ' has-snip' : ''}`;
     pin.style.left = `${note.xPct}%`;
     pin.style.top = `${note.yPct}%`;
     pin.setAttribute('aria-label', `Sticky note on page ${note.page}`);
     pin.innerHTML = `<span class="margin-pin-sheet"><span class="margin-pin-fold"></span></span>`;
 
-    let dragMoved = false;
-    let dragStart = null;
+    let justDragged = false;
+    pin.addEventListener('dragstart', (e) => e.preventDefault());
+    pin.addEventListener('mousedown', (e) => e.stopPropagation());
+    pin.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
     pin.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       if (e.button !== 0) return;
-      const pr = node.getBoundingClientRect();
-      if (!pr.width || !pr.height) return;
-      dragMoved = false;
-      dragStart = { px: e.clientX, py: e.clientY, xPct: note.xPct, yPct: note.yPct, pr };
-      pin.setPointerCapture?.(e.pointerId);
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let dragging = false;
+      let lastX = startX;
+      let lastY = startY;
+      let moveRaf = 0;
+
+      const applyFloatPos = () => {
+        moveRaf = 0;
+        if (!dragging) return;
+        pin.style.transform = `translate3d(${lastX}px, ${lastY}px, 0) translate(-50%, -50%) rotate(0deg) scale(1.22)`;
+      };
+
+      const onWinMove = (ev) => {
+        if (ev.pointerId !== undefined && e.pointerId !== undefined && ev.pointerId !== e.pointerId) return;
+        lastX = ev.clientX;
+        lastY = ev.clientY;
+        if (!dragging && Math.hypot(lastX - startX, lastY - startY) > 3) {
+          dragging = true;
+          hideMarginNoteHoverCard();
+          pin.classList.add('is-dragging');
+          document.body.appendChild(pin);
+          applyFloatPos();
+          return;
+        }
+        if (dragging && !moveRaf) {
+          moveRaf = requestAnimationFrame(applyFloatPos);
+        }
+      };
+
+      const finishPinDrag = (ev) => {
+        if (ev && ev.type !== 'blur' && ev.pointerId !== undefined && e.pointerId !== undefined && ev.pointerId !== e.pointerId) {
+          return;
+        }
+        window.removeEventListener('pointermove', onWinMove, true);
+        window.removeEventListener('pointerup', finishPinDrag, true);
+        window.removeEventListener('pointercancel', finishPinDrag, true);
+        window.removeEventListener('blur', finishPinDrag);
+        if (moveRaf) {
+          cancelAnimationFrame(moveRaf);
+          moveRaf = 0;
+        }
+        if (!dragging) return;
+
+        dragging = false;
+        justDragged = true;
+        setTimeout(() => { justDragged = false; }, 60);
+        pin.classList.remove('is-dragging');
+        pin.style.transform = '';
+
+        const dropX = Number.isFinite(ev?.clientX) ? ev.clientX : lastX;
+        const dropY = Number.isFinite(ev?.clientY) ? ev.clientY : lastY;
+        const target = findVisiblePageNodeAtClient(dropX, dropY);
+        const dropIdx = target ? target.idx : idx;
+        const dropRect = target ? target.r : node.getBoundingClientRect();
+        if (dropRect.width > 0 && dropRect.height > 0) {
+          note.page = dropIdx + 1;
+          note.xPct = clamp(((dropX - dropRect.left) / dropRect.width) * 100, 2, 98);
+          note.yPct = clamp(((dropY - dropRect.top) / dropRect.height) * 100, 2, 98);
+        }
+        pin.remove();
+        paintMarginNotesOnPage(idx);
+        if (dropIdx !== idx) paintMarginNotesOnPage(dropIdx);
+        if (Number.isInteger(singleStackMeta.renderedIdx) && (singleStackMeta.renderedIdx === idx || singleStackMeta.renderedIdx === dropIdx)) {
+          appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+        }
+        state.pageFlip?.refreshSnapshots?.();
+        updateBookmarkUi();
+        updateHighlightsUi();
+        schedulePersistState();
+      };
+
+      window.addEventListener('pointermove', onWinMove, true);
+      window.addEventListener('pointerup', finishPinDrag, true);
+      window.addEventListener('pointercancel', finishPinDrag, true);
+      window.addEventListener('blur', finishPinDrag);
     });
-    pin.addEventListener('pointermove', (e) => {
-      if (!dragStart) return;
-      const dx = e.clientX - dragStart.px;
-      const dy = e.clientY - dragStart.py;
-      if (Math.hypot(dx, dy) > 4) {
-        dragMoved = true;
-        hideMarginNoteHoverCard();
-        note.xPct = clamp(dragStart.xPct + (dx / dragStart.pr.width) * 100, 2, 98);
-        note.yPct = clamp(dragStart.yPct + (dy / dragStart.pr.height) * 100, 2, 98);
-        pin.style.left = `${note.xPct}%`;
-        pin.style.top = `${note.yPct}%`;
-      }
+    pin.addEventListener('pointerenter', () => {
+      if (!pin.classList.contains('is-dragging')) showMarginNoteHoverCard(note, pin);
     });
-    const endPinDrag = (e) => {
-      if (!dragStart) return;
-      const moved = dragMoved;
-      dragStart = null;
-      try { pin.releasePointerCapture?.(e.pointerId); } catch {}
-      if (moved) schedulePersistState();
-    };
-    pin.addEventListener('pointerup', endPinDrag);
-    pin.addEventListener('pointercancel', endPinDrag);
-    pin.addEventListener('mousedown', (e) => e.stopPropagation());
-    pin.addEventListener('pointerenter', () => showMarginNoteHoverCard(note, pin));
     pin.addEventListener('pointerleave', () => hideMarginNoteHoverCard());
     pin.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (dragMoved) return;
+      if (justDragged) return;
       hideMarginNoteHoverCard();
       const pr = pin.getBoundingClientRect();
       openMarginNotePopover({
@@ -3840,6 +3893,10 @@ function saveMarginNoteFromPopover() {
   }
   closeMarginNotePopover();
   paintMarginNotesOnPage(draft.page - 1);
+  if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === draft.page - 1) {
+    appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+  }
+  state.pageFlip?.refreshSnapshots?.();
   updateHighlightsUi();
   schedulePersistState();
 }
@@ -3850,6 +3907,10 @@ function deleteMarginNoteById(id) {
   state.marginNotes = state.marginNotes.filter((n) => n.id !== id);
   if (state.marginEditDraft?.id === id) closeMarginNotePopover();
   paintMarginNotesOnPage(target.page - 1);
+  if (Number.isInteger(singleStackMeta.renderedIdx) && singleStackMeta.renderedIdx === target.page - 1) {
+    appendMiniPageOverlays(els.scsTopCard, singleStackMeta.renderedIdx, { tinyStack: true });
+  }
+  state.pageFlip?.refreshSnapshots?.();
   updateHighlightsUi();
   schedulePersistState();
 }
@@ -4004,56 +4065,136 @@ function removeHighlightById(id) {
   schedulePersistState();
 }
 
+function passesSavesPageFilter(pageNum, visiblePages) {
+  if (state.hlFilterMode === 'current') return visiblePages.has(pageNum);
+  if (state.hlFilterMode === 'page' && Number.isInteger(state.hlFilterPage) && state.hlFilterPage >= 1) {
+    return pageNum === state.hlFilterPage;
+  }
+  return true;
+}
+
+function getFilteredSortedStickyTabs() {
+  const visiblePages = new Set(getVisibleIndices().map((i) => i + 1));
+  return [...state.stickyTabs]
+    .filter((t) => passesSavesPageFilter(t.page, visiblePages))
+    .sort((a, b) => a.page - b.page);
+}
+
+function getFilteredSortedBookmarks() {
+  const visiblePages = new Set(getVisibleIndices().map((i) => i + 1));
+  return [...state.bookmarks]
+    .filter((p) => passesSavesPageFilter(p, visiblePages))
+    .sort((a, b) => a - b);
+}
+
 function updateHighlightsUi() {
   const visiblePages = getVisibleIndices().map((i) => i + 1);
   if (els.btnHighlightsTop) {
     const visibleSet = new Set(visiblePages);
-    const spreadHasItems = state.highlights.some((h) => visibleSet.has(h.page)) || state.marginNotes.some((n) => visibleSet.has(n.page));
+    const spreadHasItems =
+      state.highlights.some((h) => visibleSet.has(h.page)) ||
+      state.marginNotes.some((n) => visibleSet.has(n.page));
     els.btnHighlightsTop.classList.toggle('has-hl', spreadHasItems);
     els.btnHighlightsTop.classList.toggle('active', Boolean(els.sideDrawer && !els.sideDrawer.hidden));
   }
+  renderSavesDrawerPane();
+}
+
+function renderSavesDrawerPane() {
   const drawerOpen = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
-  const hlPaneActive = Boolean(document.getElementById('paneHighlights')?.classList.contains('active'));
-  if (!drawerOpen || !hlPaneActive || !els.highlightsList || !els.highlightsSummary) {
+  const savesPaneActive = Boolean(document.getElementById('paneBookmarks')?.classList.contains('active'));
+  if (!drawerOpen || !savesPaneActive || !els.bookmarksList) {
+    state.bookmarksUiDirty = true;
     state.highlightsUiDirty = true;
     return;
   }
+  state.bookmarksUiDirty = false;
   state.highlightsUiDirty = false;
 
-  const filteredHls = getFilteredSortedHighlights();
+  const visiblePages = getVisibleIndices().map((i) => i + 1);
+  const isBookmarked = visiblePages.some((p) => state.bookmarks.includes(p));
+  if (els.btnToggleCurrentBookmark) {
+    els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark';
+  }
+
+  const filteredTabs = getFilteredSortedStickyTabs();
   const filteredNotes = getFilteredSortedMarginNotes();
-  const filteredCount = filteredHls.length + filteredNotes.length;
+  const filteredHls = getFilteredSortedHighlights();
+  const filteredBookmarks = getFilteredSortedBookmarks();
 
-  const perPageCounts = new Map();
-  for (const hl of state.highlights) perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
-  for (const n of state.marginNotes) perPageCounts.set(n.page, (perPageCounts.get(n.page) || 0) + 1);
+  const cat = state.savesCategory || 'all';
+  const showSticky = cat === 'all' || cat === 'sticky';
+  const showHls = cat === 'all' || cat === 'highlights';
+  const showBookmarks = cat === 'all' || cat === 'bookmarks';
 
-  if (state.hlFilterMode === 'page' && state.hlFilterPage) {
-    els.highlightsSummary.textContent = `Page ${state.hlFilterPage}: ${filteredCount} ${filteredCount === 1 ? 'note' : 'notes'}`;
-  } else if (state.hlFilterMode === 'current') {
-    const lbl = visiblePages.length === 2 ? `Pages ${visiblePages[0]}-${visiblePages[1]}` : `Page ${visiblePages[0] || 1}`;
-    els.highlightsSummary.textContent = `${lbl}: ${filteredCount} ${filteredCount === 1 ? 'note' : 'notes'}`;
-  } else {
-    els.highlightsSummary.textContent = `${state.highlights.length} hl · ${state.marginNotes.length} notes`;
+  const stickyAllCount = state.stickyTabs.length + state.marginNotes.length;
+  const hlsAllCount = state.highlights.length;
+  const bmAllCount = state.bookmarks.length;
+  const totalAllCount = stickyAllCount + hlsAllCount + bmAllCount;
+
+  const stickyPageCount = filteredTabs.length + filteredNotes.length;
+  const visibleCount =
+    (showSticky ? stickyPageCount : 0) +
+    (showHls ? filteredHls.length : 0) +
+    (showBookmarks ? filteredBookmarks.length : 0);
+
+  if (els.savesSummary) {
+    if (state.hlFilterMode === 'page' && state.hlFilterPage) {
+      els.savesSummary.textContent = `Page ${state.hlFilterPage}: ${visibleCount} saved`;
+    } else if (state.hlFilterMode === 'current') {
+      const lbl = visiblePages.length === 2 ? `Pages ${visiblePages[0]}-${visiblePages[1]}` : `Page ${visiblePages[0] || 1}`;
+      els.savesSummary.textContent = `${lbl}: ${visibleCount} saved`;
+    } else {
+      els.savesSummary.textContent = `${totalAllCount} saved`;
+    }
   }
 
-  els.btnClearHighlights.hidden = totalCount === 0;
-  if (els.btnClearPageHighlights) {
-    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && filteredCount > 0);
-  }
-  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = filteredCount === 0;
-  if (els.btnExportMarkdown) els.btnExportMarkdown.hidden = filteredCount === 0;
+  const notesAndHlPageCount = filteredHls.length + filteredNotes.length;
+  const totalNotesAndHlCount = hlsAllCount + state.marginNotes.length;
+  if (els.btnCopyPageNotes) els.btnCopyPageNotes.hidden = notesAndHlPageCount === 0;
+  if (els.btnExportMarkdown) els.btnExportMarkdown.hidden = notesAndHlPageCount === 0;
   if (els.btnToggleNotesView) {
     els.btnToggleNotesView.classList.toggle('active', !!state.hlNotesView);
     els.btnToggleNotesView.textContent = state.hlNotesView ? 'List View' : 'Notes View';
   }
-  if (els.btnHighlightsTop) {
-    const spreadHasHl = visiblePages.some((p) => perPageCounts.has(p));
-    els.btnHighlightsTop.classList.toggle('has-hl', spreadHasHl);
-    els.btnHighlightsTop.classList.toggle('active', !els.sideDrawer.hidden);
+  if (els.btnClearHighlights) els.btnClearHighlights.hidden = totalNotesAndHlCount === 0;
+  if (els.btnClearPageHighlights) {
+    els.btnClearPageHighlights.hidden = !(state.hlFilterMode !== 'all' && notesAndHlPageCount > 0);
+  }
+  if (els.savesClearRow) {
+    els.savesClearRow.hidden = totalNotesAndHlCount === 0;
   }
 
-  // Compact filter chips (All / This Page) + dropdown select
+  // Category chips: All / Sticky / Highlights / Bookmarks
+  if (els.savesCategoryChips) {
+    els.savesCategoryChips.innerHTML = '';
+    const cats = [
+      { id: 'all', label: `All (${totalAllCount})` },
+      { id: 'sticky', label: `Sticky (${stickyAllCount})` },
+      { id: 'highlights', label: `Highlights (${hlsAllCount})` },
+      { id: 'bookmarks', label: `Bookmarks (${bmAllCount})` },
+    ];
+    for (const c of cats) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `hl-page-chip${cat === c.id ? ' active' : ''}`;
+      btn.dataset.savesCat = c.id;
+      btn.textContent = c.label;
+      btn.addEventListener('click', () => {
+        state.savesCategory = c.id;
+        renderSavesDrawerPane();
+      });
+      els.savesCategoryChips.appendChild(btn);
+    }
+  }
+
+  // Page filter chips (All Pages / This Page) + Page select dropdown
+  const perPageCounts = new Map();
+  for (const t of state.stickyTabs) perPageCounts.set(t.page, (perPageCounts.get(t.page) || 0) + 1);
+  for (const n of state.marginNotes) perPageCounts.set(n.page, (perPageCounts.get(n.page) || 0) + 1);
+  for (const hl of state.highlights) perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
+  for (const bp of state.bookmarks) perPageCounts.set(bp, (perPageCounts.get(bp) || 0) + 1);
+
   if (els.hlPageChips) {
     els.hlPageChips.innerHTML = '';
     const addChip = (label, active, onClick) => {
@@ -4064,16 +4205,15 @@ function updateHighlightsUi() {
       btn.addEventListener('click', onClick);
       els.hlPageChips.appendChild(btn);
     };
-
-    addChip(`All (${totalCount})`, state.hlFilterMode === 'all', () => {
+    addChip('All Pages', state.hlFilterMode === 'all', () => {
       state.hlFilterMode = 'all';
       state.hlFilterPage = null;
-      updateHighlightsUi();
+      renderSavesDrawerPane();
     });
     addChip('This Page', state.hlFilterMode === 'current', () => {
       state.hlFilterMode = 'current';
       state.hlFilterPage = null;
-      updateHighlightsUi();
+      renderSavesDrawerPane();
     });
   }
 
@@ -4082,7 +4222,7 @@ function updateHighlightsUi() {
     els.hlPageSelect.innerHTML = '';
     const defaultOpt = document.createElement('option');
     defaultOpt.value = '';
-    defaultOpt.textContent = pages.length ? `Filter by page (${pages.length})` : 'No notes yet';
+    defaultOpt.textContent = pages.length ? `All pages (${pages.length})` : 'No saves yet';
     els.hlPageSelect.appendChild(defaultOpt);
 
     for (const p of pages) {
@@ -4092,86 +4232,157 @@ function updateHighlightsUi() {
       opt.textContent = `Page ${p} (${n} ${n === 1 ? 'item' : 'items'})`;
       els.hlPageSelect.appendChild(opt);
     }
-    els.hlPageSelect.value = state.hlFilterMode === 'page' && state.hlFilterPage && perPageCounts.has(state.hlFilterPage)
-      ? String(state.hlFilterPage)
-      : '';
+    els.hlPageSelect.value =
+      state.hlFilterMode === 'page' && state.hlFilterPage && perPageCounts.has(state.hlFilterPage)
+        ? String(state.hlFilterPage)
+        : '';
     els.hlPageSelect.disabled = pages.length === 0;
   }
 
-  els.highlightsList.hidden = !!state.hlNotesView;
+  els.bookmarksList.hidden = !!state.hlNotesView;
   if (els.hlNotesSheet) els.hlNotesSheet.hidden = !state.hlNotesView;
 
-  if (!filteredCount) {
-    const emptyMsg = totalCount === 0
-      ? 'Select text to highlight or Alt+Click / right-click a margin to add a 3D Sticky Note.'
-      : 'No highlights or notes on the selected page yet.';
-    els.highlightsList.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
-    if (els.hlNotesSheet) els.hlNotesSheet.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
-    return;
-  }
-
   if (!state.hlNotesView) {
-    els.highlightsList.innerHTML = '';
-    for (const n of filteredNotes) {
-      const row = document.createElement('div');
-      row.className = 'hl-item';
-      row.innerHTML = `
-        <span class="hl-item-dot color-${n.color === 'blue' ? 'blue' : n.color === 'mint' ? 'green' : n.color === 'coral' ? 'pink' : n.color === 'violet' ? 'orange' : 'yellow'}"></span>
-        <div class="hl-item-body">
-          <div class="hl-item-meta"><span class="hl-note-item-badge">Note</span>Page ${n.page}${n.snipRect ? ' · Diagram' : ''}</div>
-          <div class="hl-item-snippet">${escapeHtml(n.text || '(Attached diagram snippet)')}</div>
-        </div>
-        <button class="drawer-close hl-row-del" title="Delete sticky note" aria-label="Delete sticky note">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-          </svg>
-        </button>
-      `;
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('button')) {
-          deleteMarginNoteById(n.id);
-          return;
-        }
-        jumpToPage(n.page, false);
-        openMarginNotePopover({ id: n.id, page: n.page, xPct: n.xPct, yPct: n.yPct, color: n.color, text: n.text, snipRect: n.snipRect });
-      });
-      els.highlightsList.appendChild(row);
+    els.bookmarksList.innerHTML = '';
+    if (!visibleCount) {
+      const emptyMsg = totalAllCount === 0
+        ? 'No saves yet — add a Sticky Note, Sticky Tab, Highlight, or Bookmark on any page.'
+        : 'No matching saves in this filter.';
+      els.bookmarksList.innerHTML = `<div class="search-status">${emptyMsg}</div>`;
+      return;
     }
 
-    for (const hl of filteredHls) {
-      const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
-      const row = document.createElement('div');
-      row.className = 'hl-item';
-      row.dataset.hlId = hl.id;
-      row.innerHTML = `
-        <span class="hl-item-dot color-${color}"></span>
-        <div class="hl-item-body">
-          <div class="hl-item-meta">Page ${hl.page}</div>
-          <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
-        </div>
-        <button class="drawer-close hl-row-del" title="Delete highlight" aria-label="Delete highlight">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-          </svg>
-        </button>
-      `;
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('button')) {
-          removeHighlightById(hl.id);
-          return;
-        }
-        jumpToPage(hl.page, false);
-      });
-      els.highlightsList.appendChild(row);
+    const addSectionHead = (label) => {
+      if (cat !== 'all') return;
+      const h = document.createElement('div');
+      h.className = 'saves-section-head';
+      h.textContent = label;
+      els.bookmarksList.appendChild(h);
+    };
+
+    // 1. Sticky Tabs & Margin Sticky Notes
+    if (showSticky && stickyPageCount > 0) {
+      addSectionHead(`Sticky Tabs & Notes (${stickyPageCount})`);
+      for (const tab of filteredTabs) {
+        const row = document.createElement('div');
+        row.className = 'toc-item';
+        row.innerHTML = `
+          <span class="drawer-tab-pill">
+            <span class="drawer-tab-swatch color-${tab.color}"></span>
+            <span>${escapeHtml(tab.label)} — p. ${tab.page}</span>
+          </span>
+          <span class="drawer-item-actions">
+            <button class="drawer-edit-btn" data-action="edit" title="Edit sticky tab">✎</button>
+            <button class="drawer-close" data-action="remove" title="Remove">✕</button>
+          </span>
+        `;
+        row.addEventListener('click', (e) => {
+          const btn = e.target.closest('button');
+          if (btn?.dataset.action === 'remove') {
+            removeStickyTabForPage(tab.page);
+            return;
+          }
+          if (btn?.dataset.action === 'edit') {
+            openStickyTabPopover(tab.page);
+            return;
+          }
+          jumpToPage(tab.page, false, { reason: 'sticky-tab' });
+        });
+        els.bookmarksList.appendChild(row);
+      }
+
+      for (const n of filteredNotes) {
+        const row = document.createElement('div');
+        row.className = 'hl-item';
+        row.innerHTML = `
+          <span class="hl-item-dot color-${n.color === 'blue' ? 'blue' : n.color === 'mint' ? 'green' : n.color === 'coral' ? 'pink' : n.color === 'violet' ? 'orange' : 'yellow'}"></span>
+          <div class="hl-item-body">
+            <div class="hl-item-meta"><span class="hl-note-item-badge">Note</span>Page ${n.page}${n.snipRect ? ' · Diagram' : ''}</div>
+            <div class="hl-item-snippet">${escapeHtml(n.text || '(Attached diagram snippet)')}</div>
+          </div>
+          <button class="drawer-close hl-row-del" title="Delete sticky note" aria-label="Delete sticky note">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+        `;
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('button')) {
+            deleteMarginNoteById(n.id);
+            return;
+          }
+          jumpToPage(n.page, false);
+          openMarginNotePopover({ id: n.id, page: n.page, xPct: n.xPct, yPct: n.yPct, color: n.color, text: n.text, snipRect: n.snipRect });
+        });
+        els.bookmarksList.appendChild(row);
+      }
+    }
+
+    // 2. Highlights
+    if (showHls && filteredHls.length > 0) {
+      addSectionHead(`Highlights (${filteredHls.length})`);
+      for (const hl of filteredHls) {
+        const color = HIGHLIGHT_COLORS.includes(hl.color) ? hl.color : 'yellow';
+        const row = document.createElement('div');
+        row.className = 'hl-item';
+        row.dataset.hlId = hl.id;
+        row.innerHTML = `
+          <span class="hl-item-dot color-${color}"></span>
+          <div class="hl-item-body">
+            <div class="hl-item-meta">Page ${hl.page}</div>
+            <div class="hl-item-snippet">${escapeHtml(hl.text || '(Highlighted region)')}</div>
+          </div>
+          <button class="drawer-close hl-row-del" title="Delete highlight" aria-label="Delete highlight">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+        `;
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('button')) {
+            removeHighlightById(hl.id);
+            return;
+          }
+          jumpToPage(hl.page, false);
+        });
+        els.bookmarksList.appendChild(row);
+      }
+    }
+
+    // 3. Bookmarks
+    if (showBookmarks && filteredBookmarks.length > 0) {
+      addSectionHead(`Bookmarks (${filteredBookmarks.length})`);
+      for (const p of filteredBookmarks) {
+        const row = document.createElement('div');
+        row.className = 'toc-item';
+        row.innerHTML = `<span>★ Bookmark — Page ${p}</span><button class="drawer-close" title="Remove">✕</button>`;
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('button')) {
+            state.bookmarks = state.bookmarks.filter((x) => x !== p);
+            updateBookmarkUi();
+            schedulePersistState();
+            return;
+          }
+          jumpToPage(p, false, { reason: 'bookmark' });
+        });
+        els.bookmarksList.appendChild(row);
+      }
     }
     return;
   }
 
-  // Consolidated reading-order Page Notes view (Sticky Notes + Highlights)
+  // Consolidated reading-order Notes View (Sticky Notes + Highlights)
   if (els.hlNotesSheet) {
     els.hlNotesSheet.innerHTML = '';
+    if (!notesAndHlPageCount) {
+      const emptyNotes = totalNotesAndHlCount === 0
+        ? 'No sticky notes or highlights yet — Alt+Click a page margin or select text to highlight.'
+        : 'No sticky notes or highlights on the selected page yet.';
+      els.hlNotesSheet.innerHTML = `<div class="search-status">${emptyNotes}</div>`;
+      return;
+    }
     const groups = new Map();
     for (const n of filteredNotes) {
       if (!groups.has(n.page)) groups.set(n.page, { notes: [], highlights: [] });
@@ -7370,27 +7581,29 @@ function toggleAutoScrollEnabled() {
 }
 
 function openDrawerTab(tabName) {
+  const normalized = tabName === 'highlights' ? 'bookmarks' : tabName;
+  if (tabName === 'highlights') {
+    state.savesCategory = 'highlights';
+  }
   els.sideDrawer.hidden = false;
   els.btnHighlightsTop?.classList.add('active');
   document.querySelectorAll('.drawer-tab').forEach((t) => {
-    t.classList.toggle('active', t.dataset.tab === tabName);
+    t.classList.toggle('active', t.dataset.tab === normalized);
   });
   document.querySelectorAll('.drawer-pane').forEach((p) => p.classList.remove('active'));
   const targetMap = {
     toc: 'paneToc',
     search: 'paneSearch',
     bookmarks: 'paneBookmarks',
-    highlights: 'paneHighlights',
     text: 'paneText',
   };
-  document.getElementById(targetMap[tabName])?.classList.add('active');
-  if (tabName === 'search') {
+  document.getElementById(targetMap[normalized])?.classList.add('active');
+  if (normalized === 'search') {
     setTimeout(() => els.searchInput.focus(), 40);
-  } else if (tabName === 'text') {
+  } else if (normalized === 'text') {
     refreshTextPane();
-  } else if (tabName === 'bookmarks') {
+  } else if (normalized === 'bookmarks') {
     updateBookmarkUi();
-  } else if (tabName === 'highlights') {
     updateHighlightsUi();
   }
 }
@@ -7824,7 +8037,7 @@ function wireEvents() {
       els.btnHighlightsTop?.classList.remove('active');
       updateHighlightsUi();
     } else {
-      const activeTab = document.querySelector('.drawer-tab.active')?.dataset.tab || 'highlights';
+      const activeTab = document.querySelector('.drawer-tab.active')?.dataset.tab || 'bookmarks';
       openDrawerTab(activeTab);
     }
   });
@@ -7833,6 +8046,12 @@ function wireEvents() {
   els.btnAddStickyTabDrawer?.addEventListener('click', (e) => {
     e.stopPropagation();
     openStickyTabPopover();
+  });
+  els.btnAddMarginNoteDrawer?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!state.pdfDoc) return;
+    const primary = (getVisibleIndices()[0] ?? 0) + 1;
+    openMarginNotePopover({ page: primary, xPct: 8, yPct: 16 });
   });
   els.btnStickySideLeft?.addEventListener('click', () => {
     const visible = getVisibleIndices().map((i) => i + 1);

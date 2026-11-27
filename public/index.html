@@ -38,7 +38,7 @@
             <path d="M21.05 13.38a.85.85 0 0 0-1.05-.13A6.95 6.95 0 0 1 10.75 4a.85.85 0 0 0-.97-1.15A9.35 9.35 0 1 0 21.15 14.35a.85.85 0 0 0-.1-.97Z"/>
           </svg>
         </button>
-        <button id="btnHighlightsTop" class="icon-chip" title="Reader Panel: Contents, Search, Saves, Highlights &amp; Text (H)" aria-label="Open reader panel (Contents, Search, Saves, Highlights, Text)">
+        <button id="btnHighlightsTop" class="icon-chip" title="Reader Panel: Contents, Search, Saves &amp; Text (H)" aria-label="Open reader panel (Contents, Search, Saves, Text)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
             <path fill-rule="evenodd" clip-rule="evenodd" d="M5.25 3A2.75 2.75 0 0 0 2.5 5.75v12.5A2.75 2.75 0 0 0 5.25 21h13.5a2.75 2.75 0 0 0 2.75-2.75V5.75A2.75 2.75 0 0 0 18.75 3H5.25Zm9.5 2v14h4a.75.75 0 0 0 .75-.75V5.75a.75.75 0 0 0-.75-.75h-4Zm1.5 3.25a.75.75 0 0 1 .75-.75h1.25a.75.75 0 0 1 0 1.5H17a.75.75 0 0 1-.75-.75Zm.75 3a.75.75 0 0 0 0 1.5h1.25a.75.75 0 0 0 0-1.5H17Zm-.75 3.75a.75.75 0 0 1 .75-.75h1.25a.75.75 0 0 1 0 1.5H17a.75.75 0 0 1-.75-.75Z"/>
           </svg>
@@ -602,13 +602,12 @@
       </div>
     </section>
 
-    <!-- Slide-over Drawer (Search / TOC / Saves / Page Text / Library) -->
+    <!-- Slide-over Drawer (Contents / Search / Saves / Text) -->
     <aside id="sideDrawer" class="side-drawer" hidden>
       <div class="drawer-tabs">
         <button class="drawer-tab active" data-tab="toc">Contents</button>
         <button class="drawer-tab" data-tab="search">Search</button>
         <button class="drawer-tab" data-tab="bookmarks">Saves</button>
-        <button class="drawer-tab" data-tab="highlights">Highlights</button>
         <button class="drawer-tab" data-tab="text">Text</button>
         <button id="btnCloseDrawer" class="drawer-close" aria-label="Close panel">✕</button>
       </div>
@@ -627,32 +626,32 @@
       </div>
 
       <div id="paneBookmarks" class="drawer-pane">
-        <div class="bookmarks-actions sticky-drawer-actions">
-          <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark Page</button>
+        <div class="bookmarks-actions sticky-drawer-actions saves-add-actions">
+          <button id="btnToggleCurrentBookmark" class="btn-small">+ Bookmark</button>
           <button id="btnAddStickyTabDrawer" class="btn-small sticky-drawer-add-btn">+ Sticky Tab</button>
+          <button id="btnAddMarginNoteDrawer" class="btn-small margin-drawer-add-btn">+ Sticky Note</button>
         </div>
-        <div id="bookmarksList" class="bookmarks-list"></div>
-      </div>
-
-      <div id="paneHighlights" class="drawer-pane">
         <div class="bookmarks-actions hl-actions-head">
-          <span id="highlightsSummary">0 notes</span>
+          <span id="savesSummary">0 saved</span>
           <div class="hl-header-btns">
             <button id="btnToggleNotesView" class="btn-small" title="View highlights and sticky notes as study notes">Notes View</button>
             <button id="btnCopyPageNotes" class="btn-small" hidden title="Copy Markdown study notes to clipboard">Copy MD</button>
             <button id="btnExportMarkdown" class="btn-small" hidden title="Download Markdown study export (.md)">Export .md</button>
-            <button id="btnClearPageHighlights" class="btn-small btn-danger-subtle" hidden title="Delete all highlights &amp; notes on this page">Clear Page</button>
-            <button id="btnClearHighlights" class="btn-small btn-danger-subtle" hidden>Clear All</button>
           </div>
         </div>
+        <div id="savesCategoryChips" class="saves-cat-chips" role="group" aria-label="Filter saves by type"></div>
         <div class="hl-filter-bar">
           <div id="hlPageChips" class="hl-page-chips"></div>
-          <select id="hlPageSelect" class="hl-page-select" aria-label="Select highlighted page">
+          <select id="hlPageSelect" class="hl-page-select" aria-label="Filter saves by page">
             <option value="">All Pages</option>
           </select>
         </div>
-        <div id="highlightsList" class="bookmarks-list"></div>
+        <div id="bookmarksList" class="bookmarks-list"></div>
         <div id="hlNotesSheet" class="hl-notes-sheet" hidden></div>
+        <div class="saves-clear-row" id="savesClearRow" hidden>
+          <button id="btnClearPageHighlights" class="btn-small btn-danger-subtle" hidden title="Delete highlights &amp; notes on selected page">Clear Page Notes</button>
+          <button id="btnClearHighlights" class="btn-small btn-danger-subtle" hidden title="Delete all highlights &amp; notes">Clear Notes/HL</button>
+        </div>
       </div>
 
       <div id="paneText" class="drawer-pane">
