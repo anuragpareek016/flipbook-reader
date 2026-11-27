@@ -2321,7 +2321,7 @@ function computeGlobalTabPositionsMap(tabs) {
   const minY = 11;
   const maxY = 87;
   const span = maxY - minY;
-  const gap = Math.min(8.4, span / Math.max(1, sorted.length));
+  const gap = Math.min(7.2, span / Math.max(1, sorted.length));
   const totalPagesDenom = Math.max(1, state.totalPages - 1);
 
   const ys = sorted.map((t, i) => {
@@ -2485,7 +2485,10 @@ function reconcileEdgeTabContainer(containerEl, entries, posMap, visible1Based, 
     const ratio = isRightSide
       ? (isCur || state.totalPages <= tab.curLast ? 0 : clamp((tab.page - tab.curLast) / Math.max(1, state.totalPages - tab.curLast), 0, 1))
       : (isCur || tab.curFirst <= 1 ? 0 : clamp((tab.curFirst - tab.page) / Math.max(1, tab.curFirst - 1), 0, 1));
-    const depthPx = Math.round(ratio * stackThick);
+    const rawDepth = Math.round(ratio * stackThick);
+    const depthPx = isCur
+      ? 0
+      : clamp(rawDepth, stackThick >= 2 ? 1 : 0, stackThick);
     const stackSpan = Math.max(0, stackThick - depthPx);
     const zIndex = isCur ? 250 : 200 - Math.min(180, rank);
     const opts = {
@@ -3998,22 +4001,21 @@ function drawMagStickyTab(
   y,
   w,
   h,
-  { color = 'amber', label = '', isRightSide = true, isCurrent = false, tailW = 0, zoomScale = 1, alpha = 1 } = {}
+  { color = 'amber', label = '', isRightSide = true, isCurrent = false, tailW = 0, zoomScale = 1, alpha = 1, fontSizePx = 0, domTruncated = null } = {}
 ) {
   if (w <= 0.5 || h <= 0.5 || alpha <= 0.01) return;
   const pal = MAG_STICKY_TAB_COLORS[color] || MAG_STICKY_TAB_COLORS.amber;
   const z = Math.max(0.25, zoomScale);
-  const r = Math.min(3.5 * z, w * 0.35, h * 0.45);
+  const r = Math.min(3 * z, w * 0.35, h * 0.45);
   const radii = isRightSide ? [0, r, r, 0] : [r, 0, 0, r];
 
   ctx.save();
   ctx.globalAlpha *= alpha;
 
-  // Tail strip linking edge stack tab cleanly to its deeper page offset
+  // Tail strip linking edge stack tab cleanly to its deeper page offset (100% opaque matte paper)
   if (tailW > 0.5) {
     const tailX = isRightSide ? x - tailW : x + w;
     ctx.save();
-    ctx.globalAlpha *= 0.88;
     ctx.fillStyle = pal.deep;
     ctx.fillRect(tailX, y, tailW, h);
     const bevelG = ctx.createLinearGradient(0, y, 0, y + h);
@@ -4047,7 +4049,7 @@ function drawMagStickyTab(
   roundRectPathCustom(ctx, x, y, w, h, radii);
   ctx.clip();
 
-  const stopOffset = clamp((12 * z) / Math.max(1, w), 0.05, 0.9);
+  const stopOffset = clamp((10 * z) / Math.max(1, w), 0.05, 0.9);
   const bodyG = isRightSide
     ? ctx.createLinearGradient(x, 0, x + w, 0)
     : ctx.createLinearGradient(x + w, 0, x, 0);
@@ -4074,10 +4076,10 @@ function drawMagStickyTab(
   ctx.fillRect(isRightSide ? x : x + w - seamW, y, seamW, h);
 
   // Dot marker & crisp bold label
-  const dotR = 2.25 * z;
-  const gap = 4 * z;
-  const innerPad = 8 * z;
-  const outerPad = 11 * z;
+  const dotR = 2 * z;
+  const gap = 3.5 * z;
+  const innerPad = 6.5 * z;
+  const outerPad = 9 * z;
   const midY = y + h / 2;
   const dotCx = isRightSide ? x + innerPad + dotR : x + w - innerPad - dotR;
 
@@ -4090,13 +4092,13 @@ function drawMagStickyTab(
   ctx.restore();
 
   if (label) {
-    const fontSize = Math.max(5, 11 * z);
-    ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif`;
+    const fontSize = Math.max(4.5, fontSizePx || 10 * z);
+    ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif`;
     ctx.fillStyle = pal.ink;
     ctx.textBaseline = 'middle';
-    const textMaxW = Math.max(4, w - innerPad - outerPad - dotR * 2 - gap);
+    const textMaxW = Math.max(4, w - innerPad - outerPad * 0.75 - dotR * 2 - gap);
     let drawLabel = label;
-    if (ctx.measureText(drawLabel).width > textMaxW) {
+    if (domTruncated !== false && ctx.measureText(drawLabel).width > textMaxW + 0.5) {
       while (drawLabel.length > 1 && ctx.measureText(`${drawLabel}…`).width > textMaxW) {
         drawLabel = drawLabel.slice(0, -1);
       }
@@ -4219,6 +4221,10 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
   }
   items.sort((a, b) => (a.z - b.z) || (a.idx - b.idx));
 
+  const scopeEl = containerEl.closest('.book-shell, .scroll-tabs-rail');
+  const domTabZoom = parseFloat(scopeEl?.style.getPropertyValue('--tab-zoom') || '1') || 1;
+  const tabZoomScale = Math.max(0.32, domTabZoom * power);
+
   for (const item of items) {
     const { btn, r, tailW } = item;
     const dx = fw / 2 + (r.left - lensCx) * power;
@@ -4230,13 +4236,19 @@ function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx,
     const maxX = isRightSide ? dx + dw : dx + dw + dTail;
     if (maxX < -30 || minX > fw + 30 || dy + dh < -30 || dy > fh + 30) continue;
 
+    const textEl = btn.querySelector('.sticky-tab-text');
+    const domTruncated = textEl ? textEl.scrollWidth > textEl.clientWidth + 1.5 : null;
+    const domFontPx = (parseFloat(getComputedStyle(btn).fontSize) || 10 * domTabZoom) * power;
+
     drawMagStickyTab(ctx, dx, dy, dw, dh, {
       color: getStickyTabColorKey(btn),
       label: getStickyTabText(btn),
       isRightSide,
       isCurrent: btn.classList.contains('is-current'),
       tailW: dTail,
-      zoomScale: Math.max(0.35, dh / 27),
+      zoomScale: tabZoomScale,
+      fontSizePx: domFontPx,
+      domTruncated,
     });
   }
 }
@@ -4250,9 +4262,9 @@ function drawMagTurningTabsForLeaf(ctx, containerEl, x0, y0, pageW, pageH, tabZo
     const yCenter = y0 + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * pageH;
     const sideDir = el.dataset.sideDir || (el.classList.contains('tab-side-left') ? 'left' : 'right');
     const isRightSide = sideDir !== 'left';
-    const tabH = el.offsetHeight || 27 * tabZoom;
-    const tabW = el.offsetWidth || 54 * tabZoom;
-    const tuck = 4 * tabZoom;
+    const tabH = el.offsetHeight || 23 * tabZoom;
+    const tabW = el.offsetWidth || 46 * tabZoom;
+    const tuck = 3 * tabZoom;
     const tabX = isRightSide ? x0 + pageW - tuck : x0 + tuck - tabW;
     const tabY = yCenter - tabH / 2;
 
@@ -4376,9 +4388,9 @@ function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
       for (const el of faceTabs) {
         const topPct = Number(el.dataset.topPct);
         const tabY = edgeTopY + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * (pageH * sy);
-        const tabW = el.offsetWidth || 54 * tabZoom;
-        const tabH = el.offsetHeight || 27 * tabZoom;
-        const tuck = 4 * tabZoom;
+        const tabW = el.offsetWidth || 46 * tabZoom;
+        const tabH = el.offsetHeight || 23 * tabZoom;
+        const tuck = 3 * tabZoom;
         ctx.save();
         ctx.translate(pEdge.x, tabY);
         ctx.scale(sx, sy);
