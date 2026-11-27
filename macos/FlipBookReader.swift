@@ -374,6 +374,7 @@ final class NativeAmbientSoundEngine {
 /// and intercepting Finder PDF drops natively so books stream via the backend and persist in library.json.
 final class FlipBookWebView: WKWebView {
     var onDropPdfURLs: (([URL]) -> Void)?
+    private var magnifyLockUntil: TimeInterval = 0
 
     override init(frame: CGRect, configuration: WKWebViewConfiguration) {
         super.init(frame: frame, configuration: configuration)
@@ -383,6 +384,20 @@ final class FlipBookWebView: WKWebView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         registerForDraggedTypes([.fileURL])
+    }
+
+    override func magnify(with event: NSEvent) {
+        let lockSec: TimeInterval = (event.phase == .ended || event.phase == .cancelled) ? 0.16 : 0.35
+        magnifyLockUntil = max(magnifyLockUntil, ProcessInfo.processInfo.systemUptime + lockSec)
+        super.magnify(with: event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if ProcessInfo.processInfo.systemUptime < magnifyLockUntil &&
+           !event.modifierFlags.contains(.control) {
+            return
+        }
+        super.scrollWheel(with: event)
     }
 
     override func smartMagnify(with event: NSEvent) {

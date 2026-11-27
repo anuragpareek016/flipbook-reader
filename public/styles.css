@@ -2875,10 +2875,25 @@ body.mode-scroll .side-nav {
   display: none;
 }
 
+body.is-scrolling .fb-page .textLayer,
+body.is-scrolling .fb-margin-note-pin,
+body.is-scrolling .scroll-page-edge-tabs {
+  pointer-events: none !important;
+}
+
+.fb-page canvas.fb-canvas {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
 .scroll-viewport {
   position: absolute;
   inset: 0;
   overflow: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 54px 32px 60px;
   box-sizing: border-box;
   user-select: none;
@@ -2894,6 +2909,9 @@ body.mode-scroll .side-nav {
   align-items: center;
   gap: 18px;
   contain: layout style;
+  overflow-anchor: none;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .scroll-page-wrap {

@@ -333,6 +333,8 @@ const state = {
   autoScrollRenderTickAt: 0,
   scrollUserSelecting: false,
   isScrollingActive: false,
+  pinchLockScrollUntil: 0,
+  scrollPinchPreview: null,
 
   zoom: 1,
   committedZoom: 1,
@@ -470,7 +472,7 @@ function getVisibleScrollIndices() {
   const n = els.scrollPages.children.length;
   if (!n || !els.scrollViewport.clientHeight) return getVisibleIndices(state.currentIndex);
   const sv = els.scrollViewport;
-  const pageH = Math.max(160, Math.round(state.pageH * (state.zoom || 1)));
+  const pageH = Math.max(160, Math.round(state.pageH * (state.committedZoom || state.zoom || 1)));
   const stride = pageH + 18;
   const baseTop = els.scrollPages.children[0]?.offsetTop ?? 54;
   const viewTop = sv.scrollTop - 120;
@@ -745,6 +747,9 @@ function disposeBook() {
   clearTimeout(state.scrollSyncTimer);
   state.scrollSyncTimer = null;
   state.isScrollingActive = false;
+  state.scrollPinchPreview = null;
+  if (els.scrollPages) els.scrollPages.style.transform = '';
+  document.body.classList.remove('is-scrolling');
   clearTimeout(state.nearbyRenderTimer);
   state.nearbyRenderTimer = null;
 
@@ -932,6 +937,8 @@ function initScrollView(startIndex = 0) {
 
   buildPageElements();
   els.scrollPages.innerHTML = '';
+  els.scrollPages.style.transform = '';
+  state.scrollPinchPreview = null;
   if (els.shortcutsModal) els.shortcutsModal.hidden = true;
   if (els.lookupModal) els.lookupModal.hidden = true;
   if (els.aboutModal) els.aboutModal.hidden = true;
@@ -957,14 +964,15 @@ function initScrollView(startIndex = 0) {
   els.btnLastPage.hidden = false;
 
   state.scrollObserver = new IntersectionObserver((entries) => {
+    if (state.isScrollingActive || state.scrollPinchPreview) return;
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       const idx = Number(entry.target.dataset.pageIndex);
       if (Number.isFinite(idx)) {
-        renderPageNode(idx);
+        renderPageNode(idx, { withText: false });
       }
     }
-  }, { root: els.scrollViewport, rootMargin: '1200px 0px' });
+  }, { root: els.scrollViewport, rootMargin: '420px 0px' });
 
   for (const wrap of els.scrollPages.children) {
     state.scrollObserver.observe(wrap);
@@ -1650,13 +1658,15 @@ function queueNearbyRenders(centerIdx, radius = 8, { withText = true } = {}) {
   for (const flipIdx of getActiveFlipPageIndices()) {
     if (!immediate.includes(flipIdx)) immediate.push(flipIdx);
   }
-  const allowText = withText && !state.isFlipping;
-  for (const idx of immediate) {
+  const allowText = withText && !state.isFlipping && !state.isScrollingActive;
+  const maxImmediate = state.isScrollingActive ? Math.min(3, immediate.length) : immediate.length;
+  for (let k = 0; k < maxImmediate; k++) {
+    const idx = immediate[k];
     renderPageNode(idx, { withText: allowText && visible.includes(idx) });
   }
 
   // Immediately pre-warm the very next page in flip direction without waiting so fast taps stay instant
-  if (state.committedZoom <= 1.25 && !state.isScrollingActive) {
+  if (state.committedZoom <= 1.25 && !state.isScrollingActive && !state.scrollPinchPreview) {
     const dir = state.lastNavDir >= 0 ? 1 : -1;
     for (const ahead of [centerIdx + dir, centerIdx + dir * 2]) {
       if (ahead >= 0 && ahead < state.totalPages && !immediate.includes(ahead) && !isPageCanvasReadyAtCurrentZoom(ahead)) {
@@ -1665,7 +1675,7 @@ function queueNearbyRenders(centerIdx, radius = 8, { withText = true } = {}) {
     }
   }
 
-  if (radius > 0 && !nearbyPrefetchState.scheduled) {
+  if (radius > 0 && !state.isScrollingActive && !nearbyPrefetchState.scheduled) {
     nearbyPrefetchState.scheduled = true;
     setTimeout(pumpNearbyRenders, state.committedZoom > 1.2 ? 28 : 12);
   }
@@ -2261,6 +2271,22 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   return true;
 }
 
+function updateScrollCurrentTabHighlights(visible1Based) {
+  if (els.scrollTabsRail && !els.scrollTabsRail.hidden) {
+    for (const el of els.scrollTabsRail.children) {
+      if (!el.classList?.contains('sticky-edge-tab')) continue;
+      const p = Number(el.dataset.page);
+      el.classList.toggle('is-current', visible1Based.has(p));
+    }
+  }
+  if (els.scrollPages) {
+    for (const el of els.scrollPages.querySelectorAll('.scroll-page-edge-tabs .sticky-edge-tab')) {
+      const p = Number(el.dataset.page);
+      el.classList.toggle('is-current', visible1Based.has(p));
+    }
+  }
+}
+
 function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap = false, withText = true, lightScroll = false } = {}) {
   const visible = getVisibleIndices();
   const label = formatSpreadLabel(visible);
@@ -2278,31 +2304,34 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   els.btnNextArrow.disabled = atEnd;
   els.btnLastPage.disabled = atEnd;
 
-  if (!lightScroll) {
-    updateCenterShift();
-    updateBookDepthChrome();
-    updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
+  if (lightScroll) {
+    updateScrollCurrentTabHighlights(new Set(visible.map((i) => i + 1)));
+    queueNearbyRenders(state.currentIndex, 0, { withText: false });
+    if (state.magEnabled) scheduleMagnifierRedraw();
+    return;
   }
+
+  updateCenterShift();
+  updateBookDepthChrome();
+  updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
   updateBookmarkUi();
-  if (!lightScroll) {
-    updateHighlightsUi();
-  }
+  updateHighlightsUi();
   highlightActiveThumbnail(visible);
   queueNearbyRenders(state.currentIndex, renderRadius, { withText });
 
-  if (!lightScroll && els.sideDrawer && !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="text"]').classList.contains('active')) {
+  if (els.sideDrawer && !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="text"]').classList.contains('active')) {
     refreshTextPane();
   }
 
-  if (!lightScroll && state.totalPages > 0) {
+  if (state.totalPages > 0) {
     const p = (visible[0] ?? 0) + 1;
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}#p=${p}`);
   }
   if (state.magEnabled) {
     scheduleMagnifierRedraw();
-    if (!lightScroll) setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
+    setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
   }
-  if (state.curtainEnabled && !lightScroll) {
+  if (state.curtainEnabled) {
     scheduleCurtainBoundsSync(540);
   }
   if (persist) schedulePersistState();
@@ -2512,45 +2541,59 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
 
     if (state.pdfDoc && els.scrollPages.children.length) {
       const sv = els.scrollViewport;
-      const svRect = sv.getBoundingClientRect();
-      const targetX = anchor && Number.isFinite(anchor.clientX) ? anchor.clientX : svRect.left + svRect.width / 2;
-      const targetY = anchor && Number.isFinite(anchor.clientY) ? anchor.clientY : svRect.top + svRect.height / 2;
-      const vpX = targetX - svRect.left;
-      const vpY = targetY - svRect.top;
+      const measureScrollAnchor = () => {
+        const svRect = sv.getBoundingClientRect();
+        const spRect0 = els.scrollPages.getBoundingClientRect();
+        const targetX = anchor && Number.isFinite(anchor.clientX) ? anchor.clientX : svRect.left + svRect.width / 2;
+        const targetY = anchor && Number.isFinite(anchor.clientY) ? anchor.clientY : svRect.top + svRect.height / 2;
+        const vpX = targetX - svRect.left;
+        const vpY = targetY - svRect.top;
 
-      let anchorWrap = els.scrollPages.children[state.currentIndex] || els.scrollPages.children[0];
-      let bestDist = Infinity;
-      const approxIdx = clamp(state.currentIndex, 0, els.scrollPages.children.length - 1);
-      const lo = Math.max(0, approxIdx - 4);
-      const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 4);
-      for (let i = lo; i <= hi; i++) {
-        const w = els.scrollPages.children[i];
-        const r = w.getBoundingClientRect();
-        const dist = targetY < r.top ? r.top - targetY : targetY > r.bottom ? targetY - r.bottom : 0;
-        if (dist < bestDist) {
-          bestDist = dist;
-          anchorWrap = w;
+        let anchorWrap = els.scrollPages.children[state.currentIndex] || els.scrollPages.children[0];
+        let bestDist = Infinity;
+        const approxIdx = clamp(state.currentIndex, 0, els.scrollPages.children.length - 1);
+        const lo = Math.max(0, approxIdx - 4);
+        const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 4);
+        for (let i = lo; i <= hi; i++) {
+          const w = els.scrollPages.children[i];
+          const r = w.getBoundingClientRect();
+          const dist = targetY < r.top ? r.top - targetY : targetY > r.bottom ? targetY - r.bottom : 0;
+          if (dist < bestDist) {
+            bestDist = dist;
+            anchorWrap = w;
+          }
         }
-      }
+        const prevR = anchorWrap.getBoundingClientRect();
+        return {
+          anchorWrap,
+          relX: prevR.width > 0 ? (targetX - prevR.left) / prevR.width : 0.5,
+          relY: prevR.height > 0 ? (targetY - prevR.top) / prevR.height : 0.5,
+          vpX,
+          vpY,
+          docX: targetX - spRect0.left,
+          docY: targetY - spRect0.top,
+          scrollLockLeft: sv.scrollLeft,
+          scrollLockTop: sv.scrollTop,
+        };
+      };
 
-      const prevR = anchorWrap.getBoundingClientRect();
-      const relX = prevR.width > 0 ? (targetX - prevR.left) / prevR.width : 0.5;
-      const relY = prevR.height > 0 ? (targetY - prevR.top) / prevR.height : 0.5;
+      const commitScroll = (info = null) => {
+        const snapInfo = info || state.scrollPinchPreview || measureScrollAnchor();
+        state.scrollPinchPreview = null;
+        els.scrollPages.style.transform = '';
 
-      const sw = Math.max(120, Math.round(state.pageW * state.zoom));
-      const sh = Math.max(160, Math.round(state.pageH * state.zoom));
-      els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
-      els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
-      syncStickyTabScale(sw);
+        const sw = Math.max(120, Math.round(state.pageW * state.zoom));
+        const sh = Math.max(160, Math.round(state.pageH * state.zoom));
+        els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
+        els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
+        syncStickyTabScale(sw);
 
-      sv.scrollLeft = Math.max(0, anchorWrap.offsetLeft + relX * sw - vpX);
-      sv.scrollTop = Math.max(0, anchorWrap.offsetTop + relY * sh - vpY);
-      state.autoScrollPosY = sv.scrollTop;
-      syncEdgeTabsViewportBounds();
-
-      clearTimeout(state.zoomRerenderTimer);
-      const commitScroll = () => {
+        state.programmaticScrollUntil = performance.now() + 220;
+        sv.scrollLeft = Math.max(0, snapInfo.anchorWrap.offsetLeft + snapInfo.relX * sw - snapInfo.vpX);
+        sv.scrollTop = Math.max(0, snapInfo.anchorWrap.offsetTop + snapInfo.relY * sh - snapInfo.vpY);
+        state.autoScrollPosY = sv.scrollTop;
         state.committedZoom = state.zoom;
+
         const visScroll = getVisibleScrollIndices();
         for (const i of visScroll) renderPageNode(i);
         queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 3));
@@ -2558,8 +2601,37 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         if (state.curtainEnabled) positionFocusCurtain();
         if (state.magEnabled) scheduleMagnifierRedraw();
       };
-      if (immediate) commitScroll();
-      else state.zoomRerenderTimer = setTimeout(commitScroll, 150);
+
+      clearTimeout(state.zoomRerenderTimer);
+      if (immediate) {
+        if (state.scrollPinchPreview) {
+          els.scrollPages.style.transform = '';
+          state.scrollPinchPreview = null;
+        }
+        commitScroll(measureScrollAnchor());
+      } else {
+        state.pinchLockScrollUntil = performance.now() + 240;
+        if (!state.scrollPinchPreview) {
+          els.scrollPages.style.transform = '';
+          state.scrollPinchPreview = measureScrollAnchor();
+        }
+        const p = state.scrollPinchPreview;
+        const baseZoom = state.committedZoom || 1;
+        const s = state.zoom / baseZoom;
+        if (sv.scrollTop !== p.scrollLockTop || sv.scrollLeft !== p.scrollLockLeft) {
+          state.programmaticScrollUntil = performance.now() + 200;
+          sv.scrollLeft = p.scrollLockLeft;
+          sv.scrollTop = p.scrollLockTop;
+        }
+        if (Math.abs(s - 1) < 0.002) {
+          els.scrollPages.style.transform = '';
+        } else {
+          const tx = p.docX * (1 - s);
+          const ty = p.docY * (1 - s);
+          els.scrollPages.style.transform = `translate3d(${tx.toFixed(2)}px, ${ty.toFixed(2)}px, 0) scale(${s.toFixed(4)})`;
+        }
+        state.zoomRerenderTimer = setTimeout(() => commitScroll(), 150);
+      }
     }
     return;
   }
@@ -9766,13 +9838,34 @@ function wireEvents() {
     schedulePersistState();
   });
 
-  // Scroll tracking & on-demand buffering in Smooth Auto-Scroll mode
+  // Scroll tracking & Preview-grade compositor buffering in Smooth Auto-Scroll mode
+  let scrollFrameRaf = null;
+  const runScrollUiFrame = () => {
+    scrollFrameRaf = null;
+    if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
+    if (state.magEnabled) scheduleMagnifierRedraw();
+    if (state.curtainEnabled) positionFocusCurtain();
+    syncEdgeTabsViewportBounds();
+  };
+
   els.scrollViewport.addEventListener('scroll', () => {
     if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
-    state.isScrollingActive = true;
-    hideHighlightPopover();
     const sv = els.scrollViewport;
     const now = performance.now();
+    if (state.scrollPinchPreview && now < (state.pinchLockScrollUntil || 0)) {
+      if (sv.scrollTop !== state.scrollPinchPreview.scrollLockTop || sv.scrollLeft !== state.scrollPinchPreview.scrollLockLeft) {
+        state.programmaticScrollUntil = now + 200;
+        sv.scrollLeft = state.scrollPinchPreview.scrollLockLeft;
+        sv.scrollTop = state.scrollPinchPreview.scrollLockTop;
+      }
+      return;
+    }
+
+    if (!state.isScrollingActive) {
+      state.isScrollingActive = true;
+      document.body.classList.add('is-scrolling');
+    }
+    hideHighlightPopover();
     if (!state.autoScrollRafId || now < state.autoScrollPauseUntil) {
       state.autoScrollPosY = sv.scrollTop;
     }
@@ -9784,30 +9877,32 @@ function wireEvents() {
       } else if (maxScroll > 0 && sv.scrollTop >= maxScroll - 2) {
         estIdx = state.totalPages - 1;
       } else {
-        const itemStride = Math.round(state.pageH * state.zoom) + 18;
+        const itemStride = Math.round(state.pageH * (state.committedZoom || state.zoom || 1)) + 18;
         const centerOffset = sv.scrollTop + sv.clientHeight * 0.38 - 54;
         estIdx = clamp(Math.floor(centerOffset / Math.max(40, itemStride)), 0, state.totalPages - 1);
       }
       if (estIdx !== state.currentIndex) {
         state.currentIndex = estIdx;
-        onSpreadChanged(true, 0, { withText: false, lightScroll: true });
+        onSpreadChanged(false, 0, { withText: false, lightScroll: true });
       }
     }
-    if (now - (state.autoScrollRenderTickAt || 0) >= 140) {
+    if (now - (state.autoScrollRenderTickAt || 0) >= 120) {
       state.autoScrollRenderTickAt = now;
       queueNearbyRenders(state.currentIndex, 0, { withText: false });
-      syncEdgeTabsViewportBounds();
+    }
+    if (scrollFrameRaf === null && (state.magEnabled || state.curtainEnabled)) {
+      scrollFrameRaf = requestAnimationFrame(runScrollUiFrame);
     }
     clearTimeout(state.scrollSyncTimer);
     state.scrollSyncTimer = setTimeout(() => {
       state.isScrollingActive = false;
-      onSpreadChanged(false, state.committedZoom > 1.2 ? 2 : 3, { withText: true });
-    }, 130);
-    if (state.magEnabled) scheduleMagnifierRedraw();
-    if (state.curtainEnabled) positionFocusCurtain();
+      document.body.classList.remove('is-scrolling');
+      onSpreadChanged(true, state.committedZoom > 1.2 ? 2 : 3, { withText: true });
+    }, 120);
   }, { passive: true });
   els.scrollViewport.addEventListener('wheel', (e) => {
     if (state.scrollMode !== 'scroll' || e.ctrlKey || e.metaKey) return;
+    if (performance.now() < (state.pinchLockScrollUntil || 0)) return;
     state.programmaticScrollUntil = 0;
     state.autoScrollPauseUntil = performance.now() + (e.deltaY < 0 ? 750 : 320);
   }, { passive: true });
@@ -10191,6 +10286,7 @@ function wireEvents() {
     if (e.ctrlKey || e.metaKey) {
       if (e.target.closest('#snipResultCard, #focusCurtainPill, #magControlsPill, #snipHintPill, #hlPopover')) return;
       e.preventDefault();
+      state.pinchLockScrollUntil = performance.now() + 240;
       if (!e.deltaY) return;
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
       pendingPinchDeltaY += e.deltaY;
@@ -10198,6 +10294,10 @@ function wireEvents() {
       if (pinchRafId === null) {
         pinchRafId = requestAnimationFrame(flushPinchZoom);
       }
+      return;
+    }
+    if (state.scrollMode === 'scroll' && performance.now() < (state.pinchLockScrollUntil || 0)) {
+      e.preventDefault();
       return;
     }
     if (state.twoFingerPan && state.zoom > 1.01 && state.scrollMode === 'flip') {
