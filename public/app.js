@@ -250,6 +250,10 @@ const els = {
   btnModalPickPdf: document.getElementById('btnModalPickPdf'),
   btnModalBrowsePdf: document.getElementById('btnModalBrowsePdf'),
   libraryList: document.getElementById('libraryList'),
+  btnAboutApp: document.getElementById('btnAboutApp'),
+  menuAboutCard: document.getElementById('menuAboutCard'),
+  aboutModal: document.getElementById('aboutModal'),
+  btnCloseAbout: document.getElementById('btnCloseAbout'),
   appToast: document.getElementById('appToast'),
 
   btnMore: document.getElementById('btnMore'),
@@ -314,6 +318,7 @@ const state = {
   autoScrollPauseUntil: 0,
   autoScrollRenderTickAt: 0,
   scrollUserSelecting: false,
+  isScrollingActive: false,
 
   zoom: 1,
   committedZoom: 1,
@@ -446,12 +451,20 @@ function getVisibleScrollIndices() {
   if (!state.totalPages || state.scrollMode !== 'scroll' || !els.scrollViewport || !els.scrollPages) {
     return [];
   }
-  const svRect = els.scrollViewport.getBoundingClientRect();
-  if (!svRect.height) return getVisibleIndices(state.currentIndex);
+  const n = els.scrollPages.children.length;
+  if (!n || !els.scrollViewport.clientHeight) return getVisibleIndices(state.currentIndex);
+  const sv = els.scrollViewport;
+  const pageH = Math.max(160, Math.round(state.pageH * (state.zoom || 1)));
+  const stride = pageH + 18;
+  const baseTop = els.scrollPages.children[0]?.offsetTop ?? 54;
+  const viewTop = sv.scrollTop - 120;
+  const viewBottom = sv.scrollTop + sv.clientHeight + 120;
+  const firstIdx = clamp(Math.floor((viewTop - baseTop) / stride), 0, n - 1);
+  const lastIdx = clamp(Math.floor((viewBottom - baseTop) / stride), firstIdx, n - 1);
   const hits = [];
-  for (let i = 0; i < els.scrollPages.children.length; i++) {
-    const r = els.scrollPages.children[i].getBoundingClientRect();
-    if (r.width > 10 && r.height > 10 && r.bottom >= svRect.top - 120 && r.top <= svRect.bottom + 120) {
+  for (let i = firstIdx; i <= lastIdx; i++) {
+    const top = baseTop + i * stride;
+    if (top + pageH >= viewTop && top <= viewBottom) {
       hits.push(i);
     }
   }
@@ -715,6 +728,7 @@ function disposeBook() {
   state.zoomRerenderTimer = null;
   clearTimeout(state.scrollSyncTimer);
   state.scrollSyncTimer = null;
+  state.isScrollingActive = false;
   clearTimeout(state.nearbyRenderTimer);
   state.nearbyRenderTimer = null;
 
@@ -899,13 +913,13 @@ function initScrollView(startIndex = 0) {
 
   buildPageElements();
   els.scrollPages.innerHTML = '';
+  els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
+  els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
   const frag = document.createDocumentFragment();
   for (let i = 0; i < state.pageNodes.length; i++) {
     const wrap = document.createElement('div');
     wrap.className = 'scroll-page-wrap';
     wrap.dataset.pageIndex = String(i);
-    wrap.style.width = `${sw}px`;
-    wrap.style.height = `${sh}px`;
     wrap.appendChild(state.pageNodes[i]);
     frag.appendChild(wrap);
   }
@@ -1145,7 +1159,7 @@ function initPageFlip(startIndex = 0) {
     if (e.data === 'read') {
       updateCenterShift();
       updateBookDepthChrome();
-      queueNearbyRenders(state.currentIndex, 8);
+      queueNearbyRenders(state.currentIndex, state.committedZoom > 1.05 ? 1 : 6);
     }
   });
 
@@ -1354,6 +1368,28 @@ async function ensureTextLayerForToken(idx, token) {
   return token.textPromise;
 }
 
+function computePageRenderMetrics() {
+  const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
+  const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
+  const devDpr = window.devicePixelRatio || 1;
+  const z = Math.max(1, state.committedZoom || 1);
+  // sw & sh already scale linearly with committedZoom, so oversampling factor scales down smoothly at high zoom
+  const desiredDpr = z >= 2.2
+    ? Math.min(devDpr, 1.35)
+    : (z > 1.15 ? Math.min(devDpr, 1.65) : Math.min(2.25, Math.max(devDpr, 1.75)));
+  const maxDim = 3840;
+  const maxArea = 9_500_000;
+  const maxScaleByDim = Math.min(maxDim / sw, maxDim / sh);
+  const maxScaleByArea = Math.sqrt(maxArea / Math.max(1, sw * sh));
+  const pixelScale = Math.max(1, Math.min(desiredDpr, maxScaleByDim, maxScaleByArea));
+  return {
+    sw,
+    sh,
+    pixelScale,
+    renderKey: `${sw}x${sh}@${pixelScale.toFixed(3)}`,
+  };
+}
+
 async function renderPageNode(idx, { withText = true } = {}) {
   if (!state.pdfDoc || idx < 0 || idx >= state.totalPages) return;
   const pageNode = state.pageNodes[idx];
@@ -1361,17 +1397,7 @@ async function renderPageNode(idx, { withText = true } = {}) {
   const inner = pageNode.querySelector('.fb-page-inner');
   if (!inner) return;
 
-  const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
-  const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
-  // Keep text razor-sharp (4K+/8K backing pixels) even at maximum zoom or on 1x displays
-  const devDpr = window.devicePixelRatio || 1;
-  const desiredDpr = Math.min(3.0, Math.max(devDpr, state.committedZoom > 1.05 ? 2.5 : 2.0));
-  const maxDim = 8192;
-  const maxArea = 52_000_000;
-  const maxScaleByDim = Math.min(maxDim / sw, maxDim / sh);
-  const maxScaleByArea = Math.sqrt(maxArea / Math.max(1, sw * sh));
-  const pixelScale = Math.max(1, Math.min(desiredDpr, maxScaleByDim, maxScaleByArea));
-  const renderKey = `${sw}x${sh}@${pixelScale.toFixed(3)}`;
+  const { sw, sh, pixelScale, renderKey } = computePageRenderMetrics();
 
   const existing = state.renderedMap.get(idx);
   if (existing && existing.renderKey === renderKey) {
@@ -1453,8 +1479,12 @@ async function renderPageNode(idx, { withText = true } = {}) {
       state.pageFlip?.refreshPendingSnapshots?.();
       if (state.magEnabled) scheduleMagnifierRedraw();
 
-      if (state.readDark) {
-        requestAnimationFrame(() => getBakedDarkCanvas(canvas));
+      if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05) {
+        setTimeout(() => {
+          if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05 && canvas.width > 0) {
+            getBakedDarkCanvas(canvas);
+          }
+        }, 40);
       }
 
       token.pdfPage = pdfPage;
@@ -1504,9 +1534,9 @@ function evictDistantPages(centerIdx) {
     ...getActiveFlipPageIndices(),
   ]);
   const maxKeep = state.committedZoom >= 2.0
-    ? Math.max(2, activeIndices.size)
-    : (state.committedZoom > 1.2 ? Math.max(4, activeIndices.size + 2) : Math.max(MAX_CACHED_CANVASES, 36));
-  const keepRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 14);
+    ? Math.max(6, activeIndices.size + 4)
+    : (state.committedZoom > 1.2 ? Math.max(10, activeIndices.size + 6) : Math.max(MAX_CACHED_CANVASES, 36));
+  const keepRadius = state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 14);
   if (state.renderedMap.size <= maxKeep) return;
   const entries = Array.from(state.renderedMap.keys())
     .sort((a, b) => Math.abs(b - centerIdx) - Math.abs(a - centerIdx));
@@ -1531,14 +1561,7 @@ function evictDistantPages(centerIdx) {
 }
 
 function getExpectedPageRenderKey() {
-  const sw = Math.max(120, Math.round(state.pageW * state.committedZoom));
-  const sh = Math.max(160, Math.round(state.pageH * state.committedZoom));
-  const devDpr = window.devicePixelRatio || 1;
-  const desiredDpr = Math.min(3.0, Math.max(devDpr, state.committedZoom > 1.05 ? 2.5 : 2.0));
-  const maxDim = 8192;
-  const maxArea = 52_000_000;
-  const pixelScale = Math.max(1, Math.min(desiredDpr, maxDim / sw, maxDim / sh, Math.sqrt(maxArea / Math.max(1, sw * sh))));
-  return `${sw}x${sh}@${pixelScale.toFixed(3)}`;
+  return computePageRenderMetrics().renderKey;
 }
 
 function isPageCanvasReadyAtCurrentZoom(idx) {
@@ -1558,7 +1581,7 @@ function pumpNearbyRenders() {
   const maxConc = state.committedZoom > 1.2 ? 1 : 2;
   if (nearbyPrefetchState.inFlight.size >= maxConc) return;
 
-  const effectiveRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 8);
+  const effectiveRadius = state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 8);
   if (effectiveRadius <= 0) return;
 
   const dir = state.lastNavDir >= 0 ? 1 : -1;
@@ -1595,19 +1618,20 @@ function pumpNearbyRenders() {
   }
 }
 
-function queueNearbyRenders(centerIdx, radius = 8) {
+function queueNearbyRenders(centerIdx, radius = 8, { withText = true } = {}) {
   clearTimeout(state.nearbyRenderTimer);
   const visible = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx);
   const immediate = [...visible];
   for (const flipIdx of getActiveFlipPageIndices()) {
     if (!immediate.includes(flipIdx)) immediate.push(flipIdx);
   }
+  const allowText = withText && !state.isFlipping;
   for (const idx of immediate) {
-    renderPageNode(idx, { withText: !state.isFlipping || visible.includes(idx) });
+    renderPageNode(idx, { withText: allowText && visible.includes(idx) });
   }
 
   // Immediately pre-warm the very next page in flip direction without waiting so fast taps stay instant
-  if (state.committedZoom <= 1.25) {
+  if (state.committedZoom <= 1.25 && !state.isScrollingActive) {
     const dir = state.lastNavDir >= 0 ? 1 : -1;
     for (const ahead of [centerIdx + dir, centerIdx + dir * 2]) {
       if (ahead >= 0 && ahead < state.totalPages && !immediate.includes(ahead) && !isPageCanvasReadyAtCurrentZoom(ahead)) {
@@ -1618,7 +1642,7 @@ function queueNearbyRenders(centerIdx, radius = 8) {
 
   if (radius > 0 && !nearbyPrefetchState.scheduled) {
     nearbyPrefetchState.scheduled = true;
-    setTimeout(pumpNearbyRenders, 12);
+    setTimeout(pumpNearbyRenders, state.committedZoom > 1.2 ? 28 : 12);
   }
 }
 
@@ -2211,7 +2235,7 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   return true;
 }
 
-function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap = false } = {}) {
+function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap = false, withText = true, lightScroll = false } = {}) {
   const visible = getVisibleIndices();
   const label = formatSpreadLabel(visible);
   if (document.activeElement !== els.pageInput) {
@@ -2228,27 +2252,31 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   els.btnNextArrow.disabled = atEnd;
   els.btnLastPage.disabled = atEnd;
 
-  updateCenterShift();
-  updateBookDepthChrome();
-  updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
+  if (!lightScroll) {
+    updateCenterShift();
+    updateBookDepthChrome();
+    updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
+  }
   updateBookmarkUi();
-  updateHighlightsUi();
+  if (!lightScroll) {
+    updateHighlightsUi();
+  }
   highlightActiveThumbnail(visible);
-  queueNearbyRenders(state.currentIndex, renderRadius);
+  queueNearbyRenders(state.currentIndex, renderRadius, { withText });
 
-  if (els.sideDrawer && !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="text"]').classList.contains('active')) {
+  if (!lightScroll && els.sideDrawer && !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="text"]').classList.contains('active')) {
     refreshTextPane();
   }
 
-  if (state.totalPages > 0) {
+  if (!lightScroll && state.totalPages > 0) {
     const p = (visible[0] ?? 0) + 1;
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}#p=${p}`);
   }
   if (state.magEnabled) {
     scheduleMagnifierRedraw();
-    setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
+    if (!lightScroll) setTimeout(() => { if (state.magEnabled) scheduleMagnifierRedraw(); }, 500);
   }
-  if (state.curtainEnabled) {
+  if (state.curtainEnabled && !lightScroll) {
     scheduleCurtainBoundsSync(540);
   }
   if (persist) schedulePersistState();
@@ -2390,7 +2418,7 @@ function commitZoomLayout() {
   for (const idx of getVisibleIndices()) {
     renderPageNode(idx);
   }
-  queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 4));
+  queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 4));
 }
 
 function applyZoomTransform(rerender = true, immediate = false) {
@@ -2414,7 +2442,7 @@ function applyZoomTransform(rerender = true, immediate = false) {
     if (immediate) {
       commitZoomLayout();
     } else {
-      state.zoomRerenderTimer = setTimeout(commitZoomLayout, 85);
+      state.zoomRerenderTimer = setTimeout(commitZoomLayout, 150);
     }
   }
 }
@@ -2424,7 +2452,7 @@ function clampZoomPan(nextX, nextY) {
   const sh = Math.max(160, Math.round(state.pageH * state.zoom));
   const single = isEffectiveSingleMode();
   const bookW = single ? sw : sw * 2;
-  const maxX = Math.max(120, Math.round(bookW * 0.55 + 64));
+  const maxX = Math.max(180, Math.round(bookW * 0.55 + 180));
   const maxY = Math.max(120, Math.round(sh * 0.55 + 64));
   return {
     x: clamp(nextX, -maxX, maxX),
@@ -2466,8 +2494,8 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
       let anchorWrap = els.scrollPages.children[state.currentIndex] || els.scrollPages.children[0];
       let bestDist = Infinity;
       const approxIdx = clamp(state.currentIndex, 0, els.scrollPages.children.length - 1);
-      const lo = Math.max(0, approxIdx - 6);
-      const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 6);
+      const lo = Math.max(0, approxIdx - 4);
+      const hi = Math.min(els.scrollPages.children.length - 1, approxIdx + 4);
       for (let i = lo; i <= hi; i++) {
         const w = els.scrollPages.children[i];
         const r = w.getBoundingClientRect();
@@ -2484,10 +2512,8 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
 
       const sw = Math.max(120, Math.round(state.pageW * state.zoom));
       const sh = Math.max(160, Math.round(state.pageH * state.zoom));
-      for (const wrap of els.scrollPages.children) {
-        wrap.style.width = `${sw}px`;
-        wrap.style.height = `${sh}px`;
-      }
+      els.scrollPages.style.setProperty('--scroll-page-w', `${sw}px`);
+      els.scrollPages.style.setProperty('--scroll-page-h', `${sh}px`);
 
       sv.scrollLeft = Math.max(0, anchorWrap.offsetLeft + relX * sw - vpX);
       sv.scrollTop = Math.max(0, anchorWrap.offsetTop + relY * sh - vpY);
@@ -2498,12 +2524,12 @@ function setZoom(nextZoom, immediate = false, anchor = null) {
         state.committedZoom = state.zoom;
         const visScroll = getVisibleScrollIndices();
         for (const i of visScroll) renderPageNode(i);
-        queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : 3));
+        queueNearbyRenders(state.currentIndex, state.committedZoom >= 2.0 ? 1 : (state.committedZoom > 1.2 ? 2 : 3));
         if (state.curtainEnabled) positionFocusCurtain();
         if (state.magEnabled) scheduleMagnifierRedraw();
       };
       if (immediate) commitScroll();
-      else state.zoomRerenderTimer = setTimeout(commitScroll, 85);
+      else state.zoomRerenderTimer = setTimeout(commitScroll, 150);
     }
     return;
   }
@@ -2962,7 +2988,7 @@ function getTurningTabPages() {
 }
 
 function syncStickyTabScale(pageWidthPx) {
-  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.58, 4.5);
+  const scale = clamp((pageWidthPx || state.pageW || 460) / 460, 0.82, 1.42);
   const val = scale.toFixed(4);
   els.bookShell?.style.setProperty('--tab-zoom', val);
   els.singleFlightLayer?.style.setProperty('--tab-zoom', val);
@@ -7778,7 +7804,7 @@ function setReadDark(enabled, persist = true) {
   if (Number.isInteger(singleStackMeta.renderedIdx) && els.singleCollectedStack && !els.singleCollectedStack.hidden) {
     paintSingleStackTopCard(singleStackMeta.renderedIdx, { force: true });
   }
-  if (state.readDark) {
+  if (state.readDark && state.scrollMode === 'flip' && state.zoom <= 1.05) {
     requestAnimationFrame(() => {
       for (const i of getVisibleIndices()) {
         const c = state.pageNodes[i]?.querySelector('canvas.fb-canvas');
@@ -8428,6 +8454,31 @@ function wireEvents() {
     fetchLibrary({ applySettings: false });
     els.libraryModal.hidden = false;
   };
+
+  const openAboutModal = () => {
+    closeMarginNotePopover();
+    closeStickyTabPopover();
+    closePageContextMenu();
+    hideHighlightPopover();
+    els.moreMenu.hidden = true;
+    els.btnMore?.classList.remove('active');
+    if (els.libraryModal) els.libraryModal.hidden = true;
+    if (els.aboutModal) els.aboutModal.hidden = false;
+  };
+  els.btnAboutApp?.addEventListener('click', openAboutModal);
+  els.menuAboutCard?.addEventListener('click', openAboutModal);
+  els.menuAboutCard?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openAboutModal();
+    }
+  });
+  els.btnCloseAbout?.addEventListener('click', () => {
+    if (els.aboutModal) els.aboutModal.hidden = true;
+  });
+  els.aboutModal?.addEventListener('click', (e) => {
+    if (e.target === els.aboutModal) els.aboutModal.hidden = true;
+  });
 
   els.btnOpenTop.addEventListener('click', openLibraryModal);
   els.btnCloseLibrary.addEventListener('click', () => {
@@ -9186,7 +9237,7 @@ function wireEvents() {
 
     const sel = window.getSelection();
     const hasSelection = !!(sel && !sel.isCollapsed && sel.toString().trim());
-    const clickedUiChrome = Boolean(e.target.closest('#topBar, #bottomBar, #sideDrawer, #moreMenu, #libraryModal'));
+    const clickedUiChrome = Boolean(e.target.closest('#topBar, #bottomBar, #sideDrawer, #moreMenu, #libraryModal, #aboutModal'));
     if (!e.target.closest('#hlPopover') && (!hasSelection || clickedUiChrome)) {
       const wasPanDrag = state.panMoved;
       state.panMoved = false;
@@ -9446,6 +9497,7 @@ function wireEvents() {
   // Scroll tracking & on-demand buffering in Smooth Auto-Scroll mode
   els.scrollViewport.addEventListener('scroll', () => {
     if (state.scrollMode !== 'scroll' || !state.totalPages || !els.scrollPages.children.length) return;
+    state.isScrollingActive = true;
     hideHighlightPopover();
     const sv = els.scrollViewport;
     const now = performance.now();
@@ -9466,17 +9518,18 @@ function wireEvents() {
       }
       if (estIdx !== state.currentIndex) {
         state.currentIndex = estIdx;
-        onSpreadChanged(true, 4);
+        onSpreadChanged(true, 0, { withText: false, lightScroll: true });
       }
     }
-    if (now - (state.autoScrollRenderTickAt || 0) >= 180) {
+    if (now - (state.autoScrollRenderTickAt || 0) >= 140) {
       state.autoScrollRenderTickAt = now;
-      queueNearbyRenders(state.currentIndex, 4);
+      queueNearbyRenders(state.currentIndex, 0, { withText: false });
     }
     clearTimeout(state.scrollSyncTimer);
     state.scrollSyncTimer = setTimeout(() => {
-      queueNearbyRenders(state.currentIndex, 4);
-    }, 90);
+      state.isScrollingActive = false;
+      onSpreadChanged(false, state.committedZoom > 1.2 ? 2 : 3, { withText: true });
+    }, 130);
     if (state.magEnabled) scheduleMagnifierRedraw();
     if (state.curtainEnabled) positionFocusCurtain();
   }, { passive: true });
@@ -9586,7 +9639,7 @@ function wireEvents() {
     if (shouldKeepBarVisible('footer')) showBar('footer', false);
     else scheduleHideBar('footer', 420);
   });
-  [els.moreMenu, els.thumbnailsStrip, els.libraryModal, els.stickyTabPopover]
+  [els.moreMenu, els.thumbnailsStrip, els.libraryModal, els.aboutModal, els.stickyTabPopover]
     .filter(Boolean)
     .forEach((panel) => overlayObserver.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));
 
@@ -9843,7 +9896,23 @@ function wireEvents() {
     state.panMoved = false;
   });
 
-  // Trackpad two-finger drag pan + pinch/Ctrl+Wheel zoom anchored at cursor
+  // Trackpad two-finger drag pan + pinch/Ctrl+Wheel zoom coalesced per frame
+  let pendingPinchDeltaY = 0;
+  let pendingPinchAnchor = null;
+  let pinchRafId = null;
+  const flushPinchZoom = () => {
+    pinchRafId = null;
+    if (!pendingPinchDeltaY || !state.pdfDoc) {
+      pendingPinchDeltaY = 0;
+      return;
+    }
+    const dy = pendingPinchDeltaY;
+    const anchor = pendingPinchAnchor;
+    pendingPinchDeltaY = 0;
+    const nextZoom = clamp(state.zoom * Math.exp(-dy * 0.003), 1, MAX_PAGE_ZOOM);
+    setZoom(nextZoom, false, anchor);
+  };
+
   els.stage.addEventListener('wheel', (e) => {
     if (!state.pdfDoc) return;
     if (e.ctrlKey || e.metaKey) {
@@ -9851,12 +9920,15 @@ function wireEvents() {
       e.preventDefault();
       if (!e.deltaY) return;
       state.lastStagePointer = { clientX: e.clientX, clientY: e.clientY };
-      const nextZoom = clamp(state.zoom * Math.exp(-e.deltaY * 0.003), 1, MAX_PAGE_ZOOM);
-      setZoom(nextZoom, false, { clientX: e.clientX, clientY: e.clientY });
+      pendingPinchDeltaY += e.deltaY;
+      pendingPinchAnchor = { clientX: e.clientX, clientY: e.clientY };
+      if (pinchRafId === null) {
+        pinchRafId = requestAnimationFrame(flushPinchZoom);
+      }
       return;
     }
     if (state.twoFingerPan && state.zoom > 1.01 && state.scrollMode === 'flip') {
-      if (e.target.closest('#sideDrawer, #thumbnailsStrip, #moreMenu, #libraryModal, #snipResultCard, .ref-pin-card, .popover-panel')) return;
+      if (e.target.closest('#sideDrawer, #thumbnailsStrip, #moreMenu, #libraryModal, #aboutModal, #snipResultCard, .ref-pin-card, .popover-panel')) return;
       e.preventDefault();
       const unit = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? Math.max(240, els.stage.clientHeight * 0.85) : 1;
       const dx = (e.deltaX || 0) * unit;
@@ -9924,7 +9996,8 @@ function wireEvents() {
       else if (!els.moreMenu.hidden) {
         els.moreMenu.hidden = true;
         els.btnMore.classList.remove('active');
-      } else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
+      } else if (els.aboutModal && !els.aboutModal.hidden) els.aboutModal.hidden = true;
+      else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
       else if (!els.sideDrawer.hidden) {
         els.sideDrawer.hidden = true;
         els.btnHighlightsTop?.classList.remove('active');
@@ -9957,6 +10030,7 @@ function wireEvents() {
     if (hasMod) return;
 
     if ((e.key === 'l' || e.key === 'L') && !e.shiftKey) {
+      if (els.aboutModal && !els.aboutModal.hidden) els.aboutModal.hidden = true;
       if (!els.libraryModal.hidden) {
         els.libraryModal.hidden = true;
       } else {
@@ -9969,7 +10043,7 @@ function wireEvents() {
       return;
     }
 
-    if (!state.pdfDoc || !els.libraryModal.hidden) return;
+    if (!state.pdfDoc || !els.libraryModal.hidden || (els.aboutModal && !els.aboutModal.hidden)) return;
 
     switch (e.key) {
       case 'ArrowLeft':

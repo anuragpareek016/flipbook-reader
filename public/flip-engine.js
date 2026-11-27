@@ -276,12 +276,37 @@ function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = fa
     snap.className = 'fh-snap-canvas';
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const maxSnapW = pageW > 0 ? Math.max(240, Math.round(pageW * dpr)) : srcCanvas.width;
-    const ratio = srcCanvas.width > maxSnapW ? maxSnapW / srcCanvas.width : 1;
+    const maxSnapDim = 1600;
+    const maxSnapArea = 2_000_000;
+    const maxDim = Math.max(srcCanvas.width, srcCanvas.height);
+    const area = srcCanvas.width * srcCanvas.height;
+    const ratio = Math.min(
+      1,
+      maxSnapW / srcCanvas.width,
+      maxSnapDim / maxDim,
+      Math.sqrt(maxSnapArea / Math.max(1, area))
+    );
     snap.width = Math.max(1, Math.round(srcCanvas.width * ratio));
     snap.height = Math.max(1, Math.round(srcCanvas.height * ratio));
-    const source = darkMode ? getBakedDarkCanvas(srcCanvas) : srcCanvas;
-    snap.getContext('2d', { alpha: false }).drawImage(source, 0, 0, snap.width, snap.height);
-    if (darkMode) snap.dataset.darkBaked = '1';
+    const snapCtx = snap.getContext('2d', { alpha: false });
+    if (snapCtx) {
+      if (darkMode) {
+        const cachedDark = darkBakedCanvasCache.get(srcCanvas);
+        if (cachedDark && cachedDark.width === srcCanvas.width && cachedDark.height === srcCanvas.height) {
+          snapCtx.drawImage(cachedDark, 0, 0, snap.width, snap.height);
+        } else if (canUseCanvasDarkFilter()) {
+          snapCtx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+          snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
+          snapCtx.filter = 'none';
+        } else {
+          snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
+          bakeDarkCanvasInPlace(snap);
+        }
+        snap.dataset.darkBaked = '1';
+      } else {
+        snapCtx.drawImage(srcCanvas, 0, 0, snap.width, snap.height);
+      }
+    }
     wrap.appendChild(snap);
     delete wrap.dataset.pendingPageIdx;
     if (!reverseBack) {
@@ -2099,8 +2124,10 @@ export class FlipBookEngine {
     const nextSpread = prevSpread + dir;
     if (nextSpread < 0 || nextSpread >= this.spreads.length) return;
 
-    // Bound simultaneous active DOM flip sheets cleanly while advancing at full speed
-    if (this.flyingFlips.length >= 6) {
+    // Bound simultaneous active DOM flip sheets cleanly while advancing at full speed;
+    // when zoomed (wide pageW or interactionDisabled), cap at 2 to prevent stacked GPU clip-path layers
+    const maxConcurrentFlips = (this.pageW > 850 || this.interactionDisabled) ? 2 : 6;
+    while (this.flyingFlips.length >= maxConcurrentFlips) {
       const oldest = this.flyingFlips.shift();
       this._removeFlipDom(oldest);
       const landedSlots = this._getSpreadSlots(oldest.nextSpread);

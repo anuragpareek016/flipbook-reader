@@ -579,15 +579,28 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     @objc private func showAboutPanel() {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        paragraph.lineSpacing = 2.0
-        let credits = NSAttributedString(
-            string: "Developed by Anurag Pareek\nOpenFrontier Labs\n\nA tactile digital book reader with realistic corner-curl physics.",
+        paragraph.lineSpacing = 3.0
+
+        let creditsText = "FlipBook Reader is crafted by OpenFrontier Labs.\nDeveloped by Anurag Pareek.\n\nTactile PDF book reading with realistic corner-curl physics, focus tools, and study annotations."
+        let credits = NSMutableAttributedString(
+            string: creditsText,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11.5),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: paragraph,
             ]
         )
+        let highlightAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12.0, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        for token in ["OpenFrontier Labs", "Anurag Pareek"] {
+            let range = (creditsText as NSString).range(of: token)
+            if range.location != NSNotFound {
+                credits.addAttributes(highlightAttrs, range: range)
+            }
+        }
+
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "FlipBook Reader",
             .credits: credits,

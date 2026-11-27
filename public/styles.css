@@ -455,8 +455,8 @@ body.is-flip-dragging .fb-page .textLayer {
 }
 
 .fh-stage.fh-single .fh-flip-layer {
-  clip-path: inset(calc(-44px * var(--tab-zoom, 1)) calc(-130px * var(--tab-zoom, 1)) calc(-44px * var(--tab-zoom, 1)) 0px);
-  -webkit-clip-path: inset(calc(-44px * var(--tab-zoom, 1)) calc(-130px * var(--tab-zoom, 1)) calc(-44px * var(--tab-zoom, 1)) 0px);
+  clip-path: inset(calc(-50px * var(--tab-zoom, 1)) calc(-156px * var(--tab-zoom, 1)) calc(-50px * var(--tab-zoom, 1)) 0px);
+  -webkit-clip-path: inset(calc(-50px * var(--tab-zoom, 1)) calc(-156px * var(--tab-zoom, 1)) calc(-50px * var(--tab-zoom, 1)) 0px);
 }
 
 .fh-stage.fh-single .fh-slot-right::after {
@@ -1647,29 +1647,35 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .auto-playback-hud 
 }
 
 .menu-about {
-  padding: 10px 12px 12px;
+  padding: 10px 12px 11px;
   text-align: center;
-  color: var(--text-muted);
-  font-size: 10.5px;
+  color: var(--text-main);
+  font-size: 12px;
   line-height: 1.5;
   letter-spacing: 0.01em;
-  opacity: 0.7;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+.menu-about:hover {
+  background: linear-gradient(145deg, rgba(46, 51, 70, 0.52) 0%, rgba(28, 31, 44, 0.62) 100%);
+  box-shadow: var(--neu-pill-shadow);
 }
 .menu-about .about-app-name {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.03em;
-  opacity: 0.85;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
 }
 .menu-about .about-org {
-  font-size: 10px;
-  opacity: 0.65;
+  font-size: 12px;
+  font-weight: 500;
+  color: #cdd3e4;
+  margin-top: 2px;
 }
 .menu-about .about-dev {
-  font-size: 9.5px;
-  font-style: italic;
-  opacity: 0.5;
+  font-size: 11.5px;
+  color: #aeb6cd;
   margin-top: 2px;
 }
 
@@ -2270,6 +2276,99 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .auto-playback-hud 
   justify-content: flex-start;
 }
 
+.about-modal-card {
+  width: 460px;
+  gap: 16px;
+}
+
+.about-modal-hero {
+  background: #141720;
+  border: none;
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  box-shadow: var(--neu-inset);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.about-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--neu-pill-surface);
+  box-shadow: var(--neu-pill-shadow);
+  color: #b4bfff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.about-hero-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.about-hero-byline {
+  font-size: 13px;
+  font-weight: 500;
+  color: #c5cce0;
+}
+
+.about-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #d6dce9;
+}
+
+.about-desc strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.about-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.about-meta-pill {
+  background: #161923;
+  border: none;
+  border-radius: 14px;
+  padding: 10px 13px;
+  box-shadow: var(--neu-inset);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.about-meta-k {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.about-meta-v {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.about-footer {
+  padding-top: 4px;
+  text-align: center;
+  font-size: 12px;
+  color: #aeb6cd;
+}
+
 .spinner {
   width: 34px;
   height: 34px;
@@ -2661,6 +2760,10 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .auto-playback-hud 
 }
 
 /* Continuous Vertical Scroll Mode */
+body.mode-scroll .side-nav {
+  display: none;
+}
+
 .scroll-viewport {
   position: absolute;
   inset: 0;
@@ -2679,11 +2782,15 @@ body:not(.footer-hidden):has(#thumbnailsStrip:not([hidden])) .auto-playback-hud 
   flex-direction: column;
   align-items: center;
   gap: 18px;
+  contain: layout style;
 }
 
 .scroll-page-wrap {
   position: relative;
   flex: 0 0 auto;
+  width: var(--scroll-page-w, 460px);
+  height: var(--scroll-page-h, 640px);
+  contain: layout style size;
   background: var(--paper-bg, #ffffff);
   border-radius: 2px;
   overflow: hidden;
@@ -3409,17 +3516,17 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-face {
   position: relative;
   pointer-events: none;
-  height: calc(23px * var(--tab-zoom, 1));
-  min-width: calc(38px * var(--tab-zoom, 1));
-  max-width: calc(88px * var(--tab-zoom, 1));
-  padding: 0 calc(9px * var(--tab-zoom, 1)) 0 calc(6.5px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(112px * var(--tab-zoom, 1));
+  padding: 0 calc(10px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
   color: var(--tab-ink);
-  font-size: calc(10px * var(--tab-zoom, 1));
+  font-size: calc(11px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   display: inline-flex;
   align-items: center;
-  gap: calc(3.5px * var(--tab-zoom, 1));
+  gap: calc(4px * var(--tab-zoom, 1));
   white-space: nowrap;
   transform: translate3d(0, 0, 0);
   transition:
@@ -3487,13 +3594,13 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-right {
   left: 100%;
   right: auto;
-  height: calc(23px * var(--tab-zoom, 1));
-  min-width: calc(38px * var(--tab-zoom, 1));
-  max-width: calc(88px * var(--tab-zoom, 1));
-  padding: 0 calc(9px * var(--tab-zoom, 1)) 0 calc(6.5px * var(--tab-zoom, 1));
-  border-radius: 0 calc(3px * var(--tab-zoom, 1)) calc(3px * var(--tab-zoom, 1)) 0;
-  gap: calc(3.5px * var(--tab-zoom, 1));
-  font-size: calc(10px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(112px * var(--tab-zoom, 1));
+  padding: 0 calc(10px * var(--tab-zoom, 1)) 0 calc(7.5px * var(--tab-zoom, 1));
+  border-radius: 0 calc(3.5px * var(--tab-zoom, 1)) calc(3.5px * var(--tab-zoom, 1)) 0;
+  gap: calc(4px * var(--tab-zoom, 1));
+  font-size: calc(11px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -3542,13 +3649,13 @@ body.read-dark .scs-flying-shade {
 .sticky-edge-tab.tab-side-left {
   right: 100%;
   left: auto;
-  height: calc(23px * var(--tab-zoom, 1));
-  min-width: calc(38px * var(--tab-zoom, 1));
-  max-width: calc(88px * var(--tab-zoom, 1));
-  padding: 0 calc(6.5px * var(--tab-zoom, 1)) 0 calc(9px * var(--tab-zoom, 1));
-  border-radius: calc(3px * var(--tab-zoom, 1)) 0 0 calc(3px * var(--tab-zoom, 1));
-  gap: calc(3.5px * var(--tab-zoom, 1));
-  font-size: calc(10px * var(--tab-zoom, 1));
+  height: calc(27px * var(--tab-zoom, 1));
+  min-width: calc(46px * var(--tab-zoom, 1));
+  max-width: calc(112px * var(--tab-zoom, 1));
+  padding: 0 calc(7.5px * var(--tab-zoom, 1)) 0 calc(10px * var(--tab-zoom, 1));
+  border-radius: calc(3.5px * var(--tab-zoom, 1)) 0 0 calc(3.5px * var(--tab-zoom, 1));
+  gap: calc(4px * var(--tab-zoom, 1));
+  font-size: calc(11px * var(--tab-zoom, 1));
   font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -3597,12 +3704,12 @@ body.read-dark .scs-flying-shade {
 .sticky-tab-text {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: calc(58px * var(--tab-zoom, 1));
+  max-width: calc(78px * var(--tab-zoom, 1));
 }
 
 .sticky-tab-dot {
-  width: calc(4px * var(--tab-zoom, 1));
-  height: calc(4px * var(--tab-zoom, 1));
+  width: calc(4.5px * var(--tab-zoom, 1));
+  height: calc(4.5px * var(--tab-zoom, 1));
   border-radius: 50%;
   background: currentColor;
   opacity: 0.44;
@@ -3642,17 +3749,17 @@ body.read-dark .scs-flying-shade {
   position: absolute;
   right: 0;
   top: 76px;
-  bottom: auto;
-  width: 132px;
-  padding: 4px 14px 6px 20px;
-  max-height: calc(50vh - 130px);
+  bottom: calc(var(--bar-height) + 28px);
+  width: 214px;
+  padding: 6px 14px 10px 30px;
+  max-height: none;
   z-index: 38;
   pointer-events: none;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   justify-content: flex-start;
-  gap: 5px;
+  gap: 8px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -3671,14 +3778,28 @@ body.read-dark .scs-flying-shade {
 }
 
 .scroll-tabs-rail .sticky-tab-face {
-  border-radius: 3px 0 0 3px;
-  padding: 0 8.5px 0 8px;
+  height: 32px;
+  min-width: 68px;
+  max-width: 162px;
+  border-radius: 5px 0 0 5px;
+  padding: 0 13px 0 11px;
+  font-size: 12px;
+  gap: 6px;
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.22),
     -2px 3px 10px rgba(0, 0, 0, 0.36);
   background:
     linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
-    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 10px, var(--tab-bg) 100%);
+    linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) 12px, var(--tab-bg) 100%);
+}
+
+.scroll-tabs-rail .sticky-tab-dot {
+  width: 5.5px;
+  height: 5.5px;
+}
+
+.scroll-tabs-rail .sticky-tab-text {
+  max-width: 128px;
 }
 
 .scroll-tabs-rail .sticky-tab-hit {
@@ -3687,18 +3808,22 @@ body.read-dark .scs-flying-shade {
 }
 
 .scroll-tabs-rail .sticky-edge-tab:hover .sticky-tab-face {
-  transform: translate3d(-4px, 0, 0);
+  transform: translate3d(-6px, 0, 0);
 }
 
 .scroll-tabs-rail .sticky-edge-tab:hover .sticky-tab-hit {
-  left: -4px;
+  left: -6px;
 }
 
 .scroll-tabs-rail .sticky-edge-tab.is-current .sticky-tab-face {
-  transform: translate3d(-5px, 0, 0);
+  transform: translate3d(-6px, 0, 0);
   box-shadow:
     inset -3px 0 5px -2px rgba(0, 0, 0, 0.16),
     -4px 5px 14px rgba(0, 0, 0, 0.46);
+}
+
+.scroll-tabs-rail .sticky-edge-tab.is-current .sticky-tab-hit {
+  left: -6px;
 }
 
 /* Sticky Tab Popover Editor */

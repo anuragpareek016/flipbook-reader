@@ -592,7 +592,11 @@
         <div><kbd>⌘F</kbd> Search &nbsp; <kbd>+</kbd>/<kbd>-</kbd> Zoom &nbsp; <kbd>F</kbd> Full</div>
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-about">
+      <button type="button" id="btnAboutApp" class="menu-item">
+        <span>About FlipBook Reader</span>
+        <span class="menu-val">v1.0.0 ›</span>
+      </button>
+      <div class="menu-about" id="menuAboutCard" role="button" tabindex="0" title="About FlipBook Reader">
         <div class="about-app-name">FlipBook Reader</div>
         <div class="about-org">OpenFrontier Labs</div>
         <div class="about-dev">Developed by Anurag Pareek</div>
@@ -685,6 +689,37 @@
           <button type="button" id="btnModalBrowsePdf" class="btn-secondary">Browse File</button>
         </div>
         <div id="libraryList" class="library-list"></div>
+      </div>
+    </div>
+
+    <!-- About FlipBook Reader Modal -->
+    <div id="aboutModal" class="modal-backdrop" hidden>
+      <div class="modal-card about-modal-card" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+        <div class="modal-head">
+          <h2 id="aboutModalTitle">About FlipBook Reader</h2>
+          <button type="button" id="btnCloseAbout" class="drawer-close" aria-label="Close About">✕</button>
+        </div>
+        <div class="about-modal-hero">
+          <div class="about-badge">Version 1.0.0</div>
+          <div class="about-hero-title">FlipBook Reader</div>
+          <div class="about-hero-byline">OpenFrontier Labs · Developed by Anurag Pareek</div>
+        </div>
+        <p class="about-desc">
+          FlipBook Reader is built by <strong>OpenFrontier Labs</strong> and developed by <strong>Anurag Pareek</strong> — a tactile digital book reader featuring realistic corner-curl page physics, study highlights, sticky notes, magnifier lens, and ambient focus tools.
+        </p>
+        <div class="about-meta-grid">
+          <div class="about-meta-pill">
+            <span class="about-meta-k">Organization</span>
+            <span class="about-meta-v">OpenFrontier Labs</span>
+          </div>
+          <div class="about-meta-pill">
+            <span class="about-meta-k">Developer</span>
+            <span class="about-meta-v">Anurag Pareek</span>
+          </div>
+        </div>
+        <div class="about-footer">
+          <span>© 2026 OpenFrontier Labs · Developed by Anurag Pareek</span>
+        </div>
       </div>
     </div>
 
