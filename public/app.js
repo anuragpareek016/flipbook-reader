@@ -3736,10 +3736,17 @@ function wireEvents() {
     isSelectingText = false;
   }, true);
 
-  // Unlock Web Audio cleanly on first user interaction (required in WebKit/Safari)
-  const unlockAudioOnce = () => flipSound.unlock();
-  window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
-  window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
+  // Keep Web Audio unlocked & recover automatically after sleep, audio-route change, or focus loss
+  const keepAudioActive = () => {
+    if (state.soundEnabled) flipSound.unlock();
+  };
+  window.addEventListener('pointerdown', keepAudioActive, { capture: true, passive: true });
+  window.addEventListener('keydown', keepAudioActive, { capture: true, passive: true });
+  window.addEventListener('touchstart', keepAudioActive, { capture: true, passive: true });
+  window.addEventListener('focus', keepAudioActive, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) keepAudioActive();
+  });
 
   // Panning when zoomed + double click to zoom anchored at cursor + text highlight selection trigger
   els.zoomViewport.addEventListener('dblclick', (e) => {

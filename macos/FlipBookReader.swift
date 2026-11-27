@@ -77,6 +77,7 @@ final class FlipBookAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         let contentController = WKUserContentController()
         contentController.add(self, name: "flipbook")
         config.userContentController = contentController
+        config.mediaTypesRequiringUserActionForPlayback = []
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         webView = WKWebView(frame: rect, configuration: config)
