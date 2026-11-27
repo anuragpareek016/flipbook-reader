@@ -1,6 +1,6 @@
 import * as pdfjsLib from '/vendor/pdfjs/build/pdf.min.mjs';
 import { flipSound, DEFAULT_SOUND_PRESET } from '/assets/sound.js';
-import { FlipBookEngine } from '/assets/flip-engine.js';
+import { FlipBookEngine, bakeDarkCanvasInPlace, getBakedDarkCanvas } from '/assets/flip-engine.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.min.mjs';
 
@@ -759,6 +759,7 @@ function initPageFlip(startIndex = 0) {
     showPageCorners: true,
     disableFlipByClick: !single && state.clickMode === 'smart',
     hasCollectedStack: () => canShowSingleCollectedStack(0),
+    isDarkMode: () => state.readDark,
     onRenderSheetTabs: renderTurningSheetTabs,
   });
 
@@ -1113,6 +1114,7 @@ async function renderPageNode(idx) {
     inner.appendChild(hlLayer);
     inner.appendChild(textLayerDiv);
     paintUserHighlightsOnPage(idx);
+    state.pageFlip?.refreshPendingSnapshots?.();
     if (state.magEnabled) scheduleMagnifierRedraw();
 
     const textLayer = new pdfjsLib.TextLayer({
@@ -1133,8 +1135,29 @@ async function renderPageNode(idx) {
   }
 }
 
+function getActiveFlipPageIndices() {
+  const pf = state.pageFlip;
+  if (!pf) return [];
+  const active = [];
+  const flips = [
+    ...(pf.interactiveFlip ? [pf.interactiveFlip] : []),
+    ...(Array.isArray(pf.flyingFlips) ? pf.flyingFlips : []),
+  ];
+  for (const f of flips) {
+    for (const i of [f.fromIdx, f.toIdx, f.underIdx]) {
+      if (Number.isInteger(i) && i >= 0 && i < state.totalPages && !active.includes(i)) {
+        active.push(i);
+      }
+    }
+  }
+  return active;
+}
+
 function evictDistantPages(centerIdx) {
-  const activeIndices = new Set(state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx));
+  const activeIndices = new Set([
+    ...(state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx)),
+    ...getActiveFlipPageIndices(),
+  ]);
   const maxKeep = state.committedZoom >= 2.0
     ? Math.max(2, activeIndices.size)
     : (state.committedZoom > 1.2 ? Math.max(4, activeIndices.size + 2) : Math.max(MAX_CACHED_CANVASES, 24));
@@ -1166,6 +1189,9 @@ function queueNearbyRenders(centerIdx, radius = 5) {
   const effectiveRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : radius);
   const visible = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx);
   const priority = [...visible];
+  for (const flipIdx of getActiveFlipPageIndices()) {
+    if (!priority.includes(flipIdx)) priority.push(flipIdx);
+  }
   for (let d = 1; d <= effectiveRadius; d++) {
     const next = centerIdx + d;
     const prev = centerIdx - d;
@@ -1373,12 +1399,16 @@ function createFlightSnapshotCanvas(pageIdx, targetW, targetH, className) {
   if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
     const ctx = mini.getContext('2d', { alpha: false });
     ctx.drawImage(srcCanvas, 0, 0, mini.width, mini.height);
+    if (state.readDark) {
+      bakeDarkCanvasInPlace(mini);
+      mini.dataset.darkBaked = '1';
+    }
     return mini;
   }
   return null;
 }
 
-function paintSingleStackTopCard(pageIdx) {
+function paintSingleStackTopCard(pageIdx, { force = false } = {}) {
   if (!els.singleCollectedStack || !els.scsTopCard || !els.scsBadge) return;
   if (pageIdx < 0 || pageIdx >= state.totalPages || !state.pdfDoc) return;
 
@@ -1390,7 +1420,7 @@ function paintSingleStackTopCard(pageIdx) {
   const depth = pageIdx >= 20 || readRatio >= 0.7 ? '4' : pageIdx >= 7 || readRatio >= 0.35 ? '3' : pageIdx >= 2 || readRatio >= 0.1 ? '2' : '1';
   els.singleCollectedStack.dataset.depth = depth;
 
-  if (singleStackMeta.renderedIdx === pageIdx && els.scsTopCard.firstChild) {
+  if (!force && singleStackMeta.renderedIdx === pageIdx && els.scsTopCard.firstChild) {
     return;
   }
   singleStackMeta.renderedIdx = pageIdx;
@@ -1417,6 +1447,10 @@ function paintSingleStackTopCard(pageIdx) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     return pdfPage.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
       if (singleStackMeta.renderToken !== token || singleStackMeta.renderedIdx !== pageIdx) return;
+      if (state.readDark) {
+        bakeDarkCanvasInPlace(canvas);
+        canvas.dataset.darkBaked = '1';
+      }
       els.scsTopCard.innerHTML = '';
       els.scsTopCard.appendChild(canvas);
     });
@@ -2341,6 +2375,9 @@ function createAttachedTurningTabEl(tab, topPct, sideDir) {
   const el = document.createElement('div');
   el.className = `sticky-edge-tab tab-${tab.color} tab-side-${sideDir}`;
   el.dataset.topPct = String(topPct);
+  el.dataset.tabColor = tab.color;
+  el.dataset.tabLabel = tab.label;
+  el.dataset.sideDir = sideDir;
   el.style.setProperty('--tab-top', `${topPct.toFixed(2)}%`);
   el.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
   return el;
@@ -2497,6 +2534,7 @@ function renderBookEdgeTabs() {
         );
       }
     }
+    if (state.magEnabled) scheduleMagnifierRedraw();
     return;
   }
 
@@ -2507,6 +2545,7 @@ function renderBookEdgeTabs() {
   if (!state.pdfDoc || !tabs.length) {
     els.bookEdgeTabsLeft.innerHTML = '';
     els.bookEdgeTabsRight.innerHTML = '';
+    if (state.magEnabled) scheduleMagnifierRedraw();
     return;
   }
 
@@ -2537,6 +2576,10 @@ function renderBookEdgeTabs() {
 
   reconcileEdgeTabContainer(els.bookEdgeTabsLeft, leftSorted, posMap, visible1Based, leftThick, false);
   reconcileEdgeTabContainer(els.bookEdgeTabsRight, rightSorted, posMap, visible1Based, rightThick, true);
+  if (state.magEnabled) {
+    state.magAnimUntil = Math.max(state.magAnimUntil || 0, performance.now() + 380);
+    scheduleMagnifierRedraw();
+  }
 }
 
 function syncStickyPopoverPageFields(targetPage) {
@@ -3591,30 +3634,7 @@ function supportsMagCanvasFilter() {
 
 /** CPU fallback matching CSS invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98). */
 function getMagDarkFallbackCanvas(srcCanvas) {
-  let cached = magDarkFallbackCache.get(srcCanvas);
-  if (cached && cached.width === srcCanvas.width && cached.height === srcCanvas.height) {
-    return cached;
-  }
-  const dc = document.createElement('canvas');
-  dc.width = srcCanvas.width;
-  dc.height = srcCanvas.height;
-  const dctx = dc.getContext('2d', { alpha: false });
-  dctx.drawImage(srcCanvas, 0, 0);
-  const img = dctx.getImageData(0, 0, dc.width, dc.height);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    // Invert 90%, rotate hue 180deg via luminance mirror (2*L - c), then apply contrast & brightness
-    const ir = 229.5 - 0.8 * d[i];
-    const ig = 229.5 - 0.8 * d[i + 1];
-    const ib = 229.5 - 0.8 * d[i + 2];
-    const twoL = (Math.max(ir, ig, ib) + Math.min(ir, ig, ib));
-    d[i] = clamp(((twoL - ir - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
-    d[i + 1] = clamp(((twoL - ig - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
-    d[i + 2] = clamp(((twoL - ib - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
-  }
-  dctx.putImageData(img, 0, 0);
-  magDarkFallbackCache.set(srcCanvas, dc);
-  return dc;
+  return getBakedDarkCanvas(srcCanvas);
 }
 
 function clearMagnifierCache() {
@@ -3863,6 +3883,25 @@ function drawMagPageContent(
       }
     }
     if (hlStarted) ctx.restore();
+
+    // Active search match highlight boxes on this page
+    const searchBoxes = state.searchQuery.trim()
+      ? state.pageNodes[idx]?.querySelectorAll('.fb-search-highlights .fb-search-box')
+      : null;
+    if (searchBoxes?.length) {
+      ctx.save();
+      ctx.globalCompositeOperation = dark ? 'screen' : 'multiply';
+      ctx.fillStyle = dark ? 'rgba(255, 214, 70, 0.36)' : 'rgba(255, 224, 51, 0.48)';
+      for (const box of searchBoxes) {
+        const lp = parseFloat(box.style.left);
+        const tp = parseFloat(box.style.top);
+        const wp = parseFloat(box.style.width);
+        const hp = parseFloat(box.style.height);
+        if (!Number.isFinite(lp) || !Number.isFinite(tp) || !Number.isFinite(wp) || !Number.isFinite(hp)) continue;
+        ctx.fillRect(x + (lp / 100) * w, y + (tp / 100) * h, (wp / 100) * w, (hp / 100) * h);
+      }
+      ctx.restore();
+    }
   }
 
   if (innerSpine) {
@@ -3909,6 +3948,323 @@ function drawMagCenterSpineShadow(ctx, stageW, pageW, pageH, leftVisible, rightV
   ctx.clip();
   drawMagGradientRect(ctx, spineX, 0, spineW, pageH, spineX, spineX + spineW, MAG_GRADIENTS.bookSpine, spineOp, 'multiply');
   ctx.restore();
+}
+
+const MAG_STICKY_TAB_COLORS = {
+  coral: { bg: '#eb7d71', deep: '#d46559', ink: '#2b0f0b' },
+  amber: { bg: '#efcb68', deep: '#d7ae42', ink: '#2c1f04' },
+  mint: { bg: '#6ed2a4', deep: '#4db485', ink: '#082518' },
+  sky: { bg: '#79bbf2', deep: '#5397d4', ink: '#091f36' },
+  violet: { bg: '#b49ef2', deep: '#9077d8', ink: '#1c1039' },
+};
+
+function getStickyTabColorKey(el) {
+  if (el?.dataset?.tabColor && MAG_STICKY_TAB_COLORS[el.dataset.tabColor]) {
+    return el.dataset.tabColor;
+  }
+  for (const key of Object.keys(MAG_STICKY_TAB_COLORS)) {
+    if (el?.classList?.contains(`tab-${key}`)) return key;
+  }
+  return 'amber';
+}
+
+function getStickyTabText(el) {
+  return el?.dataset?.tabLabel || el?.querySelector('.sticky-tab-text')?.textContent || '';
+}
+
+function roundRectPathCustom(ctx, x, y, w, h, radii) {
+  const [tl, tr, br, bl] = radii;
+  ctx.beginPath();
+  ctx.moveTo(x + tl, y);
+  ctx.lineTo(x + w - tr, y);
+  if (tr > 0) ctx.quadraticCurveTo(x + w, y, x + w, y + tr);
+  else ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h - br);
+  if (br > 0) ctx.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+  else ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x + bl, y + h);
+  if (bl > 0) ctx.quadraticCurveTo(x, y + h, x, y + h - bl);
+  else ctx.lineTo(x, y + h);
+  ctx.lineTo(x, y + tl);
+  if (tl > 0) ctx.quadraticCurveTo(x, y, x + tl, y);
+  else ctx.lineTo(x, y);
+  ctx.closePath();
+}
+
+/** Render a physical borderless matte paper sticky note + optional spine tail onto the magnifier canvas. */
+function drawMagStickyTab(
+  ctx,
+  x,
+  y,
+  w,
+  h,
+  { color = 'amber', label = '', isRightSide = true, isCurrent = false, tailW = 0, zoomScale = 1, alpha = 1 } = {}
+) {
+  if (w <= 0.5 || h <= 0.5 || alpha <= 0.01) return;
+  const pal = MAG_STICKY_TAB_COLORS[color] || MAG_STICKY_TAB_COLORS.amber;
+  const z = Math.max(0.25, zoomScale);
+  const r = Math.min(3.5 * z, w * 0.35, h * 0.45);
+  const radii = isRightSide ? [0, r, r, 0] : [r, 0, 0, r];
+
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+
+  // Tail strip linking edge stack tab cleanly to its deeper page offset
+  if (tailW > 0.5) {
+    const tailX = isRightSide ? x - tailW : x + w;
+    ctx.save();
+    ctx.globalAlpha *= 0.88;
+    ctx.fillStyle = pal.deep;
+    ctx.fillRect(tailX, y, tailW, h);
+    const bevelG = ctx.createLinearGradient(0, y, 0, y + h);
+    bevelG.addColorStop(0, 'rgba(255, 255, 255, 0.06)');
+    bevelG.addColorStop(1, 'rgba(0, 0, 0, 0.08)');
+    ctx.fillStyle = bevelG;
+    ctx.fillRect(tailX, y, tailW, h);
+    const tEdgeG = isRightSide
+      ? ctx.createLinearGradient(tailX, 0, tailX + Math.min(4 * z, tailW), 0)
+      : ctx.createLinearGradient(tailX + tailW, 0, tailX + tailW - Math.min(4 * z, tailW), 0);
+    tEdgeG.addColorStop(0, 'rgba(0, 0, 0, 0.24)');
+    tEdgeG.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = tEdgeG;
+    ctx.fillRect(tailX, y, tailW, h);
+    ctx.restore();
+  }
+
+  // Drop shadow behind raised sticky note body
+  ctx.save();
+  ctx.shadowColor = isCurrent ? 'rgba(0, 0, 0, 0.42)' : 'rgba(0, 0, 0, 0.32)';
+  ctx.shadowBlur = (isCurrent ? 12 : 8) * z;
+  ctx.shadowOffsetX = (isRightSide ? (isCurrent ? 3 : 2) : (isCurrent ? -3 : -2)) * z;
+  ctx.shadowOffsetY = (isCurrent ? 5 : 3) * z;
+  roundRectPathCustom(ctx, x, y, w, h, radii);
+  ctx.fillStyle = pal.bg;
+  ctx.fill();
+  ctx.restore();
+
+  // Clip interior matte paper gradient & subtle inner spine shadow
+  ctx.save();
+  roundRectPathCustom(ctx, x, y, w, h, radii);
+  ctx.clip();
+
+  const stopOffset = clamp((12 * z) / Math.max(1, w), 0.05, 0.9);
+  const bodyG = isRightSide
+    ? ctx.createLinearGradient(x, 0, x + w, 0)
+    : ctx.createLinearGradient(x + w, 0, x, 0);
+  bodyG.addColorStop(0, pal.deep);
+  bodyG.addColorStop(stopOffset, pal.bg);
+  bodyG.addColorStop(1, pal.bg);
+  ctx.fillStyle = bodyG;
+  ctx.fillRect(x, y, w, h);
+
+  const sheenG = ctx.createLinearGradient(0, y, 0, y + h);
+  sheenG.addColorStop(0, 'rgba(255, 255, 255, 0.10)');
+  sheenG.addColorStop(0.48, 'rgba(255, 255, 255, 0.02)');
+  sheenG.addColorStop(1, 'rgba(0, 0, 0, 0.05)');
+  ctx.fillStyle = sheenG;
+  ctx.fillRect(x, y, w, h);
+
+  const seamW = Math.min(5 * z, w * 0.4);
+  const seamG = isRightSide
+    ? ctx.createLinearGradient(x, 0, x + seamW, 0)
+    : ctx.createLinearGradient(x + w, 0, x + w - seamW, 0);
+  seamG.addColorStop(0, `rgba(0, 0, 0, ${isCurrent ? 0.16 : 0.24})`);
+  seamG.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = seamG;
+  ctx.fillRect(isRightSide ? x : x + w - seamW, y, seamW, h);
+
+  // Dot marker & crisp bold label
+  const dotR = 2.25 * z;
+  const gap = 4 * z;
+  const innerPad = 8 * z;
+  const outerPad = 11 * z;
+  const midY = y + h / 2;
+  const dotCx = isRightSide ? x + innerPad + dotR : x + w - innerPad - dotR;
+
+  ctx.save();
+  ctx.globalAlpha *= isCurrent ? 0.78 : 0.44;
+  ctx.fillStyle = pal.ink;
+  ctx.beginPath();
+  ctx.arc(dotCx, midY, dotR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (label) {
+    const fontSize = Math.max(5, 11 * z);
+    ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif`;
+    ctx.fillStyle = pal.ink;
+    ctx.textBaseline = 'middle';
+    const textMaxW = Math.max(4, w - innerPad - outerPad - dotR * 2 - gap);
+    let drawLabel = label;
+    if (ctx.measureText(drawLabel).width > textMaxW) {
+      while (drawLabel.length > 1 && ctx.measureText(`${drawLabel}…`).width > textMaxW) {
+        drawLabel = drawLabel.slice(0, -1);
+      }
+      drawLabel = `${drawLabel}…`;
+    }
+    if (isRightSide) {
+      ctx.textAlign = 'left';
+      ctx.fillText(drawLabel, dotCx + dotR + gap, midY + 0.3 * z, textMaxW);
+    } else {
+      ctx.textAlign = 'right';
+      ctx.fillText(drawLabel, dotCx - dotR - gap, midY + 0.3 * z, textMaxW);
+    }
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+/** Draw physical stacked book page edges (#bookStackLeft & #bookStackRight) onto the magnifier canvas. */
+function drawMagBookStacks(ctx, fw, fh, lensCx, lensCy, power) {
+  const dark = state.readDark;
+  const stacks = [
+    { el: els.bookStackLeft, isRight: false, taperVar: '--stack-taper-left' },
+    { el: els.bookStackRight, isRight: true, taperVar: '--stack-taper-right' },
+  ];
+  for (const { el, isRight, taperVar } of stacks) {
+    if (!el || el.classList.contains('is-empty')) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0.5 || r.height <= 4) continue;
+    const dx = fw / 2 + (r.left - lensCx) * power;
+    const dy = fh / 2 + (r.top - lensCy) * power;
+    const dw = r.width * power;
+    const dh = r.height * power;
+    if (dx + dw <= 0 || dx >= fw || dy + dh <= 0 || dy >= fh) continue;
+
+    const taperPx = Math.max(0, (parseFloat(els.bookShell?.style.getPropertyValue(taperVar)) || 0) * power);
+    ctx.save();
+    ctx.beginPath();
+    if (!isRight) {
+      ctx.moveTo(dx, dy + taperPx);
+      ctx.lineTo(dx + dw, dy);
+      ctx.lineTo(dx + dw, dy + dh);
+      ctx.lineTo(dx, dy + dh - taperPx);
+    } else {
+      ctx.moveTo(dx, dy);
+      ctx.lineTo(dx + dw, dy + taperPx);
+      ctx.lineTo(dx + dw, dy + dh - taperPx);
+      ctx.lineTo(dx, dy + dh);
+    }
+    ctx.closePath();
+    ctx.clip();
+
+    if (dark) {
+      ctx.fillStyle = isRight ? '#1d1f26' : '#1b1c22';
+      ctx.fillRect(dx, dy, dw, dh);
+      const stripeStep = Math.max(1.5, 2 * power);
+      for (let sx = 0; sx < dw; sx += stripeStep) {
+        const px = isRight ? dx + sx : dx + dw - sx - stripeStep / 2;
+        ctx.fillStyle = Math.floor(sx / stripeStep) % 2 === 0 ? '#252730' : '#121318';
+        ctx.fillRect(px, dy, Math.max(0.8, stripeStep * 0.55), dh);
+      }
+      const shadeG = isRight
+        ? ctx.createLinearGradient(dx, 0, dx + dw, 0)
+        : ctx.createLinearGradient(dx + dw, 0, dx, 0);
+      shadeG.addColorStop(0, 'rgba(0, 0, 0, 0.34)');
+      shadeG.addColorStop(0.45, 'rgba(255, 255, 255, 0.02)');
+      shadeG.addColorStop(1, 'rgba(0, 0, 0, 0.28)');
+      ctx.fillStyle = shadeG;
+      ctx.fillRect(dx, dy, dw, dh);
+    } else {
+      ctx.fillStyle = getPaperSurfaceColor(true);
+      ctx.fillRect(dx, dy, dw, dh);
+      const stripeStep = Math.max(1.5, 2 * power);
+      for (let sx = 0; sx < dw; sx += stripeStep) {
+        const px = isRight ? dx + sx : dx + dw - sx - stripeStep / 2;
+        ctx.fillStyle = Math.floor(sx / stripeStep) % 2 === 0 ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.12)';
+        ctx.fillRect(px, dy, Math.max(0.8, stripeStep * 0.48), dh);
+      }
+      const shadeG = isRight
+        ? ctx.createLinearGradient(dx, 0, dx + dw, 0)
+        : ctx.createLinearGradient(dx + dw, 0, dx, 0);
+      shadeG.addColorStop(0, 'rgba(0, 0, 0, 0.20)');
+      shadeG.addColorStop(0.36, 'rgba(0, 0, 0, 0.04)');
+      shadeG.addColorStop(0.72, 'rgba(255, 255, 255, 0.14)');
+      shadeG.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
+      ctx.fillStyle = shadeG;
+      ctx.fillRect(dx, dy, dw, dh);
+    }
+
+    const vertG = ctx.createLinearGradient(0, dy, 0, dy + dh);
+    vertG.addColorStop(0, `rgba(0, 0, 0, ${dark ? 0.34 : 0.16})`);
+    vertG.addColorStop(0.045, 'rgba(0, 0, 0, 0)');
+    vertG.addColorStop(0.94, 'rgba(0, 0, 0, 0)');
+    vertG.addColorStop(1, `rgba(0, 0, 0, ${dark ? 0.42 : 0.24})`);
+    ctx.fillStyle = vertG;
+    ctx.fillRect(dx, dy, dw, dh);
+    ctx.restore();
+  }
+}
+
+/** Project and draw axis-aligned DOM sticky edge tabs (resting edge stacks or scroll rail) onto magCanvas. */
+function drawMagProjectedEdgeTabs(ctx, containerEl, isRightSide, fw, fh, lensCx, lensCy, power) {
+  if (!containerEl || containerEl.hidden || !containerEl.children.length) return;
+  const items = [];
+  for (let idx = 0; idx < containerEl.children.length; idx++) {
+    const btn = containerEl.children[idx];
+    if (btn.hidden) continue;
+    const cs = getComputedStyle(btn);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.01) continue;
+    const r = btn.getBoundingClientRect();
+    if (r.width <= 1 || r.height <= 1) continue;
+    const tailEl = btn.querySelector('.sticky-tab-tail');
+    const tailRect = tailEl && !tailEl.hidden ? tailEl.getBoundingClientRect() : null;
+    items.push({
+      btn,
+      r,
+      tailW: tailRect && tailRect.width > 0.5 ? tailRect.width : 0,
+      z: parseInt(cs.zIndex, 10) || 0,
+      idx,
+    });
+  }
+  items.sort((a, b) => (a.z - b.z) || (a.idx - b.idx));
+
+  for (const item of items) {
+    const { btn, r, tailW } = item;
+    const dx = fw / 2 + (r.left - lensCx) * power;
+    const dy = fh / 2 + (r.top - lensCy) * power;
+    const dw = r.width * power;
+    const dh = r.height * power;
+    const dTail = tailW * power;
+    const minX = isRightSide ? dx - dTail : dx;
+    const maxX = isRightSide ? dx + dw : dx + dw + dTail;
+    if (maxX < -30 || minX > fw + 30 || dy + dh < -30 || dy > fh + 30) continue;
+
+    drawMagStickyTab(ctx, dx, dy, dw, dh, {
+      color: getStickyTabColorKey(btn),
+      label: getStickyTabText(btn),
+      isRightSide,
+      isCurrent: btn.classList.contains('is-current'),
+      tailW: dTail,
+      zoomScale: Math.max(0.35, dh / 27),
+    });
+  }
+}
+
+/** Draw attached turning sticky tabs within an unrotated/transformed page box (x0, y0, pageW, pageH). */
+function drawMagTurningTabsForLeaf(ctx, containerEl, x0, y0, pageW, pageH, tabZoom, skipHidden = true) {
+  if (!containerEl || !containerEl.children.length) return;
+  for (const el of containerEl.children) {
+    if (skipHidden && el.hidden) continue;
+    const topPct = Number(el.dataset.topPct);
+    const yCenter = y0 + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * pageH;
+    const sideDir = el.dataset.sideDir || (el.classList.contains('tab-side-left') ? 'left' : 'right');
+    const isRightSide = sideDir !== 'left';
+    const tabH = el.offsetHeight || 27 * tabZoom;
+    const tabW = el.offsetWidth || 54 * tabZoom;
+    const tuck = 4 * tabZoom;
+    const tabX = isRightSide ? x0 + pageW - tuck : x0 + tuck - tabW;
+    const tabY = yCenter - tabH / 2;
+
+    drawMagStickyTab(ctx, tabX, tabY, tabW, tabH, {
+      color: getStickyTabColorKey(el),
+      label: getStickyTabText(el),
+      isRightSide,
+      isCurrent: el.classList.contains('is-current'),
+      tailW: 0,
+      zoomScale: tabZoom,
+    });
+  }
 }
 
 /** Draw perspective-foreshortened hard cover flip around the book's center spine hinge. */
@@ -4004,6 +4360,38 @@ function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
     ctx.fillStyle = `rgba(0, 0, 0, ${geom.shadeAlpha})`;
     ctx.fill();
     ctx.restore();
+  }
+
+  // Attached sticky tabs riding on the turning hard cover outer edge
+  if (f.hardCard && !f.hardCard.classList.contains('is-hover-curl')) {
+    const activeFace = f.hardCard.querySelector(showingBack ? '.fh-hard-back' : '.fh-hard-front');
+    const faceTabs = activeFace ? Array.from(activeFace.querySelectorAll('.sticky-edge-tab')) : [];
+    if (faceTabs.length) {
+      const kEdge = P / Math.max(120, P - pageW * sinAbs);
+      const tabZoom = clamp((pageW || state.pageW || 460) / 460, 0.58, 4.5);
+      const protrudeRight = dirSign * cosR >= 0;
+      const sx = Math.max(0.08, Math.abs(cosR) * kEdge);
+      const sy = kEdge;
+      const edgeTopY = hingeY - (pageH / 2) * sy;
+      for (const el of faceTabs) {
+        const topPct = Number(el.dataset.topPct);
+        const tabY = edgeTopY + (Number.isFinite(topPct) ? topPct / 100 : 0.2) * (pageH * sy);
+        const tabW = el.offsetWidth || 54 * tabZoom;
+        const tabH = el.offsetHeight || 27 * tabZoom;
+        const tuck = 4 * tabZoom;
+        ctx.save();
+        ctx.translate(pEdge.x, tabY);
+        ctx.scale(sx, sy);
+        drawMagStickyTab(ctx, protrudeRight ? -tuck : tuck - tabW, -tabH / 2, tabW, tabH, {
+          color: getStickyTabColorKey(el),
+          label: getStickyTabText(el),
+          isRightSide: protrudeRight,
+          isCurrent: el.classList.contains('is-current'),
+          zoomScale: tabZoom,
+        });
+        ctx.restore();
+      }
+    }
   }
 }
 
@@ -4126,6 +4514,38 @@ function drawMagActiveFlipLayers(ctx, pf, desiredHiResW, stageScaleX) {
       },
     });
 
+    const tabZoom = clamp((pageW || state.pageW || 460) / 460, 0.58, 4.5);
+    const tabsAllowed = !f.downTabs?.classList?.contains('is-hover-curl');
+
+    // 2b) Flat uncurled sticky tabs on departing sheet (or clipped singlePrev unfurling sheet)
+    if (tabsAllowed && f.downTabs?.children?.length) {
+      tasks.push({
+        z: baseUp + 0.1,
+        order: order++,
+        draw: () => {
+          ctx.save();
+          ctx.globalAlpha *= layerOp;
+          if (f.singlePrev) {
+            ctx.beginPath();
+            ctx.rect(0, -44 * tabZoom, stageW + 130 * tabZoom, pageH + 88 * tabZoom);
+            ctx.clip();
+            ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+            ctx.rotate(rad);
+            ctx.beginPath();
+            ctx.rect(-maskSize, -maskSize / 2, maskSize, maskSize);
+            ctx.clip();
+            ctx.translate(-pageW / 2 - geom.pageTranX, 0);
+            ctx.rotate(-rad);
+            drawMagTurningTabsForLeaf(ctx, f.downTabs, -pageW / 2, -pageH / 2, pageW, pageH, tabZoom, false);
+          } else {
+            const slotX = !pf.single && f.side === 'right' ? pageW : 0;
+            drawMagTurningTabsForLeaf(ctx, f.downTabs, slotX, 0, pageW, pageH, tabZoom, true);
+          }
+          ctx.restore();
+        },
+      });
+    }
+
     if (f.singlePrev) continue;
 
     // 3) Soft flap drop shadow cast underneath curled-over flap
@@ -4202,6 +4622,29 @@ function drawMagActiveFlipLayers(ctx, pf, desiredHiResW, stageScaleX) {
         ctx.restore();
       },
     });
+
+    // 4b) Unclipped curled-over sticky tabs riding with upTabsWrap
+    if (tabsAllowed && f.upTabs?.children?.length) {
+      tasks.push({
+        z: 3000 + (f.seq || 0) * 4 + 1.2,
+        order: order++,
+        draw: () => {
+          ctx.save();
+          ctx.globalAlpha *= layerOp;
+          if (pf.single) {
+            ctx.beginPath();
+            ctx.rect(0, -44 * tabZoom, stageW + 130 * tabZoom, pageH + 88 * tabZoom);
+            ctx.clip();
+          }
+          ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+          ctx.rotate(rad);
+          ctx.translate(geom.distCenter, 0);
+          ctx.rotate(rad);
+          drawMagTurningTabsForLeaf(ctx, f.upTabs, -pageW / 2, -pageH / 2, pageW, pageH, tabZoom, true);
+          ctx.restore();
+        },
+      });
+    }
   }
 
   tasks.sort((a, b) => (a.z - b.z) || (a.order - b.order));
@@ -4216,6 +4659,23 @@ function drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power) {
     !els.singleCollectedStack.classList.contains('is-waiting') &&
     Number.isInteger(singleStackMeta.renderedIdx)
   ) {
+    const stackLayers = els.singleCollectedStack.querySelectorAll('.scs-layer');
+    for (let i = 0; i < stackLayers.length; i++) {
+      const lr = stackLayers[i].getBoundingClientRect();
+      if (lr.width <= 4 || lr.height <= 4) continue;
+      const lx = fw / 2 + (lr.left - lensCx) * power;
+      const ly = fh / 2 + (lr.top - lensCy) * power;
+      const lw = lr.width * power;
+      const lh = lr.height * power;
+      if (lx + lw <= 0 || lx >= fw || ly + lh <= 0 || ly >= fh) continue;
+      ctx.save();
+      ctx.fillStyle = state.readDark ? '#23252d' : getPaperSurfaceColor(true);
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+      ctx.shadowBlur = 6 * power;
+      ctx.fillRect(lx, ly, lw, lh);
+      ctx.restore();
+    }
+
     const topCard = els.scsTopCard || els.singleCollectedStack;
     const sr = topCard.getBoundingClientRect();
     if (sr.width > 10 && sr.height > 10) {
@@ -4227,9 +4687,32 @@ function drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power) {
         drawMagPageContent(ctx, singleStackMeta.renderedIdx, dx, dy, dw, dh, dw * dpr, { drawHighlights: false });
       }
     }
+
+    if (els.scsBadge && els.scsBadge.textContent) {
+      const br = els.scsBadge.getBoundingClientRect();
+      if (br.width > 4 && br.height > 4) {
+        const bx = fw / 2 + (br.left - lensCx) * power;
+        const by = fh / 2 + (br.top - lensCy) * power;
+        const bw = br.width * power;
+        const bh = br.height * power;
+        if (bx + bw > 0 && bx < fw && by + bh > 0 && by < fh) {
+          ctx.save();
+          roundRectPathCustom(ctx, bx, by, bw, bh, [bh / 2, bh / 2, bh / 2, bh / 2]);
+          ctx.fillStyle = 'rgba(15, 17, 22, 0.84)';
+          ctx.fill();
+          ctx.fillStyle = '#f3f5f8';
+          ctx.font = `600 ${Math.max(6, 10 * power)}px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(els.scsBadge.textContent, bx + bw / 2, by + bh / 2 + 0.5);
+          ctx.restore();
+        }
+      }
+    }
   }
 
   if (!els.singleFlightLayer || !els.singleFlightLayer.children.length) return;
+  const flightTabZoom = clamp((state.pageW * (state.committedZoom || 1)) / 460, 0.58, 4.5);
   for (const card of els.singleFlightLayer.children) {
     const pageIdx = Number(card.dataset.pageIdx);
     const cardW = card.offsetWidth;
@@ -4263,6 +4746,7 @@ function drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power) {
     drawMagPageContent(ctx, pageIdx, -cardW / 2, -cardH / 2, cardW, cardH, desiredHiResW, { drawHighlights: false });
     const fStops = state.readDark ? MAG_GRADIENTS.flightShadeDark : MAG_GRADIENTS.flightShadeLight;
     drawMagGradientRect(ctx, -cardW / 2, -cardH / 2, cardW, cardH, cardW / 2, -cardW / 2, fStops, 1);
+    drawMagTurningTabsForLeaf(ctx, card, -cardW / 2, -cardH / 2, cardW, cardH, flightTabZoom, false);
     ctx.restore();
   }
 }
@@ -4308,8 +4792,14 @@ function drawMagnifierFrame() {
 
       drawMagPageContent(ctx, idx, dx, dy, dw, dh, pr.width * power * dpr);
     }
+    drawMagProjectedEdgeTabs(ctx, els.scrollTabsRail, false, fw, fh, lensCx, lensCy, power);
     return;
   }
+
+  // 0. Physical stacked page edges & resting edge sticky tabs emerging from behind top pages
+  drawMagBookStacks(ctx, fw, fh, lensCx, lensCy, power);
+  drawMagProjectedEdgeTabs(ctx, els.bookEdgeTabsLeft, false, fw, fh, lensCx, lensCy, power);
+  drawMagProjectedEdgeTabs(ctx, els.bookEdgeTabsRight, true, fw, fh, lensCx, lensCy, power);
 
   const pf = state.pageFlip;
   const stageW = pf.single ? pf.pageW : pf.pageW * 2;
@@ -4351,7 +4841,7 @@ function drawMagnifierFrame() {
       drawMagCenterSpineShadow(ctx, stageW, pf.pageW, pf.pageH, leftVisible, rightVisible);
     }
 
-    // 3. Active page-turning sheets, hard covers, fold crease highlights & cast shadows
+    // 3. Active page-turning sheets, hard covers, attached turning sticky tabs, fold creases & shadows
     drawMagActiveFlipLayers(ctx, pf, desiredHiResW, stageScaleX);
     ctx.restore();
   }
@@ -4785,6 +5275,10 @@ function setReadDark(enabled, persist = true) {
   if (els.btnDarkRead) {
     els.btnDarkRead.classList.toggle('active', state.readDark);
     els.btnDarkRead.setAttribute('aria-pressed', String(state.readDark));
+  }
+  state.pageFlip?.refreshSnapshots?.();
+  if (Number.isInteger(singleStackMeta.renderedIdx) && els.singleCollectedStack && !els.singleCollectedStack.hidden) {
+    paintSingleStackTopCard(singleStackMeta.renderedIdx, { force: true });
   }
   if (state.magEnabled) scheduleMagnifierRedraw();
   if (persist) schedulePersistState();

@@ -151,10 +151,11 @@ function sendStaticFile(res, rootDir, relPath) {
       return;
     }
     const ext = path.extname(fullPath).toLowerCase();
+    const isVendor = path.resolve(rootDir) === path.resolve(NODE_MODULES);
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Content-Length': stat.size,
-      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+      'Cache-Control': isVendor ? 'public, max-age=3600' : 'no-store',
     });
     fs.createReadStream(fullPath).pipe(res);
   });
