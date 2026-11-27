@@ -1630,8 +1630,7 @@ function updateHighlightsUi() {
   if (els.btnHighlightsTop) {
     const spreadHasHl = visiblePages.some((p) => perPageCounts.has(p));
     els.btnHighlightsTop.classList.toggle('has-hl', spreadHasHl);
-    const hlTabActive = !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="highlights"]')?.classList.contains('active');
-    els.btnHighlightsTop.classList.toggle('active', !!hlTabActive);
+    els.btnHighlightsTop.classList.toggle('active', !els.sideDrawer.hidden);
   }
 
   // Compact filter chips (All / This Page) + dropdown select for specific highlighted pages
@@ -2315,6 +2314,7 @@ function toggleAutoFlip() {
 function openDrawerTab(tabName) {
   els.sideDrawer.hidden = false;
   els.btnDrawer.classList.add('active');
+  els.btnHighlightsTop?.classList.add('active');
   document.querySelectorAll('.drawer-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === tabName);
   });
@@ -2413,6 +2413,7 @@ function wireEvents() {
     if (!els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="search"]').classList.contains('active')) {
       els.sideDrawer.hidden = true;
       els.btnDrawer.classList.remove('active');
+      els.btnHighlightsTop?.classList.remove('active');
     } else {
       openDrawerTab('search');
     }
@@ -2495,13 +2496,13 @@ function wireEvents() {
     setReadDark(!state.readDark, true);
   });
   els.btnHighlightsTop?.addEventListener('click', () => {
-    const isHlActive = !els.sideDrawer.hidden && document.querySelector('.drawer-tab[data-tab="highlights"]')?.classList.contains('active');
-    if (isHlActive) {
+    if (!els.sideDrawer.hidden) {
       els.sideDrawer.hidden = true;
       els.btnDrawer.classList.remove('active');
       updateHighlightsUi();
     } else {
-      openDrawerTab('highlights');
+      const activeTab = document.querySelector('.drawer-tab.active')?.dataset.tab || 'highlights';
+      openDrawerTab(activeTab);
     }
   });
 
@@ -2975,7 +2976,11 @@ function wireEvents() {
         if (!els.hlPopover.hidden) hideHighlightPopover();
         else if (!els.moreMenu.hidden) els.moreMenu.hidden = true;
         else if (!els.libraryModal.hidden) els.libraryModal.hidden = true;
-        else if (!els.sideDrawer.hidden) { els.sideDrawer.hidden = true; els.btnDrawer.classList.remove('active'); }
+        else if (!els.sideDrawer.hidden) {
+          els.sideDrawer.hidden = true;
+          els.btnDrawer.classList.remove('active');
+          els.btnHighlightsTop?.classList.remove('active');
+        }
         else if (!els.thumbnailsStrip.hidden) { els.thumbnailsStrip.hidden = true; els.btnThumbs.classList.remove('active'); }
         else if (state.zoom > 1) setZoom(1, true);
         break;
