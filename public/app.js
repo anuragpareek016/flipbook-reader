@@ -136,6 +136,7 @@ const els = {
   bookSpineShadow: document.getElementById('bookSpineShadow'),
   singleCollectedStack: document.getElementById('singleCollectedStack'),
   scsTopCard: document.getElementById('scsTopCard'),
+  scsTabsRail: document.getElementById('scsTabsRail'),
   scsBadge: document.getElementById('scsBadge'),
   singleFlightLayer: document.getElementById('singleFlightLayer'),
   navBackPill: document.getElementById('navBackPill'),
@@ -152,8 +153,6 @@ const els = {
   moreMenu: document.getElementById('moreMenu'),
   menuOpenPdf: document.getElementById('menuOpenPdf'),
   menuLibrary: document.getElementById('menuLibrary'),
-  menuPageNotes: document.getElementById('menuPageNotes'),
-  valPageNotesCount: document.getElementById('valPageNotesCount'),
   menuScrollMode: document.getElementById('menuScrollMode'),
   valScrollMode: document.getElementById('valScrollMode'),
   menuPageMode: document.getElementById('menuPageMode'),
@@ -1540,12 +1539,16 @@ const singleStackMeta = {
 };
 
 function clearSingleDragCard() {
+  const hadCard = Boolean(singleStackMeta.dragCard);
   if (singleStackMeta.dragCard) {
     singleStackMeta.dragCard.remove();
     singleStackMeta.dragCard = null;
   }
   singleStackMeta.dragPose = null;
   els.singleCollectedStack?.classList.remove('is-drop-ready');
+  if (hadCard) {
+    renderBookEdgeTabs();
+  }
 }
 
 function clearSingleFlights() {
@@ -1707,6 +1710,7 @@ function updateSingleDragPickup(data) {
   if (!stageRect.width || !bookRect.width || !els.singleCollectedStack.offsetWidth) return;
 
   let card = singleStackMeta.dragCard;
+  let createdDragCard = false;
   if (!card || Number(card.dataset.pageIdx) !== pageToDraw) {
     clearSingleDragCard();
     card = document.createElement('div');
@@ -1726,8 +1730,18 @@ function updateSingleDragPickup(data) {
     const shade = document.createElement('div');
     shade.className = 'scs-flying-shade';
     card.appendChild(shade);
+    const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
+    const dragTab = state.stickyTabs.find((t) => t.page === pageToDraw + 1);
+    if (dragTab) {
+      const topPct = posMap.get(dragTab.page) ?? 20;
+      card.appendChild(createAttachedTurningTabEl(dragTab, topPct, 'right'));
+    }
     els.singleFlightLayer.appendChild(card);
     singleStackMeta.dragCard = card;
+    createdDragCard = true;
+  }
+  if (createdDragCard) {
+    renderBookEdgeTabs();
   }
 
   const r = clamp(data.liftRatio || 0, 0, 1);
@@ -1842,10 +1856,11 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   const flyingTab = state.stickyTabs.find((t) => t.page === flyingPageIdx + 1);
   if (flyingTab) {
     const topPct = posMap.get(flyingTab.page) ?? 20;
-    card.appendChild(createAttachedTurningTabEl(flyingTab, topPct, goingNext ? 'right' : 'left'));
+    card.appendChild(createAttachedTurningTabEl(flyingTab, topPct, 'right'));
   }
 
   els.singleFlightLayer.appendChild(card);
+  renderBookEdgeTabs();
 
   const { srcX, srcY, dstX, dstY, sx, sy } = getSingleStackCenterCoords(bookRect, stageRect);
   const midX = (srcX + dstX) / 2 - 22;
@@ -2534,15 +2549,25 @@ function computeGlobalTabPositionsMap(tabs) {
 function getTurningTabPages() {
   const activePages = new Set();
   const pf = state.pageFlip;
+  const single = pf ? Boolean(pf.single) : (isEffectiveSingleMode() || state.orientation === 'portrait');
   if (pf) {
     const flips = [
       ...(pf.interactiveFlip && pf.interactiveFlip.mode !== 'hover' && pf.interactiveFlip.wasDragged ? [pf.interactiveFlip] : []),
       ...(Array.isArray(pf.flyingFlips) ? pf.flyingFlips : []),
     ];
     for (const f of flips) {
-      if (Number.isInteger(f.fromIdx)) activePages.add(f.fromIdx + 1);
-      if (Number.isInteger(f.toIdx)) activePages.add(f.toIdx + 1);
+      if (single) {
+        const movingIdx = f.singlePrev ? f.toIdx : f.fromIdx;
+        if (Number.isInteger(movingIdx)) activePages.add(movingIdx + 1);
+      } else {
+        if (Number.isInteger(f.fromIdx)) activePages.add(f.fromIdx + 1);
+        if (Number.isInteger(f.toIdx)) activePages.add(f.toIdx + 1);
+      }
     }
+  }
+  if (singleStackMeta.dragCard) {
+    const idx = Number(singleStackMeta.dragCard.dataset.pageIdx);
+    if (Number.isInteger(idx)) activePages.add(idx + 1);
   }
   if (els.singleFlightLayer?.children?.length) {
     for (const card of els.singleFlightLayer.children) {
@@ -2574,14 +2599,19 @@ function createAttachedTurningTabEl(tab, topPct, sideDir) {
 
 function renderTurningSheetTabs({ isHard, singlePrev, side, fromIdx, toIdx, downTabs, upTabs, hardFront, hardBack }) {
   if (!state.stickyTabs.length) return;
+  const single = isEffectiveSingleMode() || state.orientation === 'portrait';
   const sheetPages = new Set();
-  if (Number.isInteger(fromIdx)) sheetPages.add(fromIdx + 1);
-  if (Number.isInteger(toIdx)) sheetPages.add(toIdx + 1);
+  if (single) {
+    const movingIdx = singlePrev ? toIdx : fromIdx;
+    if (Number.isInteger(movingIdx)) sheetPages.add(movingIdx + 1);
+  } else {
+    if (Number.isInteger(fromIdx)) sheetPages.add(fromIdx + 1);
+    if (Number.isInteger(toIdx)) sheetPages.add(toIdx + 1);
+  }
   const matching = state.stickyTabs.filter((t) => sheetPages.has(t.page));
   if (!matching.length) return;
 
   const posMap = computeGlobalTabPositionsMap(state.stickyTabs);
-  const single = isEffectiveSingleMode() || state.orientation === 'portrait';
   const frontSide = single ? 'right' : side;
   const backSide = single ? 'left' : (side === 'right' ? 'left' : 'right');
 
@@ -2708,6 +2738,59 @@ function reconcileEdgeTabContainer(containerEl, entries, posMap, visible1Based, 
   }
 }
 
+function renderSingleCollectedStackTabs(entries, posMap) {
+  if (!els.scsTabsRail) return;
+  els.scsTabsRail.innerHTML = '';
+  if (!entries.length) return;
+
+  const { h } = getSingleStackMetrics();
+  const minGapPct = clamp((13.5 / Math.max(70, h)) * 100, 12, 22);
+  const byAsc = [...entries].sort((a, b) => a.page - b.page);
+  const pcts = byAsc.map((t) => clamp(posMap.get(t.page) ?? 24, 12, 82));
+  for (let i = 1; i < pcts.length; i++) {
+    if (pcts[i] < pcts[i - 1] + minGapPct) {
+      pcts[i] = pcts[i - 1] + minGapPct;
+    }
+  }
+  const over = pcts[pcts.length - 1] - 84;
+  if (over > 0) {
+    pcts[pcts.length - 1] = 84;
+    for (let i = pcts.length - 2; i >= 0; i--) {
+      if (pcts[i] > pcts[i + 1] - minGapPct) {
+        pcts[i] = Math.max(10, pcts[i + 1] - minGapPct);
+      }
+    }
+  }
+  const pctByPage = new Map();
+  byAsc.forEach((t, idx) => pctByPage.set(t.page, clamp(pcts[idx], 10, 84)));
+
+  for (let i = 0; i < entries.length; i++) {
+    const tab = entries[i];
+    const chip = document.createElement('span');
+    chip.className = `scs-mini-tab tab-${tab.color}`;
+    chip.setAttribute('role', 'button');
+    chip.dataset.page = String(tab.page);
+    const pct = pctByPage.get(tab.page) ?? 24;
+    chip.style.setProperty('--scs-tab-top', `${pct.toFixed(1)}%`);
+    chip.style.zIndex = String(50 - Math.min(40, i));
+    chip.title = `${tab.label} — Page ${tab.page} (Click to jump, Right-click to edit)`;
+    chip.innerHTML = `<span class="sticky-tab-dot"></span><span class="sticky-tab-text">${escapeHtml(tab.label)}</span>`;
+    chip.addEventListener('mousedown', (e) => e.stopPropagation());
+    chip.addEventListener('pointerdown', (e) => e.stopPropagation());
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      jumpToPage(tab.page, false, { reason: 'sticky-tab' });
+    });
+    chip.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openStickyTabPopover(tab.page, { x: e.clientX, y: e.clientY });
+    });
+    els.scsTabsRail.appendChild(chip);
+  }
+}
+
 function renderBookEdgeTabs() {
   if (!els.bookEdgeTabsLeft || !els.bookEdgeTabsRight) return;
 
@@ -2719,6 +2802,7 @@ function renderBookEdgeTabs() {
   if (state.scrollMode === 'scroll') {
     els.bookEdgeTabsLeft.innerHTML = '';
     els.bookEdgeTabsRight.innerHTML = '';
+    renderSingleCollectedStackTabs([], posMap);
     if (els.scrollTabsRail) {
       els.scrollTabsRail.innerHTML = '';
       els.scrollTabsRail.hidden = tabs.length === 0 || !state.pdfDoc;
@@ -2739,6 +2823,7 @@ function renderBookEdgeTabs() {
   if (!state.pdfDoc || !tabs.length) {
     els.bookEdgeTabsLeft.innerHTML = '';
     els.bookEdgeTabsRight.innerHTML = '';
+    renderSingleCollectedStackTabs([], posMap);
     if (state.magEnabled) scheduleMagnifierRedraw();
     return;
   }
@@ -2747,6 +2832,10 @@ function renderBookEdgeTabs() {
   const single = isEffectiveSingleMode() || state.orientation === 'portrait';
   const curFirst = (visible[0] ?? 0) + 1;
   const curLast = (visible[visible.length - 1] ?? 0) + 1;
+  const singleStackShown =
+    single &&
+    (canShowSingleCollectedStack(curFirst - 2) ||
+      (curFirst > 1 && els.singleCollectedStack && !els.singleCollectedStack.hidden));
 
   let leftTabs = [];
   let rightTabs = [];
@@ -2768,7 +2857,13 @@ function renderBookEdgeTabs() {
   const leftSorted = [...leftTabs].sort((a, b) => b.page - a.page).map((t) => ({ ...t, curFirst, curLast }));
   const rightSorted = [...rightTabs].sort((a, b) => a.page - b.page).map((t) => ({ ...t, curFirst, curLast }));
 
-  reconcileEdgeTabContainer(els.bookEdgeTabsLeft, leftSorted, posMap, visible1Based, leftThick, false);
+  if (singleStackShown) {
+    reconcileEdgeTabContainer(els.bookEdgeTabsLeft, [], posMap, visible1Based, leftThick, false);
+    renderSingleCollectedStackTabs(leftSorted, posMap);
+  } else {
+    renderSingleCollectedStackTabs([], posMap);
+    reconcileEdgeTabContainer(els.bookEdgeTabsLeft, leftSorted, posMap, visible1Based, leftThick, false);
+  }
   reconcileEdgeTabContainer(els.bookEdgeTabsRight, rightSorted, posMap, visible1Based, rightThick, true);
   if (state.magEnabled) {
     state.magAnimUntil = Math.max(state.magAnimUntil || 0, performance.now() + 380);
@@ -3141,14 +3236,18 @@ function normalizePinnedRefs(list) {
   return [...byId.values()].slice(0, 12);
 }
 
-async function paintRefPinCanvas(pin, canvasEl, wrapEl) {
+let activeHoveredPinCtrl = null;
+
+async function paintRefPinCanvas(pin, canvasEl, wrapEl, bodyEl, renderTokenRef) {
   if (!pin || !canvasEl || !state.pdfDoc) return;
+  const token = ++renderTokenRef.seq;
   const bodyW = Math.max(180, (pin.width || 340) - 20);
   const targetCssW = bodyW * (pin.zoom || 1);
   const srcCanvas = await renderPdfRegionToCanvas(pin.page, pin.crop, targetCssW, 2.5);
-  if (!srcCanvas || !canvasEl.isConnected) return;
+  if (!srcCanvas || !canvasEl.isConnected || token !== renderTokenRef.seq) return;
 
   const ratio = srcCanvas.height / Math.max(1, srcCanvas.width);
+  pin.aspectRatio = ratio;
   const cssW = Math.round(targetCssW);
   const cssH = Math.round(cssW * ratio);
   canvasEl.width = srcCanvas.width;
@@ -3160,6 +3259,10 @@ async function paintRefPinCanvas(pin, canvasEl, wrapEl) {
   if (wrapEl) {
     wrapEl.style.width = `${cssW}px`;
     wrapEl.style.height = `${cssH}px`;
+  }
+  if (bodyEl) {
+    const canPan = bodyEl.scrollWidth > bodyEl.clientWidth + 1 || bodyEl.scrollHeight > bodyEl.clientHeight + 1;
+    bodyEl.classList.toggle('is-pannable', canPan);
   }
 }
 
@@ -3206,15 +3309,83 @@ function createRefPinCardElement(pin) {
   const wrapEl = card.querySelector('.ref-pin-canvas-wrap');
   const canvasEl = card.querySelector('.ref-pin-canvas');
   const resizeGrip = card.querySelector('.ref-pin-resize');
+  const renderTokenRef = { seq: 0 };
+  let paintDebounce = null;
 
-  const rerenderCard = () => {
-    zoomLbl.textContent = `${Math.round((pin.zoom || 1) * 100)}%`;
-    paintRefPinCanvas(pin, canvasEl, wrapEl);
+  const updateBodyPannable = () => {
+    if (!bodyEl) return;
+    const canPan = bodyEl.scrollWidth > bodyEl.clientWidth + 1 || bodyEl.scrollHeight > bodyEl.clientHeight + 1;
+    bodyEl.classList.toggle('is-pannable', canPan);
   };
-  rerenderCard();
+
+  const rerenderCard = (immediate = true) => {
+    zoomLbl.textContent = `${Math.round((pin.zoom || 1) * 100)}%`;
+    clearTimeout(paintDebounce);
+    if (immediate) {
+      paintRefPinCanvas(pin, canvasEl, wrapEl, bodyEl, renderTokenRef);
+    } else {
+      paintDebounce = setTimeout(() => {
+        paintRefPinCanvas(pin, canvasEl, wrapEl, bodyEl, renderTokenRef);
+      }, 65);
+    }
+  };
+
+  const setPinZoom = (nextZoom, anchorClient = null, immediatePaint = false) => {
+    const oldW = wrapEl?.offsetWidth || Math.round(Math.max(180, (pin.width || 340) - 20) * (pin.zoom || 1));
+    const oldH = wrapEl?.offsetHeight || Math.round(oldW * (pin.aspectRatio || 1.35));
+    const clampedZoom = clamp(Math.round(nextZoom * 100) / 100, 0.75, 4.0);
+    if (Math.abs(clampedZoom - pin.zoom) < 0.001) return;
+    pin.zoom = clampedZoom;
+
+    const bodyW = Math.max(180, (pin.width || 340) - 20);
+    const ratio = pin.aspectRatio || (oldH / Math.max(1, oldW));
+    const newW = Math.round(bodyW * pin.zoom);
+    const newH = Math.round(newW * ratio);
+
+    if (bodyEl && wrapEl && canvasEl && oldW > 0 && oldH > 0) {
+      const br = bodyEl.getBoundingClientRect();
+      const localX = anchorClient ? clamp(anchorClient.clientX - br.left, 0, br.width) : br.width / 2;
+      const localY = anchorClient ? clamp(anchorClient.clientY - br.top, 0, br.height) : br.height / 2;
+      const wrapOffsetLeft = wrapEl.offsetLeft;
+      const wrapOffsetTop = wrapEl.offsetTop;
+      const contentRelX = clamp((bodyEl.scrollLeft + localX - wrapOffsetLeft) / oldW, 0, 1);
+      const contentRelY = clamp((bodyEl.scrollTop + localY - wrapOffsetTop) / oldH, 0, 1);
+
+      canvasEl.style.width = `${newW}px`;
+      canvasEl.style.height = `${newH}px`;
+      wrapEl.style.width = `${newW}px`;
+      wrapEl.style.height = `${newH}px`;
+
+      const nextPadX = Math.max(8, wrapEl.offsetLeft);
+      const nextPadY = Math.max(8, wrapEl.offsetTop);
+      bodyEl.scrollLeft = Math.max(0, nextPadX + contentRelX * newW - localX);
+      bodyEl.scrollTop = Math.max(0, nextPadY + contentRelY * newH - localY);
+      updateBodyPannable();
+    }
+
+    rerenderCard(immediatePaint);
+    schedulePersistState();
+  };
+
+  const pinController = {
+    card,
+    pin,
+    setZoom: (z, anchor, immediate = true) => setPinZoom(z, anchor, immediate),
+    resetZoom: () => setPinZoom(1, null, true),
+  };
+
+  card.addEventListener('pointerenter', () => {
+    activeHoveredPinCtrl = pinController;
+  });
+  card.addEventListener('pointerleave', () => {
+    if (activeHoveredPinCtrl === pinController) activeHoveredPinCtrl = null;
+  });
+
+  rerenderCard(true);
 
   card.addEventListener('pointerdown', (e) => e.stopPropagation());
   card.addEventListener('mousedown', (e) => e.stopPropagation());
+  card.addEventListener('dblclick', (e) => e.stopPropagation());
 
   titleBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -3226,6 +3397,7 @@ function createRefPinCardElement(pin) {
       e.stopPropagation();
       const act = btn.dataset.pinAct;
       if (act === 'close') {
+        if (activeHoveredPinCtrl === pinController) activeHoveredPinCtrl = null;
         removePinnedRef(pin.id);
       } else if (act === 'collapse') {
         pin.collapsed = !pin.collapsed;
@@ -3233,26 +3405,97 @@ function createRefPinCardElement(pin) {
         btn.textContent = pin.collapsed ? '▢' : '–';
         schedulePersistState();
       } else if (act === 'zdec') {
-        pin.zoom = clamp(Math.round((pin.zoom - 0.25) * 100) / 100, 0.75, 4.0);
-        rerenderCard();
-        schedulePersistState();
+        setPinZoom(pin.zoom - 0.25, null, true);
       } else if (act === 'zinc') {
-        pin.zoom = clamp(Math.round((pin.zoom + 0.25) * 100) / 100, 0.75, 4.0);
-        rerenderCard();
-        schedulePersistState();
+        setPinZoom(pin.zoom + 0.25, null, true);
       }
     });
   });
 
-  // Wheel zoom directly inside floating reference card
-  bodyEl?.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey && !e.metaKey) return;
+  // Trackpad pinch/Ctrl+Wheel zoom + two-finger pan inside floating reference card
+  card.addEventListener('wheel', (e) => {
+    e.stopPropagation();
+    if (!bodyEl || pin.collapsed) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      if (!e.deltaY) return;
+      const nextZoom = pin.zoom * Math.exp(-e.deltaY * 0.004);
+      setPinZoom(nextZoom, { clientX: e.clientX, clientY: e.clientY }, false);
+      return;
+    }
     e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.2 : -0.2;
-    pin.zoom = clamp(Math.round((pin.zoom + delta) * 100) / 100, 0.75, 4.0);
-    rerenderCard();
-    schedulePersistState();
+    const unit = e.deltaMode === 1 ? 18 : e.deltaMode === 2 ? Math.max(120, bodyEl.clientHeight * 0.85) : 1;
+    const dx = (e.deltaX || 0) * unit;
+    const dy = (e.deltaY || 0) * unit;
+    if (dx) bodyEl.scrollLeft += dx;
+    if (dy) bodyEl.scrollTop += dy;
   }, { passive: false });
+
+  // Double-click inside preview body toggles zoom anchored at cursor
+  bodyEl?.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPinZoom(pin.zoom > 1.05 ? 1 : 1.75, { clientX: e.clientX, clientY: e.clientY }, true);
+  });
+
+  // Single-pointer drag pan + touchscreen two-finger pan inside preview body
+  let bodyPanStart = null;
+  bodyEl?.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    bodyPanStart = {
+      px: e.clientX,
+      py: e.clientY,
+      sl: bodyEl.scrollLeft,
+      st: bodyEl.scrollTop,
+    };
+    bodyEl.classList.add('is-panning');
+    bodyEl.setPointerCapture?.(e.pointerId);
+  });
+  bodyEl?.addEventListener('pointermove', (e) => {
+    if (!bodyPanStart) return;
+    bodyEl.scrollLeft = bodyPanStart.sl - (e.clientX - bodyPanStart.px);
+    bodyEl.scrollTop = bodyPanStart.st - (e.clientY - bodyPanStart.py);
+  });
+  const endBodyPan = (e) => {
+    if (!bodyPanStart) return;
+    bodyPanStart = null;
+    bodyEl.classList.remove('is-panning');
+    try { bodyEl.releasePointerCapture?.(e.pointerId); } catch {}
+  };
+  bodyEl?.addEventListener('pointerup', endBodyPan);
+  bodyEl?.addEventListener('pointercancel', endBodyPan);
+
+  let pinTouchMid = null;
+  bodyEl?.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      pinTouchMid = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      };
+    } else {
+      pinTouchMid = null;
+    }
+  }, { passive: true });
+  bodyEl?.addEventListener('touchmove', (e) => {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      if (pinTouchMid) {
+        e.preventDefault();
+        bodyEl.scrollLeft -= mx - pinTouchMid.x;
+        bodyEl.scrollTop -= my - pinTouchMid.y;
+      }
+      pinTouchMid = { x: mx, y: my };
+    }
+  }, { passive: false });
+  bodyEl?.addEventListener('touchend', (e) => {
+    e.stopPropagation();
+    pinTouchMid = null;
+  }, { passive: true });
 
   // Drag header to reposition anywhere on stage
   let dragStart = null;
@@ -3302,7 +3545,7 @@ function createRefPinCardElement(pin) {
     if (!resizeStart) return;
     resizeStart = null;
     try { resizeGrip.releasePointerCapture?.(e.pointerId); } catch {}
-    rerenderCard();
+    rerenderCard(true);
     schedulePersistState();
   };
   resizeGrip?.addEventListener('pointerup', endResize);
@@ -3762,10 +4005,6 @@ function removeHighlightById(id) {
 }
 
 function updateHighlightsUi() {
-  const totalCount = state.highlights.length + state.marginNotes.length;
-  if (els.valPageNotesCount) {
-    els.valPageNotesCount.textContent = String(totalCount);
-  }
   const visiblePages = getVisibleIndices().map((i) => i + 1);
   if (els.btnHighlightsTop) {
     const visibleSet = new Set(visiblePages);
@@ -7656,14 +7895,6 @@ function wireEvents() {
     fetchLibrary();
     els.libraryModal.hidden = false;
   });
-  els.menuPageNotes?.addEventListener('click', () => {
-    els.moreMenu.hidden = true;
-    els.btnMore.classList.remove('active');
-    state.hlFilterMode = 'current';
-    state.hlFilterPage = null;
-    state.hlNotesView = true;
-    openDrawerTab('highlights');
-  });
   els.menuScrollMode?.addEventListener('click', () => {
     if (state.scrollMode === 'scroll') {
       stopAutoScroll({ resetPlaying: true });
@@ -8725,16 +8956,28 @@ function wireEvents() {
         break;
       case '+':
       case '=':
-        setZoom(state.zoom + getZoomStepDelta(1), true, getStageZoomAnchor());
-        showBar('header', true, 1400);
+        if (activeHoveredPinCtrl && activeHoveredPinCtrl.card.isConnected && !activeHoveredPinCtrl.pin.collapsed) {
+          activeHoveredPinCtrl.setZoom(activeHoveredPinCtrl.pin.zoom + 0.25, null, true);
+        } else {
+          setZoom(state.zoom + getZoomStepDelta(1), true, getStageZoomAnchor());
+          showBar('header', true, 1400);
+        }
         break;
       case '-':
-        setZoom(state.zoom + getZoomStepDelta(-1), true, getStageZoomAnchor());
-        showBar('header', true, 1400);
+        if (activeHoveredPinCtrl && activeHoveredPinCtrl.card.isConnected && !activeHoveredPinCtrl.pin.collapsed) {
+          activeHoveredPinCtrl.setZoom(activeHoveredPinCtrl.pin.zoom - 0.25, null, true);
+        } else {
+          setZoom(state.zoom + getZoomStepDelta(-1), true, getStageZoomAnchor());
+          showBar('header', true, 1400);
+        }
         break;
       case '0':
-        setZoom(1, true);
-        showBar('header', true, 1400);
+        if (activeHoveredPinCtrl && activeHoveredPinCtrl.card.isConnected && !activeHoveredPinCtrl.pin.collapsed) {
+          activeHoveredPinCtrl.resetZoom();
+        } else {
+          setZoom(1, true);
+          showBar('header', true, 1400);
+        }
         break;
       case 'Escape':
         if (state.snipActive) setSnipToolActive(false);
