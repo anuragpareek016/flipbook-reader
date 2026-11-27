@@ -284,7 +284,12 @@ const state = {
   zoomRerenderTimer: null,
   persistTimer: null,
   resizeTimer: null,
+  nearbyRenderTimer: null,
   isFlipping: false,
+  hoveringTopBar: false,
+  hoveringBottomBar: false,
+  bookmarksUiDirty: true,
+  highlightsUiDirty: true,
 
   magEnabled: false,
   magStyle: 'circle', // 'circle' | 'bar'
@@ -878,6 +883,7 @@ function initPageFlip(startIndex = 0) {
     if (e.data === 'read') {
       updateCenterShift();
       updateBookDepthChrome();
+      queueNearbyRenders(state.currentIndex, 5);
     }
   });
 
@@ -1117,6 +1123,15 @@ async function renderPageNode(idx) {
     state.pageFlip?.refreshPendingSnapshots?.();
     if (state.magEnabled) scheduleMagnifierRedraw();
 
+    if (state.readDark) {
+      requestAnimationFrame(() => getBakedDarkCanvas(canvas));
+    }
+
+    if (state.isFlipping) {
+      await new Promise((r) => setTimeout(r, 110));
+      if (state.renderedMap.get(idx) !== token) return;
+    }
+
     const textLayer = new pdfjsLib.TextLayer({
       textContentSource: pdfPage.streamTextContent(),
       container: textLayerDiv,
@@ -1186,29 +1201,46 @@ function evictDistantPages(centerIdx) {
 }
 
 function queueNearbyRenders(centerIdx, radius = 5) {
+  clearTimeout(state.nearbyRenderTimer);
   const effectiveRadius = state.committedZoom >= 2.0 ? 0 : (state.committedZoom > 1.2 ? 1 : radius);
   const visible = state.scrollMode === 'scroll' ? getVisibleScrollIndices() : getVisibleIndices(centerIdx);
-  const priority = [...visible];
+  const immediate = [...visible];
   for (const flipIdx of getActiveFlipPageIndices()) {
-    if (!priority.includes(flipIdx)) priority.push(flipIdx);
+    if (!immediate.includes(flipIdx)) immediate.push(flipIdx);
   }
+  for (const idx of immediate) {
+    renderPageNode(idx);
+  }
+
+  const upcoming = [];
   for (let d = 1; d <= effectiveRadius; d++) {
     const next = centerIdx + d;
     const prev = centerIdx - d;
-    if (next < state.totalPages && !priority.includes(next)) priority.push(next);
-    if (prev >= 0 && !priority.includes(prev)) priority.push(prev);
+    if (next < state.totalPages && !immediate.includes(next)) upcoming.push(next);
+    if (prev >= 0 && !immediate.includes(prev)) upcoming.push(prev);
   }
-  priority.forEach((idx, order) => {
-    if (order < visible.length + 2) {
-      renderPageNode(idx);
-    } else {
-      setTimeout(() => {
-        if (Math.abs(idx - state.currentIndex) <= effectiveRadius + 2) {
-          renderPageNode(idx);
-        }
-      }, 12 * order);
-    }
-  });
+  if (!upcoming.length) return;
+
+  const scheduleDeferred = () => {
+    let step = 0;
+    const pumpNext = () => {
+      if (state.isFlipping) {
+        state.nearbyRenderTimer = setTimeout(pumpNext, 140);
+        return;
+      }
+      if (step >= upcoming.length) return;
+      const idx = upcoming[step++];
+      if (Math.abs(idx - state.currentIndex) <= effectiveRadius + 2) {
+        renderPageNode(idx);
+      }
+      if (step < upcoming.length) {
+        state.nearbyRenderTimer = setTimeout(pumpNext, 45);
+      }
+    };
+    pumpNext();
+  };
+
+  state.nearbyRenderTimer = setTimeout(scheduleDeferred, state.isFlipping ? 280 : 60);
 }
 
 /* ---------- Book Visual Chrome: Stacks, Spine, Centering, Toolbar ---------- */
@@ -1245,6 +1277,9 @@ function getBookMaxStackThickness(totalPages, single) {
 
 function setStackElementGeometry(stackEl, side, thicknessPx) {
   if (!stackEl) return;
+  const key = `${side}:${thicknessPx}`;
+  if (stackEl.dataset.stackGeom === key) return;
+  stackEl.dataset.stackGeom = key;
   const visible = thicknessPx > 0;
   stackEl.classList.toggle('is-empty', !visible);
   stackEl.style.opacity = visible ? '1' : '0';
@@ -1258,6 +1293,13 @@ function setStackElementGeometry(stackEl, side, thicknessPx) {
   }
   const taperPx = visible ? Math.min(5, thicknessPx * 0.17).toFixed(1) : '0';
   els.bookShell.style.setProperty(`--stack-taper-${side}`, `${taperPx}px`);
+}
+
+function setShellVarIfChanged(name, value) {
+  if (!els.bookShell) return;
+  if (els.bookShell.style.getPropertyValue(name) !== value) {
+    els.bookShell.style.setProperty(name, value);
+  }
 }
 
 function updateBookDepthChrome() {
@@ -1296,9 +1338,9 @@ function updateBookDepthChrome() {
     els.bookSpineShadow.style.opacity = '0';
     els.bookDropShadow.style.left = '0px';
     els.bookDropShadow.style.right = `${-rightThick}px`;
-    els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
-    els.bookShell.style.setProperty('--tabs-offset-left', '0px');
-    els.bookShell.style.setProperty('--tabs-offset-right', '0px');
+    setShellVarIfChanged('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
+    setShellVarIfChanged('--tabs-offset-left', '0px');
+    setShellVarIfChanged('--tabs-offset-right', '0px');
     return;
   }
 
@@ -1315,9 +1357,9 @@ function updateBookDepthChrome() {
       els.bookSpineShadow.style.opacity = '0';
       els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
-      els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
-      els.bookShell.style.setProperty('--tabs-offset-left', `${sw}px`);
-      els.bookShell.style.setProperty('--tabs-offset-right', '0px');
+      setShellVarIfChanged('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
+      setShellVarIfChanged('--tabs-offset-left', `${sw}px`);
+      setShellVarIfChanged('--tabs-offset-right', '0px');
     } else {
       // Back cover sits on left half of 2*pageW
       setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
@@ -1325,9 +1367,9 @@ function updateBookDepthChrome() {
       els.bookSpineShadow.style.opacity = '0';
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
-      els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(-leftThick * 0.25)}px`);
-      els.bookShell.style.setProperty('--tabs-offset-left', '0px');
-      els.bookShell.style.setProperty('--tabs-offset-right', `${sw}px`);
+      setShellVarIfChanged('--stack-shadow-bias', `${Math.round(-leftThick * 0.25)}px`);
+      setShellVarIfChanged('--tabs-offset-left', '0px');
+      setShellVarIfChanged('--tabs-offset-right', `${sw}px`);
     }
   } else {
     state.allowSpine = true;
@@ -1763,9 +1805,7 @@ function onSpreadChanged(persist = true, renderRadius = 5, { skipSingleStackSwap
   updateBookDepthChrome();
   updateSingleCollectedStack({ skipSwap: skipSingleStackSwap });
   updateBookmarkUi();
-  if (els.valPageNotesCount || (els.sideDrawer && !els.sideDrawer.hidden)) {
-    updateHighlightsUi();
-  }
+  updateHighlightsUi();
   highlightActiveThumbnail(visible);
   queueNearbyRenders(state.currentIndex, renderRadius);
 
@@ -2710,10 +2750,17 @@ function removeStickyTabForPage(page) {
 }
 
 function updateBookmarkUi() {
+  renderBookEdgeTabs();
+  const drawerOpen = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
+  const savesPaneActive = Boolean(document.getElementById('paneBookmarks')?.classList.contains('active'));
+  if (!drawerOpen || !savesPaneActive) {
+    state.bookmarksUiDirty = true;
+    return;
+  }
+  state.bookmarksUiDirty = false;
   const visible = getVisibleIndices().map((i) => i + 1);
   const isBookmarked = visible.some((p) => state.bookmarks.includes(p));
   els.btnToggleCurrentBookmark.textContent = isBookmarked ? '★ Remove Bookmark' : '+ Bookmark Page';
-  renderBookEdgeTabs();
 
   els.bookmarksList.innerHTML = '';
   const hasTabs = state.stickyTabs.length > 0;
@@ -2876,14 +2923,26 @@ function removeHighlightById(id) {
 }
 
 function updateHighlightsUi() {
-  if (els.valPageNotesCount) {
-    els.valPageNotesCount.textContent = String(state.highlights.length);
-  }
-  if (!els.highlightsList || !els.highlightsSummary) return;
-
   const totalCount = state.highlights.length;
-  const filtered = getFilteredSortedHighlights();
+  if (els.valPageNotesCount) {
+    els.valPageNotesCount.textContent = String(totalCount);
+  }
   const visiblePages = getVisibleIndices().map((i) => i + 1);
+  if (els.btnHighlightsTop) {
+    const visibleSet = new Set(visiblePages);
+    const spreadHasHl = state.highlights.some((h) => visibleSet.has(h.page));
+    els.btnHighlightsTop.classList.toggle('has-hl', spreadHasHl);
+    els.btnHighlightsTop.classList.toggle('active', Boolean(els.sideDrawer && !els.sideDrawer.hidden));
+  }
+  const drawerOpen = Boolean(els.sideDrawer && !els.sideDrawer.hidden);
+  const hlPaneActive = Boolean(document.getElementById('paneHighlights')?.classList.contains('active'));
+  if (!drawerOpen || !hlPaneActive || !els.highlightsList || !els.highlightsSummary) {
+    state.highlightsUiDirty = true;
+    return;
+  }
+  state.highlightsUiDirty = false;
+
+  const filtered = getFilteredSortedHighlights();
   const perPageCounts = new Map();
   for (const hl of state.highlights) {
     perPageCounts.set(hl.page, (perPageCounts.get(hl.page) || 0) + 1);
@@ -5123,12 +5182,26 @@ function buildPaperGrainTile(styleKey) {
   return entry;
 }
 
+let lastAppliedGrainUrlStyle = null;
+let paperComfortRaf = 0;
+
 function initPaperGrainTexture() {
   const entry = buildPaperGrainTile(state.paperGrainStyle);
-  if (entry.url) {
+  if (entry.url && lastAppliedGrainUrlStyle !== state.paperGrainStyle) {
+    lastAppliedGrainUrlStyle = state.paperGrainStyle;
     document.documentElement.style.setProperty('--paper-grain-url', entry.url);
   }
   return entry.canvas;
+}
+
+function prewarmPaperGrainTiles() {
+  let idx = 0;
+  const next = () => {
+    if (idx >= PAPER_GRAIN_STYLES.length) return;
+    buildPaperGrainTile(PAPER_GRAIN_STYLES[idx++]);
+    if (idx < PAPER_GRAIN_STYLES.length) setTimeout(next, 24);
+  };
+  setTimeout(next, 24);
 }
 
 function drawMagPaperGrain(ctx, x, y, w, h) {
@@ -5229,11 +5302,23 @@ function updatePaperComfortUi() {
   }
 }
 
-function setPaperWarmth(val, persist = true) {
+function schedulePaperComfortUiUpdate() {
+  if (paperComfortRaf) return;
+  paperComfortRaf = requestAnimationFrame(() => {
+    paperComfortRaf = 0;
+    updatePaperComfortUi();
+    if (state.magEnabled) scheduleMagnifierRedraw();
+  });
+}
+
+function setPaperWarmth(val, persist = true, coalesce = false) {
   const num = Number(val);
   state.paperWarmth = Number.isFinite(num) ? clamp(Math.round(num), 0, 100) : 0;
-  updatePaperComfortUi();
-  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (coalesce) schedulePaperComfortUiUpdate();
+  else {
+    updatePaperComfortUi();
+    if (state.magEnabled) scheduleMagnifierRedraw();
+  }
   if (persist) schedulePersistState();
 }
 
@@ -5244,12 +5329,15 @@ function setPaperGrain(enabled, persist = true) {
   if (persist) schedulePersistState();
 }
 
-function setPaperGrainStrength(val, persist = true) {
+function setPaperGrainStrength(val, persist = true, coalesce = false) {
   const num = Number(val);
   state.paperGrainStrength = Number.isFinite(num) ? clamp(Math.round(num), 10, 100) : 50;
   state.paperGrain = true;
-  updatePaperComfortUi();
-  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (coalesce) schedulePaperComfortUiUpdate();
+  else {
+    updatePaperComfortUi();
+    if (state.magEnabled) scheduleMagnifierRedraw();
+  }
   if (persist) schedulePersistState();
 }
 
@@ -5261,12 +5349,15 @@ function setPaperGrainStyle(style, persist = true) {
   if (persist) schedulePersistState();
 }
 
-function setPaperGrainScalePx(val, persist = true) {
+function setPaperGrainScalePx(val, persist = true, coalesce = false) {
   const num = Number(val);
   state.paperGrainScalePx = Number.isFinite(num) ? clamp(Math.round(num), 90, 280) : 160;
   state.paperGrain = true;
-  updatePaperComfortUi();
-  if (state.magEnabled) scheduleMagnifierRedraw();
+  if (coalesce) schedulePaperComfortUiUpdate();
+  else {
+    updatePaperComfortUi();
+    if (state.magEnabled) scheduleMagnifierRedraw();
+  }
   if (persist) schedulePersistState();
 }
 
@@ -5291,6 +5382,14 @@ function setReadDark(enabled, persist = true) {
   state.pageFlip?.refreshSnapshots?.();
   if (Number.isInteger(singleStackMeta.renderedIdx) && els.singleCollectedStack && !els.singleCollectedStack.hidden) {
     paintSingleStackTopCard(singleStackMeta.renderedIdx, { force: true });
+  }
+  if (state.readDark) {
+    requestAnimationFrame(() => {
+      for (const i of getVisibleIndices()) {
+        const c = state.pageNodes[i]?.querySelector('canvas.fb-canvas');
+        if (c) getBakedDarkCanvas(c);
+      }
+    });
   }
   if (state.magEnabled) scheduleMagnifierRedraw();
   if (persist) schedulePersistState();
@@ -5797,6 +5896,7 @@ function wireEvents() {
     e.stopPropagation();
     els.moreMenu.hidden = !els.moreMenu.hidden;
     els.btnMore.classList.toggle('active', !els.moreMenu.hidden);
+    if (!els.moreMenu.hidden) prewarmPaperGrainTiles();
   });
 
   els.btnThumbs.addEventListener('click', () => {
@@ -6207,7 +6307,7 @@ function wireEvents() {
 
   els.btnPaperWarmDec?.addEventListener('click', () => setPaperWarmth(state.paperWarmth - 12));
   els.btnPaperWarmInc?.addEventListener('click', () => setPaperWarmth(state.paperWarmth + 12));
-  els.paperWarmthRange?.addEventListener('input', () => setPaperWarmth(els.paperWarmthRange.value));
+  els.paperWarmthRange?.addEventListener('input', () => setPaperWarmth(els.paperWarmthRange.value, true, true));
   els.paperWarmthRange?.addEventListener('change', () => els.paperWarmthRange.blur());
   els.paperWarmthRange?.addEventListener('pointerup', () => els.paperWarmthRange.blur());
   els.paperWarmthPresets?.querySelectorAll('.auto-pill').forEach((btn) => {
@@ -6216,7 +6316,7 @@ function wireEvents() {
   els.menuPaperGrain?.addEventListener('click', () => setPaperGrain(!state.paperGrain));
   els.btnPaperGrainDec?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength - 5));
   els.btnPaperGrainInc?.addEventListener('click', () => setPaperGrainStrength(state.paperGrainStrength + 5));
-  els.paperGrainRange?.addEventListener('input', () => setPaperGrainStrength(els.paperGrainRange.value));
+  els.paperGrainRange?.addEventListener('input', () => setPaperGrainStrength(els.paperGrainRange.value, true, true));
   els.paperGrainRange?.addEventListener('change', () => els.paperGrainRange.blur());
   els.paperGrainRange?.addEventListener('pointerup', () => els.paperGrainRange.blur());
   els.paperGrainInput?.addEventListener('input', () => {
@@ -6235,7 +6335,7 @@ function wireEvents() {
   });
   els.btnPaperScaleDec?.addEventListener('click', () => setPaperGrainScalePx(state.paperGrainScalePx - 15));
   els.btnPaperScaleInc?.addEventListener('click', () => setPaperGrainScalePx(state.paperGrainScalePx + 15));
-  els.paperGrainScaleRange?.addEventListener('input', () => setPaperGrainScalePx(els.paperGrainScaleRange.value));
+  els.paperGrainScaleRange?.addEventListener('input', () => setPaperGrainScalePx(els.paperGrainScaleRange.value, true, true));
   els.paperGrainScaleRange?.addEventListener('change', () => els.paperGrainScaleRange.blur());
   els.paperGrainScaleRange?.addEventListener('pointerup', () => els.paperGrainScaleRange.blur());
   els.paperGrainScaleInput?.addEventListener('input', () => {
@@ -6490,23 +6590,27 @@ function wireEvents() {
   });
 
   // Independent edge-triggered auto-hide for header (top) & footer (bottom)
+  let wasInHeaderZone = false;
+  let wasInFooterZone = false;
   window.addEventListener('mousemove', (e) => {
     state.lastBarPointer = { clientX: e.clientX, clientY: e.clientY };
-    const inHeaderZone = e.clientY <= HEADER_WAKE_PX;
+    const inHeaderZone = e.clientY <= HEADER_WAKE_PX || state.hoveringTopBar;
     const onFloatingCornerOrHud = Boolean(e.target?.closest?.('.corner-nav, .auto-playback-hud'));
-    const inFooterZone = !onFloatingCornerOrHud && e.clientY >= window.innerHeight - FOOTER_WAKE_PX;
+    const inFooterZone = (!onFloatingCornerOrHud && e.clientY >= window.innerHeight - FOOTER_WAKE_PX) || state.hoveringBottomBar;
 
-    if (inHeaderZone || els.topBar?.matches(':hover')) {
-      showBar('header', false);
-    } else if (!state.headerHideTimer && !document.body.classList.contains('header-hidden')) {
+    if (inHeaderZone) {
+      if (!wasInHeaderZone || document.body.classList.contains('header-hidden')) showBar('header', false);
+    } else if ((wasInHeaderZone || !state.headerHideTimer) && !document.body.classList.contains('header-hidden')) {
       scheduleHideBar('header', 420);
     }
+    wasInHeaderZone = inHeaderZone;
 
-    if (inFooterZone || els.bottomBar?.matches(':hover')) {
-      showBar('footer', false);
-    } else if (!state.footerHideTimer && !document.body.classList.contains('footer-hidden')) {
+    if (inFooterZone) {
+      if (!wasInFooterZone || document.body.classList.contains('footer-hidden')) showBar('footer', false);
+    } else if ((wasInFooterZone || !state.footerHideTimer) && !document.body.classList.contains('footer-hidden')) {
       scheduleHideBar('footer', 420);
     }
+    wasInFooterZone = inFooterZone;
   }, { passive: true });
   window.addEventListener('touchstart', (e) => {
     const t = e.touches?.[0];
@@ -6522,20 +6626,24 @@ function wireEvents() {
   }, { passive: true });
   document.addEventListener('mouseleave', () => {
     state.lastBarPointer = null;
+    state.hoveringTopBar = false;
+    state.hoveringBottomBar = false;
+    wasInHeaderZone = false;
+    wasInFooterZone = false;
     if (state.pdfDoc) {
       scheduleHideBar('header', 420);
       scheduleHideBar('footer', 420);
     }
   });
-  els.topBar?.addEventListener('mouseenter', () => showBar('header', false));
-  els.topBar?.addEventListener('mouseleave', () => scheduleHideBar('header', 420));
+  els.topBar?.addEventListener('mouseenter', () => { state.hoveringTopBar = true; showBar('header', false); });
+  els.topBar?.addEventListener('mouseleave', () => { state.hoveringTopBar = false; scheduleHideBar('header', 420); });
   els.topBar?.addEventListener('focusin', () => {
     if (isBarInputFocused(els.topBar)) showBar('header', false);
   });
   els.topBar?.addEventListener('focusout', () => scheduleHideBar('header', 420));
 
-  els.bottomBar?.addEventListener('mouseenter', () => showBar('footer', false));
-  els.bottomBar?.addEventListener('mouseleave', () => scheduleHideBar('footer', 420));
+  els.bottomBar?.addEventListener('mouseenter', () => { state.hoveringBottomBar = true; showBar('footer', false); });
+  els.bottomBar?.addEventListener('mouseleave', () => { state.hoveringBottomBar = false; scheduleHideBar('footer', 420); });
   els.bottomBar?.addEventListener('focusin', () => {
     if (isBarInputFocused(els.bottomBar)) showBar('footer', false);
   });
@@ -6586,6 +6694,7 @@ function wireEvents() {
 
   // Smart Text Selection + Zoom Pan isolation inside bookContainer
   let isSelectingText = false;
+  let lastNearTextCache = null;
   const isOuterEdgeClick = (clientX, clientY, onTextSpan) => {
     return !!state.pageFlip?.isPointInFlipZone?.(clientX, clientY, onTextSpan);
   };
@@ -6596,7 +6705,14 @@ function wireEvents() {
     }
     const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
     const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
-    const nearText = isClientNearSelectableText(e.target, cx, cy);
+    const now = performance.now();
+    let nearText;
+    if (lastNearTextCache && now - lastNearTextCache.ts < 30 && Math.abs(lastNearTextCache.x - cx) < 2 && Math.abs(lastNearTextCache.y - cy) < 2 && lastNearTextCache.target === e.target) {
+      nearText = lastNearTextCache.nearText;
+    } else {
+      nearText = isClientNearSelectableText(e.target, cx, cy);
+      lastNearTextCache = { ts: now, x: cx, y: cy, target: e.target, nearText };
+    }
     if (state.clickMode === 'smart' && nearText && !isOuterEdgeClick(cx, cy, true)) {
       // Allow clean text selection on words/inter-line gaps while outer edges/corners curl pages
       isSelectingText = true;

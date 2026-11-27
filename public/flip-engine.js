@@ -169,11 +169,45 @@ for (let v = 0; v < 256; v++) {
 }
 
 const darkBakedCanvasCache = new WeakMap();
+let canvasFilterDarkSupported = null;
+
+function canUseCanvasDarkFilter() {
+  if (canvasFilterDarkSupported !== null) return canvasFilterDarkSupported;
+  try {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    const tctx = c.getContext('2d');
+    if (!tctx || typeof tctx.filter !== 'string') {
+      canvasFilterDarkSupported = false;
+      return false;
+    }
+    tctx.filter = 'invert(1)';
+    tctx.fillStyle = '#ffffff';
+    tctx.fillRect(0, 0, 1, 1);
+    canvasFilterDarkSupported = tctx.getImageData(0, 0, 1, 1).data[0] < 32;
+  } catch {
+    canvasFilterDarkSupported = false;
+  }
+  return canvasFilterDarkSupported;
+}
 
 /** Apply CSS-equivalent dark inversion (invert 0.90 hue-rotate 180deg contrast 0.93 brightness 0.98) directly to pixels. */
 export function bakeDarkCanvasInPlace(canvas) {
   if (!canvas || canvas.width <= 0 || canvas.height <= 0) return canvas;
   const ctx = canvas.getContext('2d', { alpha: false });
+  if (canUseCanvasDarkFilter()) {
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width;
+    tmp.height = canvas.height;
+    const tctx = tmp.getContext('2d', { alpha: false });
+    tctx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+    tctx.drawImage(canvas, 0, 0);
+    ctx.drawImage(tmp, 0, 0);
+    tmp.width = 0;
+    tmp.height = 0;
+    return canvas;
+  }
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -199,7 +233,7 @@ export function bakeDarkCanvasInPlace(canvas) {
   return canvas;
 }
 
-/** Return a cached dark-baked offscreen copy of srcCanvas (bypasses WKWebView CAFilter bugs in composited layers). */
+/** Return a cached dark-baked offscreen copy of srcCanvas (GPU-accelerated via ctx.filter when available). */
 export function getBakedDarkCanvas(srcCanvas) {
   if (!srcCanvas || srcCanvas.width <= 0 || srcCanvas.height <= 0) return srcCanvas;
   const cached = darkBakedCanvasCache.get(srcCanvas);
@@ -209,13 +243,19 @@ export function getBakedDarkCanvas(srcCanvas) {
   const dc = document.createElement('canvas');
   dc.width = srcCanvas.width;
   dc.height = srcCanvas.height;
-  dc.getContext('2d', { alpha: false }).drawImage(srcCanvas, 0, 0);
-  bakeDarkCanvasInPlace(dc);
+  const dctx = dc.getContext('2d', { alpha: false });
+  if (canUseCanvasDarkFilter()) {
+    dctx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+    dctx.drawImage(srcCanvas, 0, 0);
+  } else {
+    dctx.drawImage(srcCanvas, 0, 0);
+    bakeDarkCanvasInPlace(dc);
+  }
   darkBakedCanvasCache.set(srcCanvas, dc);
   return dc;
 }
 
-function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = false) {
+function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = false, pageW = 0, pageH = 0) {
   wrap.innerHTML = '';
   const rawIdx = pageNode ? Number(pageNode.dataset.pageIndex) : NaN;
   if (Number.isFinite(rawIdx)) {
@@ -225,10 +265,13 @@ function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = fa
   if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
     const snap = document.createElement('canvas');
     snap.className = 'fh-snap-canvas';
-    snap.width = srcCanvas.width;
-    snap.height = srcCanvas.height;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const maxSnapW = pageW > 0 ? Math.max(240, Math.round(pageW * dpr)) : srcCanvas.width;
+    const ratio = srcCanvas.width > maxSnapW ? maxSnapW / srcCanvas.width : 1;
+    snap.width = Math.max(1, Math.round(srcCanvas.width * ratio));
+    snap.height = Math.max(1, Math.round(srcCanvas.height * ratio));
     const source = darkMode ? getBakedDarkCanvas(srcCanvas) : srcCanvas;
-    snap.getContext('2d', { alpha: false }).drawImage(source, 0, 0);
+    snap.getContext('2d', { alpha: false }).drawImage(source, 0, 0, snap.width, snap.height);
     if (darkMode) snap.dataset.darkBaked = '1';
     wrap.appendChild(snap);
     delete wrap.dataset.pendingPageIdx;
@@ -255,7 +298,7 @@ function populateSnapshotWrap(wrap, pageNode, reverseBack = false, darkMode = fa
 function cloneCanvasSnapshot(pageNode, pageW, pageH, reverseBack = false, darkMode = false) {
   const wrap = document.createElement('div');
   wrap.className = reverseBack ? 'fh-snap fh-snap-reverse' : 'fh-snap';
-  populateSnapshotWrap(wrap, pageNode, reverseBack, darkMode);
+  populateSnapshotWrap(wrap, pageNode, reverseBack, darkMode, pageW, pageH);
   wrap.style.width = `${pageW}px`;
   wrap.style.height = `${pageH}px`;
   return wrap;
@@ -782,6 +825,14 @@ export class FlipBookEngine {
     // Hover corner-tip curl only (FlipHTML5 aroundCorner behavior)
     if (!this.settings.showPageCorners || this.isPointerDown) return;
     if (this.flyingFlips.length > 0) return;
+    if (e.target && e.target !== this.stage && e.target.closest?.('.more-menu, .side-drawer, .bottom-bar, .top-bar, .sticky-edge-tab, .popover-panel, .thumbnails-strip, .modal-backdrop, .nav-back-pill, .auto-playback-hud, .mag-controls-pill')) {
+      if (this.interactiveFlip && this.interactiveFlip.mode === 'hover') {
+        this.interactiveFlip.mode = 'fallback';
+        this.interactiveFlip.target = { ...this.interactiveFlip.from };
+        this._ensureRaf();
+      }
+      return;
+    }
 
     const side = this._hitHoverCorner(bp);
     if (side) {
@@ -1679,7 +1730,7 @@ export class FlipBookEngine {
     for (const wrap of wraps) {
       const idx = Number(wrap.dataset.pageIdx);
       if (!Number.isFinite(idx) || !this.pageNodes[idx]) continue;
-      populateSnapshotWrap(wrap, this.pageNodes[idx], wrap.classList.contains('fh-snap-reverse'), isDark);
+      populateSnapshotWrap(wrap, this.pageNodes[idx], wrap.classList.contains('fh-snap-reverse'), isDark, this.pageW, this.pageH);
     }
     this._emit('frame');
   }
@@ -1695,7 +1746,7 @@ export class FlipBookEngine {
       const node = Number.isFinite(idx) ? this.pageNodes[idx] : null;
       const srcCanvas = node?.querySelector('canvas.fb-canvas');
       if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
-        populateSnapshotWrap(wrap, node, wrap.classList.contains('fh-snap-reverse'), isDark);
+        populateSnapshotWrap(wrap, node, wrap.classList.contains('fh-snap-reverse'), isDark, this.pageW, this.pageH);
         resolvedAny = true;
       }
     }

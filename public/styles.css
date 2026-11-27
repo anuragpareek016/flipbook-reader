@@ -94,20 +94,19 @@ body.header-hidden .top-bar-right {
   border: none;
   outline: none;
   border-radius: 999px;
-  background: rgba(28, 30, 36, 0.80);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: rgba(24, 26, 32, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--btn-shadow);
   color: #f3f5f8;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition:
-    background 0.18s ease,
-    color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.16s ease;
+    background-color 0.14s ease,
+    color 0.14s ease,
+    transform 0.14s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.14s ease;
 }
 
 .icon-chip {
@@ -234,15 +233,14 @@ body.header-hidden .top-bar-right {
   position: absolute;
   inset: 2px 0 -8px 0;
   box-shadow:
-    calc(var(--stack-shadow-bias, 0px)) 20px 46px rgba(0, 0, 0, 0.54),
-    0 5px 14px rgba(0, 0, 0, 0.36);
+    calc(var(--stack-shadow-bias, 0px)) 18px 36px rgba(0, 0, 0, 0.50),
+    0 5px 14px rgba(0, 0, 0, 0.34);
   pointer-events: none;
   border-radius: 3px;
   transition:
-    left 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    right 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.24s ease;
+    left 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    right 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.20s ease;
 }
 
 .book-container {
@@ -259,22 +257,22 @@ body.header-hidden .top-bar-right {
   pointer-events: none;
   z-index: 1;
   transition:
-    width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    left 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    right 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    clip-path 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    -webkit-clip-path 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.24s ease;
+    width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    left 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    right 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    clip-path 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    -webkit-clip-path 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.20s ease;
   opacity: 0;
 }
 
 .book-stack-left {
-  background-color: #ebe8df;
+  background-color: var(--paper-reverse-bg, #ebe8df);
   background-image:
     linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.24) 100%),
     linear-gradient(to left, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.04) 36%, rgba(255, 255, 255, 0.14) 72%, rgba(0, 0, 0, 0.22) 100%),
     repeating-linear-gradient(to left, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.045) 7.5px, transparent 9px),
-    repeating-linear-gradient(to left, #faf8f2 0px, #efece3 1px, #d3cfc4 2px);
+    repeating-linear-gradient(to left, rgba(255, 255, 255, 0.44) 0px, rgba(255, 255, 255, 0.08) 1px, rgba(0, 0, 0, 0.11) 2px);
   background-position: right center;
   border-radius: 2px 0 0 2px;
   clip-path: polygon(0% var(--stack-taper-left, 0px), 100% 0%, 100% 100%, 0% calc(100% - var(--stack-taper-left, 0px)));
@@ -282,12 +280,12 @@ body.header-hidden .top-bar-right {
 }
 
 .book-stack-right {
-  background-color: #eeece4;
+  background-color: var(--paper-reverse-bg, #eeece4);
   background-image:
     linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.24) 100%),
     linear-gradient(to right, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.04) 36%, rgba(255, 255, 255, 0.14) 72%, rgba(0, 0, 0, 0.22) 100%),
     repeating-linear-gradient(to right, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.045) 7.5px, transparent 9px),
-    repeating-linear-gradient(to right, #fcfbf7 0px, #f1eee6 1px, #d6d2c7 2px);
+    repeating-linear-gradient(to right, rgba(255, 255, 255, 0.44) 0px, rgba(255, 255, 255, 0.08) 1px, rgba(0, 0, 0, 0.11) 2px);
   background-position: left center;
   border-radius: 0 2px 2px 0;
   clip-path: polygon(0% 0%, 100% var(--stack-taper-right, 0px), 100% calc(100% - var(--stack-taper-right, 0px)), 0% 100%);
@@ -532,7 +530,7 @@ body.is-flip-dragging .fb-page .textLayer {
   left: 100%;
   background: transparent;
   transform-origin: 50% 50%;
-  box-shadow: 0 0 34px rgba(0, 0, 0, 0.36), -6px 0 14px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.30), -4px 0 9px rgba(0, 0, 0, 0.16);
   will-change: transform, opacity;
 }
 
@@ -646,6 +644,10 @@ body.is-flip-dragging .fb-page .textLayer {
   display: block;
 }
 
+.fh-snap {
+  isolation: isolate;
+}
+
 /* Folded paperback back print & single-page unfurl edge highlights */
 .fh-snap-reverse {
   background: var(--paper-reverse-bg, #f8f7f3);
@@ -749,6 +751,7 @@ body.is-flip-dragging .fb-page .textLayer {
   height: 100%;
   background: var(--paper-bg, #ffffff);
   overflow: hidden;
+  isolation: isolate;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -928,11 +931,11 @@ body.is-selecting-text .corner-nav {
   gap: 12px;
   border-radius: 24px;
   border: none;
-  background: var(--bg-bar);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: rgba(24, 26, 32, 0.90);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--card-shadow);
-  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.20s ease;
 }
 
 body.footer-hidden .bottom-bar {
@@ -973,10 +976,9 @@ body.footer-hidden .bottom-bar {
     0 3px 12px rgba(0, 0, 0, 0.44),
     inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   transition:
-    background 0.16s ease,
-    color 0.16s ease,
-    box-shadow 0.16s ease,
-    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+    background-color 0.14s ease,
+    color 0.14s ease,
+    transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .bar-btn:hover {
@@ -1091,12 +1093,11 @@ body.footer-hidden .bottom-bar {
 .popover-panel {
   position: absolute;
   z-index: 65;
-  background: var(--bg-panel);
+  background: rgba(24, 26, 32, 0.95);
   border: none;
   border-radius: 20px;
   box-shadow: var(--card-shadow);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  contain: layout style;
 }
 
 .more-menu {
@@ -1465,12 +1466,12 @@ body.footer-hidden .bottom-bar {
   align-items: center;
   gap: 7px;
   border-radius: 999px;
-  background: rgba(26, 28, 34, 0.88);
+  background: rgba(24, 26, 32, 0.92);
   border: none;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--card-shadow);
-  transition: opacity 0.22s ease;
+  transition: opacity 0.20s ease;
 }
 
 body.footer-hidden .auto-playback-hud {
@@ -1554,12 +1555,11 @@ body.footer-hidden .auto-playback-hud:focus-within {
   bottom: calc(var(--bar-height) + 12px);
   z-index: 55;
   height: 174px;
-  background: var(--bg-panel);
+  background: rgba(24, 26, 32, 0.95);
   border: none;
   border-radius: 20px;
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
   box-shadow: var(--card-shadow);
+  contain: layout style;
   display: flex;
   flex-direction: column;
   padding: 10px 14px 12px;
@@ -1673,12 +1673,11 @@ body.footer-hidden .auto-playback-hud:focus-within {
   width: 378px;
   max-width: calc(100% - 28px);
   z-index: 60;
-  background: var(--bg-panel);
+  background: rgba(24, 26, 32, 0.95);
   border: none;
   border-radius: 20px;
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
   box-shadow: var(--card-shadow);
+  contain: layout style;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1934,9 +1933,7 @@ body.footer-hidden .auto-playback-hud:focus-within {
   max-width: calc(100% - 32px);
   padding: 30px 28px;
   border-radius: 24px;
-  background: rgba(28, 30, 36, 0.90);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: rgba(24, 26, 32, 0.95);
   border: none;
   box-shadow: 0 24px 58px rgba(0, 0, 0, 0.48);
   text-align: center;
@@ -2121,12 +2118,12 @@ body.footer-hidden .auto-playback-hud:focus-within {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  background: var(--bg-panel);
+  background: rgba(24, 26, 32, 0.94);
   border: none;
   border-radius: 999px;
   box-shadow: var(--card-shadow);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .hl-swatch {
@@ -2456,10 +2453,8 @@ body.footer-hidden .auto-playback-hud:focus-within {
 }
 
 /* Warm Paper Tint & Fiber Grain Texture (Eye Comfort Mode) */
-body.has-warm-paper:not(.read-dark) .book-stack-left,
-body.has-warm-paper:not(.read-dark) .book-stack-right,
 body.has-warm-paper:not(.read-dark) .scs-layer {
-  filter: sepia(calc(var(--paper-warmth, 0) * 0.48)) saturate(calc(1 + var(--paper-warmth, 0) * 0.14)) brightness(calc(1 - var(--paper-warmth, 0) * 0.04));
+  background: var(--paper-reverse-bg, #eeece4);
 }
 
 body.has-warm-paper:not(.read-dark) .fb-page canvas.fb-canvas,
@@ -2813,10 +2808,10 @@ body.read-dark .scs-flying-shade {
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  background: rgba(26, 28, 34, 0.88);
+  background: rgba(24, 26, 32, 0.92);
   border: none;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--card-shadow);
   pointer-events: auto;
   transition: top 0.2s ease;
@@ -3045,6 +3040,7 @@ body.read-dark .scs-flying-shade {
   bottom: 0;
   width: 0;
   z-index: 2;
+  transform: translate3d(0, 0, 0);
   pointer-events: none;
   overflow: visible;
 }
@@ -3105,12 +3101,7 @@ body.read-dark .scs-flying-shade {
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
-  will-change: transform;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transition:
-    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.22s ease;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sticky-edge-tab.tab-coral  { --tab-bg: #eb7d71; --tab-bg-deep: #d46559; --tab-ink: #2b0f0b; }
@@ -3125,7 +3116,8 @@ body.read-dark .scs-flying-shade {
   bottom: 0;
   pointer-events: none;
   opacity: 1;
-  transition: width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  background: var(--tab-bg-deep);
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .book-edge-tabs-right .sticky-edge-tab,
@@ -3136,34 +3128,30 @@ body.read-dark .scs-flying-shade {
   transform-origin: left center;
   transform: translate3d(calc(var(--tab-x, 0px) + var(--tab-nudge, 0px)), -50%, 0);
   background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.024) 0px,
-      rgba(0, 0, 0, 0.018) 2px,
-      transparent 4px
-    ),
-    linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
     linear-gradient(90deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
-    inset 3px 0 5px -2px rgba(0, 0, 0, 0.24),
     2px 3px 8px var(--tab-shadow),
     0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .book-edge-tabs-right .sticky-tab-tail {
-  right: calc(100% - 1px);
-  width: calc(var(--tab-tail, 0px) + var(--tab-nudge, 0px) + 1px);
+  right: calc(100% - 2px);
+  width: calc(var(--tab-tail, 0px) + 2px);
   border-radius: 1px 0 0 1px;
   background:
-    linear-gradient(178deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.08) 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
     var(--tab-bg-deep);
-  box-shadow: inset 2px 0 3px -1px rgba(0, 0, 0, 0.30);
 }
 
 .sticky-edge-tab.tab-side-right {
   left: calc(100% - 3px * var(--tab-zoom, 1));
   right: auto;
   transform: translate3d(0, -50%, 0);
+  box-shadow:
+    inset 3px 0 5px -2px rgba(0, 0, 0, 0.24),
+    2px 3px 8px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .book-edge-tabs-left .sticky-edge-tab,
@@ -3175,34 +3163,30 @@ body.read-dark .scs-flying-shade {
   transform: translate3d(calc(-1 * (var(--tab-x, 0px) + var(--tab-nudge, 0px))), -50%, 0);
   flex-direction: row-reverse;
   background:
-    repeating-linear-gradient(
-      270deg,
-      rgba(255, 255, 255, 0.024) 0px,
-      rgba(0, 0, 0, 0.018) 2px,
-      transparent 4px
-    ),
-    linear-gradient(178deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 48%, rgba(0, 0, 0, 0.05) 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
     linear-gradient(270deg, var(--tab-bg-deep) 0%, var(--tab-bg) calc(10px * var(--tab-zoom, 1)), var(--tab-bg) 100%);
   box-shadow:
-    inset -3px 0 5px -2px rgba(0, 0, 0, 0.24),
     -2px 3px 8px var(--tab-shadow),
     0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .book-edge-tabs-left .sticky-tab-tail {
-  left: calc(100% - 1px);
-  width: calc(var(--tab-tail, 0px) + var(--tab-nudge, 0px) + 1px);
+  left: calc(100% - 2px);
+  width: calc(var(--tab-tail, 0px) + 2px);
   border-radius: 0 1px 1px 0;
   background:
-    linear-gradient(178deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.08) 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.04) 100%),
     var(--tab-bg-deep);
-  box-shadow: inset -2px 0 3px -1px rgba(0, 0, 0, 0.30);
 }
 
 .sticky-edge-tab.tab-side-left {
   right: calc(100% - 3px * var(--tab-zoom, 1));
   left: auto;
   transform: translate3d(0, -50%, 0);
+  box-shadow:
+    inset -3px 0 5px -2px rgba(0, 0, 0, 0.24),
+    -2px 3px 8px var(--tab-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .fh-side-tabs .sticky-edge-tab,
@@ -3210,12 +3194,10 @@ body.read-dark .scs-flying-shade {
 .scs-flying-card .sticky-edge-tab {
   pointer-events: none;
   transition: none;
-  will-change: auto;
 }
 
 .book-edge-tabs-right .sticky-edge-tab.is-current {
   box-shadow:
-    inset 3px 0 5px -2px rgba(0, 0, 0, 0.16),
     3px 5px 12px rgba(0, 0, 0, 0.42),
     0 1px 3px rgba(0, 0, 0, 0.24);
   z-index: 250;
@@ -3223,7 +3205,6 @@ body.read-dark .scs-flying-shade {
 
 .book-edge-tabs-left .sticky-edge-tab.is-current {
   box-shadow:
-    inset -3px 0 5px -2px rgba(0, 0, 0, 0.16),
     -3px 5px 12px rgba(0, 0, 0, 0.42),
     0 1px 3px rgba(0, 0, 0, 0.24);
   z-index: 250;
@@ -3254,16 +3235,17 @@ body.read-dark .scs-flying-shade {
   z-index: 260 !important;
 }
 
+.book-edge-tabs-right .sticky-edge-tab:hover .sticky-tab-tail,
+.book-edge-tabs-left .sticky-edge-tab:hover .sticky-tab-tail {
+  width: calc(var(--tab-tail, 0px) + 7px * var(--tab-zoom, 1) + 2px);
+}
+
 .book-edge-tabs-right .sticky-edge-tab:hover {
-  box-shadow:
-    inset 3px 0 5px -2px rgba(0, 0, 0, 0.14),
-    4px 6px 14px rgba(0, 0, 0, 0.42);
+  box-shadow: 4px 6px 14px rgba(0, 0, 0, 0.42);
 }
 
 .book-edge-tabs-left .sticky-edge-tab:hover {
-  box-shadow:
-    inset -3px 0 5px -2px rgba(0, 0, 0, 0.14),
-    -4px 6px 14px rgba(0, 0, 0, 0.42);
+  box-shadow: -4px 6px 14px rgba(0, 0, 0, 0.42);
 }
 
 /* Scroll Mode Right Quick-Jump Rail for Sticky Tabs */
@@ -3589,12 +3571,12 @@ body.read-dark .scs-flying-shade {
   align-items: center;
   gap: 2px;
   border-radius: 999px;
-  background: rgba(26, 28, 34, 0.90);
+  background: rgba(24, 26, 32, 0.92);
   border: none;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--card-shadow);
-  transition: bottom 0.22s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition: bottom 0.20s ease, transform 0.16s ease;
 }
 
 body:has(#thumbnailsStrip:not([hidden])) .nav-back-pill {
