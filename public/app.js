@@ -245,6 +245,7 @@ const state = {
   magDragging: false,
   magResizing: null,
   magRedrawRaf: 0,
+  magAnimUntil: 0,
   magHiResCache: new Map(), // idx -> { targetW, canvas, renderTask }
 };
 
@@ -667,9 +668,14 @@ function initPageFlip(startIndex = 0) {
     onSpreadChanged(false);
   });
 
+  pf.on('frame', () => {
+    if (state.magEnabled) scheduleMagnifierRedraw();
+  });
+
   pf.on('flipStart', (e) => {
     flipSound.playFlip();
     hideHighlightPopover();
+    if (state.magEnabled) scheduleMagnifierRedraw();
     if (Number.isFinite(e.data?.page)) {
       const fromIdx = clamp(e.data?.from ?? state.currentIndex, 0, state.totalPages - 1);
       const nextIdx = clamp(e.data.page, 0, state.totalPages - 1);
@@ -1068,7 +1074,14 @@ function updateCenterShift() {
     // Center single front cover or single back cover smoothly
     shiftX = visible[0] === 0 ? -sw / 2 : sw / 2;
   }
-  els.bookCenterShift.style.transform = `translate3d(${shiftX}px, 0, 0)`;
+  const nextTransform = `translate3d(${shiftX}px, 0, 0)`;
+  if (els.bookCenterShift.style.transform !== nextTransform) {
+    els.bookCenterShift.style.transform = nextTransform;
+    if (state.magEnabled) {
+      state.magAnimUntil = Math.max(state.magAnimUntil, performance.now() + 560);
+      scheduleMagnifierRedraw();
+    }
+  }
 }
 
 function updateBookDepthChrome() {
@@ -1386,6 +1399,7 @@ function updateSingleDragPickup(data) {
   card.style.opacity = String(op);
   card.style.transform = transformStr;
   singleStackMeta.dragPose = { transform: transformStr, opacity: op, x, y, scale, rotY, rotZ };
+  if (state.magEnabled) scheduleMagnifierRedraw();
 }
 
 function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, fromPeelRelay = false }) {
@@ -1435,6 +1449,7 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
   const flyingPageIdx = goingNext ? fromIdx : toIdx;
   const card = document.createElement('div');
   card.className = 'scs-flying-card';
+  card.dataset.pageIdx = String(flyingPageIdx);
   card.style.width = `${bookRect.width}px`;
   card.style.height = `${bookRect.height}px`;
 
@@ -1522,10 +1537,15 @@ function spawnSingleCollectedFlight({ fromIdx, toIdx, fromDragLift = false, from
     }
     requestAnimationFrame(() => {
       card.remove();
+      if (state.magEnabled) scheduleMagnifierRedraw();
     });
   };
   anim.addEventListener('finish', finishFlight, { once: true });
   anim.addEventListener('cancel', finishFlight, { once: true });
+  if (state.magEnabled) {
+    state.magAnimUntil = Math.max(state.magAnimUntil, performance.now() + duration + 60);
+    scheduleMagnifierRedraw();
+  }
   return true;
 }
 
@@ -2814,13 +2834,133 @@ function showBars(scheduleAutoHide = true, delayMs = 1800) {
   showBar('footer', scheduleAutoHide, delayMs);
 }
 
-const MAG_HL_FILLS = {
+const MAG_HL_FILLS_LIGHT = {
+  yellow: 'rgba(255, 224, 51, 0.56)',
+  green: 'rgba(105, 220, 118, 0.50)',
+  blue: 'rgba(110, 185, 255, 0.52)',
+  pink: 'rgba(255, 130, 185, 0.50)',
+  orange: 'rgba(255, 175, 85, 0.52)',
+};
+
+const MAG_HL_FILLS_DARK = {
   yellow: 'rgba(255, 224, 51, 0.34)',
   green: 'rgba(105, 220, 118, 0.30)',
   blue: 'rgba(110, 185, 255, 0.34)',
   pink: 'rgba(255, 130, 185, 0.32)',
   orange: 'rgba(255, 175, 85, 0.34)',
 };
+
+// Gradient profiles matching styles.css spine, fold-crease, and cast-shadow curves
+const MAG_GRADIENTS = {
+  bookSpine: [
+    [0, 0, 0, 0, 0], [0.196, 0, 0, 0, 0], [0.232, 0, 0, 0, 0.008], [0.263, 0, 0, 0, 0.035],
+    [0.296, 0, 0, 0, 0.071], [0.330, 0, 0, 0, 0.118], [0.364, 0, 0, 0, 0.161], [0.398, 0, 0, 0, 0.200],
+    [0.432, 0, 0, 0, 0.243], [0.466, 0, 0, 0, 0.278], [0.491, 0, 0, 0, 0.294], [0.500, 0, 0, 0, 0.298],
+    [0.517, 0, 0, 0, 0.282], [0.534, 0, 0, 0, 0.255], [0.568, 0, 0, 0, 0.196], [0.602, 0, 0, 0, 0.129],
+    [0.636, 0, 0, 0, 0.063], [0.670, 0, 0, 0, 0.012], [0.695, 0, 0, 0, 0], [1, 0, 0, 0, 0],
+  ],
+  innerSpineLeft: [
+    [0, 0, 0, 0, 0], [0.392, 0, 0, 0, 0], [0.464, 0, 0, 0, 0.008], [0.526, 0, 0, 0, 0.035],
+    [0.592, 0, 0, 0, 0.071], [0.660, 0, 0, 0, 0.118], [0.728, 0, 0, 0, 0.161], [0.796, 0, 0, 0, 0.200],
+    [0.864, 0, 0, 0, 0.243], [0.932, 0, 0, 0, 0.278], [0.982, 0, 0, 0, 0.294], [1, 0, 0, 0, 0.298],
+  ],
+  innerSpineRight: [
+    [0, 0, 0, 0, 0.298], [0.034, 0, 0, 0, 0.282], [0.068, 0, 0, 0, 0.255], [0.136, 0, 0, 0, 0.196],
+    [0.204, 0, 0, 0, 0.129], [0.272, 0, 0, 0, 0.063], [0.340, 0, 0, 0, 0.012], [0.390, 0, 0, 0, 0], [1, 0, 0, 0, 0],
+  ],
+  singleSpineLeft: [
+    [0, 0, 0, 0, 0.22], [0.24, 0, 0, 0, 0.11], [0.58, 0, 0, 0, 0.03], [1, 0, 0, 0, 0],
+  ],
+  singleSlotSpine: [
+    [0, 0, 0, 0, 0.20], [0.24, 0, 0, 0, 0.10], [0.58, 0, 0, 0, 0.03], [1, 0, 0, 0, 0],
+  ],
+  cast: [
+    [0, 0, 0, 0, 0.34], [0.14, 0, 0, 0, 0.20], [0.42, 0, 0, 0, 0.08], [0.72, 0, 0, 0, 0.02], [1, 0, 0, 0, 0],
+  ],
+  frontSheenLight: [
+    [0, 0, 0, 0, 0.24], [0.015, 0, 0, 0, 0.08], [0.042, 255, 255, 255, 0.50], [0.085, 255, 255, 255, 0.16],
+    [0.14, 0, 0, 0, 0.08], [0.22, 0, 0, 0, 0.02], [0.34, 0, 0, 0, 0],
+  ],
+  frontSheenDark: [
+    [0, 0, 0, 0, 0.36], [0.015, 0, 0, 0, 0.14], [0.042, 255, 255, 255, 0.10], [0.085, 255, 255, 255, 0.03],
+    [0.14, 0, 0, 0, 0.14], [0.22, 0, 0, 0, 0.04], [0.34, 0, 0, 0, 0],
+  ],
+  backSheenLight: [
+    [0, 0, 0, 0, 0.28], [0.014, 0, 0, 0, 0.08], [0.044, 255, 255, 255, 0.68], [0.090, 255, 255, 255, 0.22],
+    [0.15, 0, 0, 0, 0.11], [0.24, 0, 0, 0, 0.03], [0.38, 0, 0, 0, 0],
+  ],
+  backSheenDark: [
+    [0, 0, 0, 0, 0.42], [0.014, 0, 0, 0, 0.14], [0.044, 255, 255, 255, 0.12], [0.090, 255, 255, 255, 0.04],
+    [0.15, 0, 0, 0, 0.16], [0.24, 0, 0, 0, 0.05], [0.38, 0, 0, 0, 0],
+  ],
+  unfurlSheenLight: [
+    [0, 0, 0, 0, 0.20], [0.008, 0, 0, 0, 0.06], [0.022, 255, 255, 255, 0.72], [0.052, 255, 255, 255, 0.24],
+    [0.095, 0, 0, 0, 0.06], [0.15, 0, 0, 0, 0.02], [0.22, 0, 0, 0, 0],
+  ],
+  unfurlSheenDark: [
+    [0, 0, 0, 0, 0.44], [0.009, 0, 0, 0, 0.16], [0.024, 255, 255, 255, 0.14], [0.055, 255, 255, 255, 0.04],
+    [0.10, 0, 0, 0, 0.14], [0.22, 0, 0, 0, 0],
+  ],
+  flightShadeLight: [
+    [0, 0, 0, 0, 0.18], [0.12, 255, 255, 255, 0.28], [0.28, 0, 0, 0, 0.04], [0.55, 0, 0, 0, 0],
+  ],
+  flightShadeDark: [
+    [0, 0, 0, 0, 0.42], [0.14, 255, 255, 255, 0.10], [0.55, 0, 0, 0, 0],
+  ],
+};
+
+let magCanvasFilterSupported = null;
+const magDarkFallbackCache = new WeakMap();
+
+/** Probe once whether Canvas2D ctx.filter works (false only on older WebKit builds). */
+function supportsMagCanvasFilter() {
+  if (magCanvasFilterSupported !== null) return magCanvasFilterSupported;
+  try {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    const tctx = c.getContext('2d');
+    if (!tctx || typeof tctx.filter !== 'string') {
+      magCanvasFilterSupported = false;
+      return false;
+    }
+    tctx.filter = 'invert(1)';
+    tctx.fillStyle = '#ffffff';
+    tctx.fillRect(0, 0, 1, 1);
+    magCanvasFilterSupported = tctx.getImageData(0, 0, 1, 1).data[0] < 32;
+  } catch {
+    magCanvasFilterSupported = false;
+  }
+  return magCanvasFilterSupported;
+}
+
+/** CPU fallback matching CSS invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98). */
+function getMagDarkFallbackCanvas(srcCanvas) {
+  let cached = magDarkFallbackCache.get(srcCanvas);
+  if (cached && cached.width === srcCanvas.width && cached.height === srcCanvas.height) {
+    return cached;
+  }
+  const dc = document.createElement('canvas');
+  dc.width = srcCanvas.width;
+  dc.height = srcCanvas.height;
+  const dctx = dc.getContext('2d', { alpha: false });
+  dctx.drawImage(srcCanvas, 0, 0);
+  const img = dctx.getImageData(0, 0, dc.width, dc.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Invert 90%, rotate hue 180deg via luminance mirror (2*L - c), then apply contrast & brightness
+    const ir = 229.5 - 0.8 * d[i];
+    const ig = 229.5 - 0.8 * d[i + 1];
+    const ib = 229.5 - 0.8 * d[i + 2];
+    const twoL = (Math.max(ir, ig, ib) + Math.min(ir, ig, ib));
+    d[i] = clamp(((twoL - ir - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
+    d[i + 1] = clamp(((twoL - ig - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
+    d[i + 2] = clamp(((twoL - ib - 127.5) * 0.93 + 127.5) * 0.98, 0, 255);
+  }
+  dctx.putImageData(img, 0, 0);
+  magDarkFallbackCache.set(srcCanvas, dc);
+  return dc;
+}
 
 function clearMagnifierCache() {
   for (const entry of state.magHiResCache.values()) {
@@ -2925,7 +3065,7 @@ function ensureMagHiResPage(idx, desiredW) {
   };
   state.magHiResCache.delete(idx);
   state.magHiResCache.set(idx, record);
-  while (state.magHiResCache.size > 4) {
+  while (state.magHiResCache.size > 8) {
     const oldestKey = state.magHiResCache.keys().next().value;
     const oldRec = state.magHiResCache.get(oldestKey);
     if (oldestKey === idx) break;
@@ -2966,6 +3106,503 @@ function ensureMagHiResPage(idx, desiredW) {
   return record.canvas || null;
 }
 
+/** Paint a linear gradient stop table horizontally from gx0 to gx1 across (x, y, w, h). */
+function drawMagGradientRect(ctx, x, y, w, h, gx0, gx1, stops, opacity = 1, blendOp = 'source-over') {
+  if (opacity <= 0.004 || w <= 0 || h <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = blendOp;
+  ctx.globalAlpha *= opacity;
+  const grad = ctx.createLinearGradient(gx0, 0, gx1, 0);
+  for (const [off, r, g, b, a] of stops) {
+    grad.addColorStop(off, `rgba(${r}, ${g}, ${b}, ${a})`);
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
+/** Draw an inner-edge or single-page left spine shadow matching CSS rules in light or dark mode. */
+function drawMagInnerSpine(ctx, kind, x, y, w, h, opacity = 1) {
+  if (!kind || opacity <= 0.004) return;
+  const isSingle = kind === 'singleLeft' || kind === 'singleSlot';
+  const sw = isSingle ? clamp(w * 0.055, 22, 42) : clamp(w * 0.112, 46, 170);
+  const dark = state.readDark;
+  const blend = dark ? 'source-over' : 'multiply';
+  const op = opacity * (dark ? 0.72 : 1);
+
+  if (kind === 'left') {
+    drawMagGradientRect(ctx, x + w - sw, y, sw, h, x + w - sw, x + w, MAG_GRADIENTS.innerSpineLeft, op, blend);
+  } else if (kind === 'right') {
+    drawMagGradientRect(ctx, x, y, sw, h, x, x + sw, MAG_GRADIENTS.innerSpineRight, op, blend);
+  } else if (kind === 'singleLeft') {
+    drawMagGradientRect(ctx, x, y, sw, h, x, x + sw, MAG_GRADIENTS.singleSpineLeft, op, blend);
+  } else if (kind === 'singleSlot') {
+    drawMagGradientRect(ctx, x, y, sw, h, x, x + sw, MAG_GRADIENTS.singleSlotSpine, op, blend);
+  }
+}
+
+/** Render a PDF page canvas (inverting only page pixels in Dark Mode so shadows stay un-inverted), highlights, and optional spine. */
+function drawMagPageContent(
+  ctx,
+  idx,
+  x,
+  y,
+  w,
+  h,
+  desiredHiResW,
+  { reverseBack = false, drawHighlights = true, innerSpine = null, spineOpacity = 1 } = {}
+) {
+  const dark = state.readDark;
+  const hasPage = idx !== null && idx !== undefined && idx >= 0 && idx < state.totalPages;
+  const hiCanvas = hasPage ? ensureMagHiResPage(idx, desiredHiResW) : null;
+  const srcCanvas = hiCanvas || (hasPage ? state.pageNodes[idx]?.querySelector('canvas.fb-canvas') : null);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+
+  if (reverseBack) {
+    ctx.fillStyle = dark ? '#191a1f' : '#f8f7f3';
+    ctx.fillRect(x, y, w, h);
+    if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+      ctx.save();
+      ctx.translate(x + w, y);
+      ctx.scale(-1, 1);
+      ctx.globalAlpha *= dark ? 0.16 : 0.12;
+      drawMagFilteredCanvas(ctx, srcCanvas, 0, 0, w, h);
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
+
+  ctx.fillStyle = dark ? '#17181c' : '#ffffff';
+  ctx.fillRect(x, y, w, h);
+
+  if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+    drawMagFilteredCanvas(ctx, srcCanvas, x, y, w, h);
+  }
+
+  if (drawHighlights && hasPage) {
+    const pageNum = idx + 1;
+    const hlPalette = dark ? MAG_HL_FILLS_DARK : MAG_HL_FILLS_LIGHT;
+    let hlStarted = false;
+    for (const hl of state.highlights) {
+      if (hl.page !== pageNum || !Array.isArray(hl.rects)) continue;
+      if (!hlStarted) {
+        ctx.save();
+        ctx.globalCompositeOperation = dark ? 'screen' : 'multiply';
+        hlStarted = true;
+      }
+      ctx.fillStyle = hlPalette[hl.color] || hlPalette.yellow;
+      for (const rect of hl.rects) {
+        ctx.fillRect(
+          x + (rect.l / 100) * w,
+          y + (rect.t / 100) * h,
+          (rect.w / 100) * w,
+          (rect.h / 100) * h
+        );
+      }
+    }
+    if (hlStarted) ctx.restore();
+  }
+
+  if (innerSpine) {
+    drawMagInnerSpine(ctx, innerSpine, x, y, w, h, spineOpacity);
+  }
+
+  ctx.restore();
+}
+
+function drawMagFilteredCanvas(ctx, srcCanvas, x, y, w, h) {
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  if (state.readDark) {
+    if (supportsMagCanvasFilter()) {
+      ctx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+      ctx.drawImage(srcCanvas, x, y, w, h);
+    } else {
+      ctx.drawImage(getMagDarkFallbackCanvas(srcCanvas), x, y, w, h);
+    }
+  } else {
+    ctx.drawImage(srcCanvas, x, y, w, h);
+  }
+  ctx.restore();
+}
+
+/** Draw resting double-spread center spine shadow across visible static slots. */
+function drawMagCenterSpineShadow(ctx, stageW, pageW, pageH, leftVisible, rightVisible) {
+  if (!leftVisible && !rightVisible) return;
+  const spineOp = els.bookSpineShadow ? parseFloat(getComputedStyle(els.bookSpineShadow).opacity) : 0;
+  if (!Number.isFinite(spineOp) || spineOp <= 0.005) return;
+
+  const spineW = clamp(stageW * 0.112, 92, 340);
+  const spineX = stageW / 2 - spineW / 2;
+  const clipLeft = leftVisible ? 0 : pageW;
+  const clipRight = rightVisible ? stageW : pageW;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(clipLeft, 0, Math.max(0, clipRight - clipLeft), pageH);
+  ctx.clip();
+  drawMagGradientRect(ctx, spineX, 0, spineW, pageH, spineX, spineX + spineW, MAG_GRADIENTS.bookSpine, spineOp, 'multiply');
+  ctx.restore();
+}
+
+/** Draw perspective-foreshortened hard cover flip around the book's center spine hinge. */
+function drawMagHardFlip(ctx, f, geom, pf, desiredHiResW) {
+  const { pageW, pageH } = pf;
+  const hingeX = pageW;
+  const hingeY = pageH / 2;
+  const showingBack = geom.progress > 0.5;
+  const pageIdx = showingBack ? f.toIdx : f.fromIdx;
+  if (pageIdx === null || pageIdx === undefined) return;
+
+  const dirSign = f.side === 'right' ? 1 : -1;
+  const rad = (geom.deg * Math.PI) / 180;
+  const cosR = Math.cos(rad);
+  const sinAbs = Math.abs(Math.sin(rad));
+  const P = 3600;
+  const slices = 24;
+  const hasPage = pageIdx >= 0 && pageIdx < state.totalPages;
+  const hiCanvas = hasPage ? ensureMagHiResPage(pageIdx, desiredHiResW) : null;
+  const srcCanvas = hiCanvas || (hasPage ? state.pageNodes[pageIdx]?.querySelector('canvas.fb-canvas') : null);
+  const dark = state.readDark;
+
+  const projPoint = (u) => {
+    const k = P / Math.max(120, P - u * sinAbs);
+    return {
+      x: hingeX + dirSign * u * cosR * k,
+      hh: (pageH / 2) * k,
+    };
+  };
+
+  const pEdge = projPoint(pageW);
+  const pHinge = projPoint(0);
+  const mirrorTex = f.side === 'right' ? showingBack : !showingBack;
+
+  for (let i = 0; i < slices; i++) {
+    const t0 = i / slices;
+    const t1 = (i + 1) / slices;
+    const q0 = projPoint(t0 * pageW);
+    const q1 = projPoint(t1 * pageW);
+    const leftX = Math.min(q0.x, q1.x);
+    const stripW = Math.abs(q1.x - q0.x);
+    if (stripW < 0.05) continue;
+    const topY = hingeY - (q0.hh + q1.hh) / 2;
+    const stripH = q0.hh + q1.hh;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(q0.x, hingeY - q0.hh);
+    ctx.lineTo(q1.x, hingeY - q1.hh);
+    ctx.lineTo(q1.x, hingeY + q1.hh);
+    ctx.lineTo(q0.x, hingeY + q0.hh);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.fillStyle = dark ? '#17181c' : '#ffffff';
+    ctx.fillRect(leftX - 0.5, topY - 1, stripW + 1, stripH + 2);
+
+    if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
+      const sU0 = mirrorTex ? 1 - t1 : t0;
+      const sU1 = mirrorTex ? 1 - t0 : t1;
+      const sx = sU0 * srcCanvas.width;
+      const sw = Math.max(1, (sU1 - sU0) * srcCanvas.width);
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      if (dark) {
+        if (supportsMagCanvasFilter()) {
+          ctx.filter = 'invert(0.90) hue-rotate(180deg) contrast(0.93) brightness(0.98)';
+          ctx.drawImage(srcCanvas, sx, 0, sw, srcCanvas.height, leftX - 0.35, topY, stripW + 0.7, stripH);
+        } else {
+          ctx.drawImage(getMagDarkFallbackCanvas(srcCanvas), sx, 0, sw, srcCanvas.height, leftX - 0.35, topY, stripW + 0.7, stripH);
+        }
+      } else {
+        ctx.drawImage(srcCanvas, sx, 0, sw, srcCanvas.height, leftX - 0.35, topY, stripW + 0.7, stripH);
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  if (geom.shadeAlpha > 0.004) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pHinge.x, hingeY - pHinge.hh);
+    ctx.lineTo(pEdge.x, hingeY - pEdge.hh);
+    ctx.lineTo(pEdge.x, hingeY + pEdge.hh);
+    ctx.lineTo(pHinge.x, hingeY + pHinge.hh);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(0, 0, 0, ${geom.shadeAlpha})`;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** Collect and render all active FlipBookEngine turning leaves & cast/crease shadows sorted by z-index. */
+function drawMagActiveFlipLayers(ctx, pf, desiredHiResW, stageScaleX) {
+  const activeFlips = [
+    ...(Array.isArray(pf.flyingFlips) ? pf.flyingFlips : []),
+    ...(pf.interactiveFlip ? [pf.interactiveFlip] : []),
+  ];
+  if (!activeFlips.length) return;
+
+  const { pageW, pageH, maskSize } = pf;
+  const stageW = pf.single ? pageW : pageW * 2;
+  const spineOriginX = pf.single ? 0 : pageW;
+  const spineOriginY = pageH / 2;
+  const lightW = maskSize;
+  const lightH = maskSize * 2;
+  const dark = state.readDark;
+  const tasks = [];
+  let order = 0;
+
+  for (const f of activeFlips) {
+    const geom = f.frameGeom;
+    if (!geom) continue;
+
+    if (f.underEl && f.underIdx !== null && f.underIdx !== undefined && f.underEl.style.display !== 'none') {
+      const ux = pf.single || f.side === 'left' ? 0 : pageW;
+      const underSpine = f.underSpine
+        ? (pf.single ? 'singleLeft' : (f.side === 'right' ? 'right' : 'left'))
+        : null;
+      const underShadowOp = geom.underShadowOpacity || 0;
+      tasks.push({
+        z: 1,
+        order: order++,
+        draw: () => {
+          drawMagPageContent(ctx, f.underIdx, ux, 0, pageW, pageH, desiredHiResW, { innerSpine: underSpine });
+          if (underShadowOp > 0.004) {
+            ctx.save();
+            ctx.fillStyle = `rgba(0, 0, 0, ${underShadowOp})`;
+            ctx.fillRect(ux, 0, pageW, pageH);
+            ctx.restore();
+          }
+        },
+      });
+    }
+
+    if (geom.kind === 'hard') {
+      tasks.push({
+        z: geom.zIndex || 2000,
+        order: order++,
+        draw: () => drawMagHardFlip(ctx, f, geom, pf, desiredHiResW),
+      });
+      continue;
+    }
+
+    const baseUp = f.singlePrev ? 4000 + (f.seq || 0) * 4 : 2000 - (f.seq || 0) * 4;
+    const layerOp = geom.layerOpacity ?? 1;
+    if (layerOp <= 0.005 || geom.kind === 'singlePrevHidden') continue;
+
+    const rad = (geom.deg * Math.PI) / 180;
+    const castW = 140 * (geom.castScale ?? geom.widthScale ?? 1);
+
+    // 1) Cast shadow on underlying page
+    if (geom.castOpacity > 0.005) {
+      tasks.push({
+        z: baseUp - 1,
+        order: order++,
+        draw: () => {
+          ctx.save();
+          ctx.globalAlpha *= layerOp;
+          ctx.beginPath();
+          ctx.rect(0, 0, stageW, pageH);
+          ctx.clip();
+          ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+          ctx.rotate(rad);
+          drawMagGradientRect(ctx, 0, -maskSize * 1.1, castW, maskSize * 2.2, 0, castW, MAG_GRADIENTS.cast, geom.castOpacity);
+          ctx.restore();
+        },
+      });
+    }
+
+    // 2) Departing front sheet (or single-prev unfurling sheet) inside downMask
+    tasks.push({
+      z: baseUp,
+      order: order++,
+      draw: () => {
+        ctx.save();
+        ctx.globalAlpha *= layerOp;
+        if (pf.single) {
+          ctx.beginPath();
+          ctx.rect(0, -44, stageW + 44, pageH + 88);
+          ctx.clip();
+        }
+        ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+        ctx.rotate(rad);
+        ctx.beginPath();
+        ctx.rect(-maskSize, -maskSize / 2, maskSize, maskSize);
+        ctx.clip();
+
+        ctx.translate(-pageW / 2 - geom.pageTranX, 0);
+        ctx.rotate(-rad);
+        const downIdx = f.singlePrev ? f.toIdx : f.fromIdx;
+        const downSpine = f.singlePrev
+          ? 'singleLeft'
+          : (f.fromHasSpine && !pf.single ? (f.side === 'right' ? 'right' : 'left') : null);
+        drawMagPageContent(ctx, downIdx, -pageW / 2, -pageH / 2, pageW, pageH, desiredHiResW, { innerSpine: downSpine });
+
+        if (geom.frontOpacity > 0.004) {
+          ctx.beginPath();
+          ctx.rect(-pageW / 2, -pageH / 2, pageW, pageH);
+          ctx.clip();
+          ctx.rotate(rad);
+          ctx.translate(geom.distCenter, 0);
+          const sheenStops = f.singlePrev
+            ? (dark ? MAG_GRADIENTS.unfurlSheenDark : MAG_GRADIENTS.unfurlSheenLight)
+            : (dark ? MAG_GRADIENTS.frontSheenDark : MAG_GRADIENTS.frontSheenLight);
+          drawMagGradientRect(ctx, -lightW, -lightH / 2, lightW, lightH, 0, -lightW, sheenStops, geom.frontOpacity);
+        }
+        ctx.restore();
+      },
+    });
+
+    if (f.singlePrev) continue;
+
+    // 3) Soft flap drop shadow cast underneath curled-over flap
+    if (geom.flapOpacity > 0.01) {
+      tasks.push({
+        z: 3000 + (f.seq || 0) * 4,
+        order: order++,
+        draw: () => {
+          ctx.save();
+          ctx.globalAlpha *= layerOp;
+          ctx.beginPath();
+          ctx.rect(0, 0, stageW, pageH);
+          ctx.clip();
+          ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+          ctx.rotate(rad);
+          ctx.beginPath();
+          ctx.rect(-maskSize, -maskSize / 2, maskSize, maskSize);
+          ctx.clip();
+
+          ctx.translate(geom.distCenter, 0);
+          ctx.rotate(rad);
+          // Even-odd exclusion keeps the interior flap area clear when layerOp < 1
+          ctx.beginPath();
+          ctx.rect(-maskSize * 2, -maskSize * 2, maskSize * 4, maskSize * 4);
+          ctx.rect(-pageW / 2, -pageH / 2, pageW, pageH);
+          ctx.clip('evenodd');
+          ctx.shadowColor = `rgba(0, 0, 0, ${0.36 * geom.flapOpacity})`;
+          ctx.shadowBlur = 34 * state.magPower * stageScaleX;
+          ctx.shadowOffsetX = -4 * state.magPower * stageScaleX;
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(-pageW / 2, -pageH / 2, pageW, pageH);
+          ctx.restore();
+        },
+      });
+    }
+
+    // 4) Curled-over back sheet inside upMask
+    tasks.push({
+      z: 3000 + (f.seq || 0) * 4 + 1,
+      order: order++,
+      draw: () => {
+        ctx.save();
+        ctx.globalAlpha *= layerOp;
+        if (pf.single) {
+          ctx.beginPath();
+          ctx.rect(0, -44, stageW + 44, pageH + 88);
+          ctx.clip();
+        }
+        ctx.translate(spineOriginX + geom.maskTranX, spineOriginY + geom.maskTranY);
+        ctx.rotate(rad);
+        ctx.beginPath();
+        ctx.rect(-maskSize, -maskSize / 2, maskSize, maskSize);
+        ctx.clip();
+
+        ctx.translate(geom.distCenter, 0);
+        ctx.rotate(rad);
+        const upIdx = pf.single ? f.fromIdx : f.toIdx;
+        const upSpine = !pf.single && f.upSpine ? (f.side === 'right' ? 'left' : 'right') : null;
+        drawMagPageContent(ctx, upIdx, -pageW / 2, -pageH / 2, pageW, pageH, desiredHiResW, {
+          reverseBack: pf.single,
+          innerSpine: upSpine,
+          spineOpacity: geom.spineAppear || 0,
+        });
+
+        if (geom.backOpacity > 0.004) {
+          ctx.beginPath();
+          ctx.rect(-pageW / 2, -pageH / 2, pageW, pageH);
+          ctx.clip();
+          ctx.rotate(-rad);
+          ctx.translate(-geom.distCenter, 0);
+          const backStops = dark ? MAG_GRADIENTS.backSheenDark : MAG_GRADIENTS.backSheenLight;
+          drawMagGradientRect(ctx, -lightW, -lightH / 2, lightW, lightH, 0, -lightW, backStops, geom.backOpacity);
+        }
+        ctx.restore();
+      },
+    });
+  }
+
+  tasks.sort((a, b) => (a.z - b.z) || (a.order - b.order));
+  for (const t of tasks) t.draw();
+}
+
+/** Draw the Single-Page collected stack mini-card & any in-flight flying cards under the lens. */
+function drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power) {
+  if (
+    els.singleCollectedStack &&
+    !els.singleCollectedStack.hidden &&
+    !els.singleCollectedStack.classList.contains('is-waiting') &&
+    Number.isInteger(singleStackMeta.renderedIdx)
+  ) {
+    const topCard = els.scsTopCard || els.singleCollectedStack;
+    const sr = topCard.getBoundingClientRect();
+    if (sr.width > 10 && sr.height > 10) {
+      const dx = fw / 2 + (sr.left - lensCx) * power;
+      const dy = fh / 2 + (sr.top - lensCy) * power;
+      const dw = sr.width * power;
+      const dh = sr.height * power;
+      if (dx + dw > 0 && dx < fw && dy + dh > 0 && dy < fh) {
+        drawMagPageContent(ctx, singleStackMeta.renderedIdx, dx, dy, dw, dh, dw * dpr, { drawHighlights: false });
+      }
+    }
+  }
+
+  if (!els.singleFlightLayer || !els.singleFlightLayer.children.length) return;
+  for (const card of els.singleFlightLayer.children) {
+    const pageIdx = Number(card.dataset.pageIdx);
+    const cardW = card.offsetWidth;
+    const cardH = card.offsetHeight;
+    if (!Number.isFinite(pageIdx) || !cardW || !cardH) continue;
+
+    const cs = getComputedStyle(card);
+    const op = parseFloat(cs.opacity);
+    if (!Number.isFinite(op) || op <= 0.01) continue;
+
+    const cr = card.getBoundingClientRect();
+    if (cr.width < 2 || cr.height < 2) continue;
+
+    let mat;
+    try {
+      mat = cs.transform && cs.transform !== 'none' ? new DOMMatrix(cs.transform) : new DOMMatrix();
+    } catch {
+      mat = new DOMMatrix();
+    }
+
+    const cx = fw / 2 + (cr.left + cr.width / 2 - lensCx) * power;
+    const cy = fh / 2 + (cr.top + cr.height / 2 - lensCy) * power;
+    const approxScale = Math.hypot(mat.a, mat.b) || 1;
+    const desiredHiResW = cardW * approxScale * power * dpr;
+
+    ctx.save();
+    ctx.globalAlpha *= op;
+    ctx.translate(cx, cy);
+    ctx.scale(power, power);
+    ctx.transform(mat.a, mat.b, mat.c, mat.d, 0, 0);
+    drawMagPageContent(ctx, pageIdx, -cardW / 2, -cardH / 2, cardW, cardH, desiredHiResW, { drawHighlights: false });
+    const fStops = state.readDark ? MAG_GRADIENTS.flightShadeDark : MAG_GRADIENTS.flightShadeLight;
+    drawMagGradientRect(ctx, -cardW / 2, -cardH / 2, cardW, cardH, cardW / 2, -cardW / 2, fStops, 1);
+    ctx.restore();
+  }
+}
+
 function drawMagnifierFrame() {
   state.magRedrawRaf = 0;
   if (!state.magEnabled || !state.pdfDoc || !els.magGlassFrame || !els.magCanvas) return;
@@ -2990,51 +3627,84 @@ function drawMagnifierFrame() {
   const lensCx = frameRect.left + fw / 2;
   const lensCy = frameRect.top + fh / 2;
   const power = state.magPower;
-  const visIndices = getMagnifierVisibleIndices(frameRect);
 
-  for (const idx of visIndices) {
-    const pageNode = state.pageNodes[idx];
-    if (!pageNode) continue;
-    const pr = pageNode.getBoundingClientRect();
-    if (!pr.width || !pr.height) continue;
+  if (state.scrollMode === 'scroll' || !state.pageFlip?.stage) {
+    const visIndices = getMagnifierVisibleIndices(frameRect);
+    for (const idx of visIndices) {
+      const pageNode = state.pageNodes[idx];
+      if (!pageNode) continue;
+      const pr = pageNode.getBoundingClientRect();
+      if (!pr.width || !pr.height) continue;
 
-    const dx = fw / 2 + (pr.left - lensCx) * power;
-    const dy = fh / 2 + (pr.top - lensCy) * power;
-    const dw = pr.width * power;
-    const dh = pr.height * power;
+      const dx = fw / 2 + (pr.left - lensCx) * power;
+      const dy = fh / 2 + (pr.top - lensCy) * power;
+      const dw = pr.width * power;
+      const dh = pr.height * power;
+      if (dx + dw <= 0 || dx >= fw || dy + dh <= 0 || dy >= fh) continue;
 
-    if (dx + dw <= 0 || dx >= fw || dy + dh <= 0 || dy >= fh) continue;
+      drawMagPageContent(ctx, idx, dx, dy, dw, dh, pr.width * power * dpr);
+    }
+    return;
+  }
 
-    const desiredHiResW = pr.width * power * dpr;
-    const hiCanvas = ensureMagHiResPage(idx, desiredHiResW);
-    const srcCanvas = hiCanvas || pageNode.querySelector('canvas.fb-canvas');
+  const pf = state.pageFlip;
+  const stageW = pf.single ? pf.pageW : pf.pageW * 2;
+  const stageRect = pf.stage.getBoundingClientRect();
+  if (stageRect.width > 10 && stageRect.height > 10) {
+    const stageScaleX = stageRect.width / Math.max(1, stageW);
+    const stageScaleY = stageRect.height / Math.max(1, pf.pageH);
+    const desiredHiResW = pf.pageW * power * stageScaleX * dpr;
 
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(dx, dy, dw, dh);
-    ctx.clip();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(dx, dy, dw, dh);
-    if (srcCanvas && srcCanvas.width > 0 && srcCanvas.height > 0) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(srcCanvas, dx, dy, dw, dh);
+    ctx.translate(
+      fw / 2 + (stageRect.left - lensCx) * power,
+      fh / 2 + (stageRect.top - lensCy) * power
+    );
+    ctx.scale(power * stageScaleX, power * stageScaleY);
+
+    // 1. Static left & right slots (skip slots temporarily hidden during interactive peel/drag)
+    const leftRaw = !pf.single ? pf.leftSlot?.firstElementChild?.dataset?.pageIndex : undefined;
+    const rightRaw = pf.rightSlot?.firstElementChild?.dataset?.pageIndex;
+    const leftIdx = leftRaw !== undefined ? Number(leftRaw) : null;
+    const rightIdx = rightRaw !== undefined ? Number(rightRaw) : null;
+    const leftVisible = Boolean(!pf.single && leftIdx !== null && Number.isFinite(leftIdx) && pf.leftSlot.style.visibility !== 'hidden');
+    const rightVisible = Boolean(rightIdx !== null && Number.isFinite(rightIdx) && pf.rightSlot?.style?.visibility !== 'hidden');
+
+    if (leftVisible) {
+      drawMagPageContent(ctx, leftIdx, 0, 0, pf.pageW, pf.pageH, desiredHiResW);
+    }
+    if (rightVisible) {
+      const rx = pf.single ? 0 : pf.pageW;
+      const singleSlotOp = state.readDark ? 1 : (els.bookShell?.classList?.contains('has-left-stack') ? 1 : 0.7);
+      drawMagPageContent(ctx, rightIdx, rx, 0, pf.pageW, pf.pageH, desiredHiResW, {
+        innerSpine: pf.single ? 'singleSlot' : null,
+        spineOpacity: singleSlotOp,
+      });
     }
 
-    const pageNum = idx + 1;
-    for (const hl of state.highlights) {
-      if (hl.page !== pageNum || !Array.isArray(hl.rects)) continue;
-      ctx.fillStyle = MAG_HL_FILLS[hl.color] || MAG_HL_FILLS.yellow;
-      for (const rect of hl.rects) {
-        ctx.fillRect(
-          dx + (rect.l / 100) * dw,
-          dy + (rect.t / 100) * dh,
-          (rect.w / 100) * dw,
-          (rect.h / 100) * dh
-        );
-      }
+    // 2. Center book spine shadow (layered at stage z-index 3, above static slots and below flip layer)
+    if (!pf.single) {
+      drawMagCenterSpineShadow(ctx, stageW, pf.pageW, pf.pageH, leftVisible, rightVisible);
     }
+
+    // 3. Active page-turning sheets, hard covers, fold crease highlights & cast shadows
+    drawMagActiveFlipLayers(ctx, pf, desiredHiResW, stageScaleX);
     ctx.restore();
+  }
+
+  // 4. Single-page collected stack top card & WAAPI flying cards
+  drawMagSingleStackLayers(ctx, fw, fh, dpr, lensCx, lensCy, power);
+
+  // Keep drawing at 60fps during center-shift transitions or WAAPI single-stack flights
+  const hasOngoingAnimation = Boolean(
+    pf.flyingFlips?.length ||
+    pf.interactiveFlip ||
+    singleStackMeta.activeFlights > 0 ||
+    els.singleFlightLayer?.children?.length > 0 ||
+    (state.magAnimUntil && performance.now() < state.magAnimUntil)
+  );
+  if (hasOngoingAnimation) {
+    scheduleMagnifierRedraw();
   }
 }
 
@@ -3146,6 +3816,7 @@ function setReadDark(enabled, persist = true) {
   if (els.btnDarkRead) {
     els.btnDarkRead.classList.toggle('active', state.readDark);
   }
+  if (state.magEnabled) scheduleMagnifierRedraw();
   if (persist) schedulePersistState();
 }
 

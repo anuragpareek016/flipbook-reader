@@ -798,7 +798,7 @@ export class FlipBookEngine {
       this.flipLayer.appendChild(hardCard);
       els.push(hardCard);
 
-      return { isHard: true, singlePrev, seq, underEl, underIdx, fromIdx, toIdx, hardCard, hardShade, els };
+      return { isHard: true, singlePrev, seq, underEl, underIdx, fromIdx, toIdx, fromHasSpine: !!fromHasSpine, toHasSpine: !!toHasSpine, underSpine: false, hardCard, hardShade, els };
     }
 
     let underShadow = null;
@@ -880,7 +880,9 @@ export class FlipBookEngine {
         underIdx,
         fromIdx,
         toIdx,
-        underSpine,
+        fromHasSpine: true,
+        toHasSpine: !!toHasSpine,
+        underSpine: !!underSpine,
         upSpine: null,
         castBounds,
         castMask,
@@ -967,7 +969,9 @@ export class FlipBookEngine {
       underIdx,
       fromIdx,
       toIdx,
-      underSpine,
+      fromHasSpine: !!fromHasSpine,
+      toHasSpine: !!toHasSpine,
+      underSpine: !!underSpine,
       upSpine,
       castBounds,
       castMask,
@@ -1080,11 +1084,13 @@ export class FlipBookEngine {
     if (f.stackBackedPrev && f.mode !== 'hover') {
       f.downMask.style.opacity = '0';
       f.castBounds.style.opacity = '0';
+      let underOp = 0;
       if (f.mode === 'drag' || f.mode === 'fallback') {
         const liftRatio = clamp(t * 1.15, 0, 1);
         f.singleDragLifting = liftRatio > 0.02;
+        underOp = clamp(Math.sin(t * Math.PI) * 0.16, 0, 0.14);
         if (f.underShadow) {
-          f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.16, 0, 0.14));
+          f.underShadow.style.opacity = String(underOp);
         }
         this._emit('dragLift', {
           active: f.singleDragLifting,
@@ -1096,10 +1102,12 @@ export class FlipBookEngine {
           clientY: f.lastClientY || 0,
         });
       } else {
+        underOp = clamp(Math.sin(t * Math.PI) * 0.18, 0, 0.16);
         if (f.underShadow) {
-          f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.18, 0, 0.16));
+          f.underShadow.style.opacity = String(underOp);
         }
       }
+      f.frameGeom = { kind: 'singlePrevHidden', layerOpacity: 0, underShadowOpacity: underOp };
       return;
     }
 
@@ -1148,13 +1156,29 @@ export class FlipBookEngine {
     const settleFade = t > 0.84 ? clamp((1 - t) / 0.16, 0, 1) : 1;
     const env = clamp(appear * settleFade, 0, 1);
     const castScale = clamp(0.32 + Math.sin(t * Math.PI) * 0.72, 0.28, 1.04);
+    const frontOpacity = clamp(env * 0.94, 0, 0.94);
+    const castOpacity = clamp(env * 0.86, 0, 0.86);
+    const underShadowOpacity = clamp(Math.sin(t * Math.PI) * 0.12, 0, 0.12);
 
-    f.frontHighlight.style.opacity = String(clamp(env * 0.94, 0, 0.94));
+    f.frontHighlight.style.opacity = String(frontOpacity);
     f.castGradient.style.transform = `scaleX(${castScale})`;
-    f.castGradient.style.opacity = String(clamp(env * 0.86, 0, 0.86));
+    f.castGradient.style.opacity = String(castOpacity);
     if (f.underShadow) {
-      f.underShadow.style.opacity = String(clamp(Math.sin(t * Math.PI) * 0.12, 0, 0.12));
+      f.underShadow.style.opacity = String(underShadowOpacity);
     }
+    f.frameGeom = {
+      kind: 'singlePrev',
+      layerOpacity: 1,
+      deg,
+      maskTranX,
+      maskTranY,
+      pageTranX,
+      distCenter,
+      castScale,
+      castOpacity,
+      frontOpacity,
+      underShadowOpacity,
+    };
   }
 
   _applyFlipFrame(f, coord) {
@@ -1171,11 +1195,13 @@ export class FlipBookEngine {
       const progress = clamp(Math.abs(coord.x - f.from.x) / span, 0, 1);
       const deg = f.side === 'right' ? -180 * progress : 180 * progress;
       f.hardCard.style.transform = `perspective(3600px) rotateY(${deg}deg)`;
+      const zIdx = progress <= 0.5 ? 2000 - (f.seq || 0) * 4 : 3000 + (f.seq || 0) * 4 + 1;
       if (f.seq) {
-        f.hardCard.style.zIndex = String(progress <= 0.5 ? 2000 - f.seq * 4 : 3000 + f.seq * 4 + 1);
+        f.hardCard.style.zIndex = String(zIdx);
       }
       const shadeAlpha = Math.sin(progress * Math.PI) * 0.24;
       f.hardShade.style.opacity = String(shadeAlpha);
+      f.frameGeom = { kind: 'hard', progress, deg, shadeAlpha, zIndex: zIdx };
       return;
     }
 
@@ -1205,27 +1231,34 @@ export class FlipBookEngine {
     const liftBell = (rate < 0.5 ? rate * 2 : (1 - rate) * 2) * travelFade;
     const widthScale = clamp(g.frontShadowDistance / 160, 0.18, 1.35);
 
+    const castOpacity = clamp(edgeFade * 0.9, 0, 0.88);
+    const flapOpacity = clamp(liftBell * 0.95, 0, 0.92);
+    const underShadowOpacity = clamp(liftBell * 0.18, 0, 0.12);
+    const frontOpacity = clamp(edgeFade * 0.92, 0, 0.88);
+    const backOpacity = clamp(edgeFade * 0.95, 0, 0.92);
+    const spineAppear = f.upSpine ? (travel > 0.78 ? clamp((travel - 0.78) / 0.18, 0, 1) : 0) : 0;
+
     f.castGradient.style.transform = `scaleX(${widthScale})`;
-    f.castGradient.style.opacity = String(clamp(edgeFade * 0.9, 0, 0.88));
-    f.flapCaster.style.opacity = String(clamp(liftBell * 0.95, 0, 0.92));
+    f.castGradient.style.opacity = String(castOpacity);
+    f.flapCaster.style.opacity = String(flapOpacity);
     if (f.underShadow) {
-      f.underShadow.style.opacity = String(clamp(liftBell * 0.18, 0, 0.12));
+      f.underShadow.style.opacity = String(underShadowOpacity);
     }
-    f.frontHighlight.style.opacity = String(clamp(edgeFade * 0.92, 0, 0.88));
-    f.backShade.style.opacity = String(clamp(edgeFade * 0.95, 0, 0.92));
+    f.frontHighlight.style.opacity = String(frontOpacity);
+    f.backShade.style.opacity = String(backOpacity);
     if (f.upSpine) {
-      const spineAppear = travel > 0.78 ? clamp((travel - 0.78) / 0.18, 0, 1) : 0;
       f.upSpine.style.opacity = String(spineAppear);
     }
 
+    let layerOpacity = 1;
     if (this.single && f.side === 'right') {
       if (f.mode === 'drag' || f.mode === 'fallback') {
         const liftRatio = travel <= 0.22 ? 0 : clamp((travel - 0.22) / 0.44, 0, 1);
-        const peelOpacity = 1 - clamp((travel - 0.24) / 0.30, 0, 1);
-        f.downMask.style.opacity = String(peelOpacity);
-        f.upMask.style.opacity = String(peelOpacity);
-        f.castBounds.style.opacity = String(peelOpacity);
-        f.flapDropBounds.style.opacity = String(peelOpacity);
+        layerOpacity = 1 - clamp((travel - 0.24) / 0.30, 0, 1);
+        f.downMask.style.opacity = String(layerOpacity);
+        f.upMask.style.opacity = String(layerOpacity);
+        f.castBounds.style.opacity = String(layerOpacity);
+        f.flapDropBounds.style.opacity = String(layerOpacity);
         f.singleDragLifting = liftRatio > 0.01;
         this._emit('dragLift', {
           active: f.singleDragLifting,
@@ -1240,13 +1273,30 @@ export class FlipBookEngine {
           f.singleNextLiftFired = true;
           this._emit('nextLiftStart', { fromIdx: f.fromIdx, toIdx: f.toIdx });
         }
-        const handOffOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.34) / 0.08, 0, 1);
-        f.downMask.style.opacity = String(handOffOpacity);
-        f.upMask.style.opacity = String(handOffOpacity);
-        f.castBounds.style.opacity = String(handOffOpacity);
-        f.flapDropBounds.style.opacity = String(handOffOpacity);
+        layerOpacity = f.reversed ? 1 : 1 - clamp((travel - 0.34) / 0.08, 0, 1);
+        f.downMask.style.opacity = String(layerOpacity);
+        f.upMask.style.opacity = String(layerOpacity);
+        f.castBounds.style.opacity = String(layerOpacity);
+        f.flapDropBounds.style.opacity = String(layerOpacity);
       }
     }
+
+    f.frameGeom = {
+      kind: 'fold',
+      deg: g.rotate,
+      maskTranX: g.maskTranX,
+      maskTranY: g.maskTranY,
+      pageTranX: g.pageTranX,
+      distCenter,
+      widthScale,
+      castOpacity,
+      flapOpacity,
+      underShadowOpacity,
+      frontOpacity,
+      backOpacity,
+      spineAppear,
+      layerOpacity,
+    };
   }
 
   _finishTurnAnimated() {
@@ -1340,6 +1390,7 @@ export class FlipBookEngine {
     this.rafId = null;
     const dt = this._lastLoopTime !== null ? clamp(now - this._lastLoopTime, 1, 48) : 16.67;
     this._lastLoopTime = now;
+    let didAnimateFrame = false;
 
     if (this.flyingFlips.length || this.interactiveFlip) {
       this._refreshPendingSnapshots();
@@ -1347,6 +1398,7 @@ export class FlipBookEngine {
 
     // Step all concurrent cascading animated flips independently (continuous dt integration)
     if (this.flyingFlips.length) {
+      didAnimateFrame = true;
       const finished = [];
       for (const f of this.flyingFlips) {
         f.elapsedMs += dt;
@@ -1407,6 +1459,7 @@ export class FlipBookEngine {
     let keepInteractive = false;
     const activeI = this.interactiveFlip;
     if (activeI) {
+      didAnimateFrame = true;
       const lerp = 0.22;
       const dx = activeI.target.x - activeI.coord.x;
       const dy = activeI.target.y - activeI.coord.y;
@@ -1422,6 +1475,9 @@ export class FlipBookEngine {
     }
 
     this._updateLandingSpineBlend();
+    if (didAnimateFrame) {
+      this._emit('frame');
+    }
 
     if (this.flyingFlips.length > 0 || keepInteractive) {
       this._ensureRaf();
