@@ -249,10 +249,16 @@ body.header-hidden .top-bar-right {
 .book-drop-shadow {
   position: absolute;
   inset: 2px 0 -8px 0;
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.52), 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    calc(var(--stack-shadow-bias, 0px)) 20px 46px rgba(0, 0, 0, 0.54),
+    0 5px 14px rgba(0, 0, 0, 0.36);
   pointer-events: none;
-  border-radius: 2px;
-  transition: left 0.3s ease, right 0.3s ease, opacity 0.2s ease;
+  border-radius: 3px;
+  transition:
+    left 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    right 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.24s ease;
 }
 
 .book-container {
@@ -260,34 +266,50 @@ body.header-hidden .top-bar-right {
   z-index: 2;
 }
 
-/* Realistic FlipHTML5 stacked paper edges */
+/* Realistic FlipHTML5 dynamic 3D stacked paper edges */
 .book-stack {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 1px;
+  bottom: 1px;
   width: 0px;
   pointer-events: none;
   z-index: 1;
-  transition: width 0.28s ease, opacity 0.25s ease;
+  transition:
+    width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    left 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    right 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    clip-path 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    -webkit-clip-path 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.24s ease;
   opacity: 0;
 }
 
 .book-stack-left {
-  background:
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.08), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.14)),
-    repeating-linear-gradient(to right, #d4d4d4 0px, #f4f4f4 1px, #c8c8c8 2px);
-  border-left: 1px solid #b8b8b8;
-  box-shadow: -3px 3px 8px rgba(0, 0, 0, 0.25);
+  background-color: #ebe8df;
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.24) 100%),
+    linear-gradient(to left, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.04) 36%, rgba(255, 255, 255, 0.14) 72%, rgba(0, 0, 0, 0.22) 100%),
+    repeating-linear-gradient(to left, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.045) 7.5px, transparent 9px),
+    repeating-linear-gradient(to left, #faf8f2 0px, #efece3 1px, #d3cfc4 2px);
+  background-position: right center;
+  border-left: 1px solid #a8a397;
   border-radius: 2px 0 0 2px;
+  clip-path: polygon(0% var(--stack-taper-left, 0px), 100% 0%, 100% 100%, 0% calc(100% - var(--stack-taper-left, 0px)));
+  -webkit-clip-path: polygon(0% var(--stack-taper-left, 0px), 100% 0%, 100% 100%, 0% calc(100% - var(--stack-taper-left, 0px)));
 }
 
 .book-stack-right {
-  background:
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.08), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.14)),
-    repeating-linear-gradient(to right, #e6e6e6 0px, #fafafa 1px, #cfcfcf 2px);
-  border-right: 1px solid #b5b5b5;
-  box-shadow: 3px 3px 8px rgba(0, 0, 0, 0.25);
+  background-color: #eeece4;
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.24) 100%),
+    linear-gradient(to right, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.04) 36%, rgba(255, 255, 255, 0.14) 72%, rgba(0, 0, 0, 0.22) 100%),
+    repeating-linear-gradient(to right, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.045) 7.5px, transparent 9px),
+    repeating-linear-gradient(to right, #fcfbf7 0px, #f1eee6 1px, #d6d2c7 2px);
+  background-position: left center;
+  border-right: 1px solid #a6a195;
   border-radius: 0 2px 2px 0;
+  clip-path: polygon(0% 0%, 100% var(--stack-taper-right, 0px), 100% calc(100% - var(--stack-taper-right, 0px)), 0% 100%);
+  -webkit-clip-path: polygon(0% 0%, 100% var(--stack-taper-right, 0px), 100% calc(100% - var(--stack-taper-right, 0px)), 0% 100%);
 }
 
 /* Exact FlipHTML5 center binding spine shadow (layered above static slots [z:1], below active flip layer [z:6]) */
@@ -2315,17 +2337,23 @@ body.read-dark .fh-inner-spine {
 }
 
 body.read-dark .book-stack-left {
-  background:
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.34)),
-    repeating-linear-gradient(to right, #1b1c21 0px, #272930 1px, #131418 2px);
-  border-left-color: #2f323b;
+  background-color: #1b1c22;
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.34) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.42) 100%),
+    linear-gradient(to left, rgba(0, 0, 0, 0.34) 0%, rgba(255, 255, 255, 0.02) 45%, rgba(0, 0, 0, 0.28) 100%),
+    repeating-linear-gradient(to left, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.16) 7.5px, transparent 9px),
+    repeating-linear-gradient(to left, #252730 0px, #1d1f26 1px, #121318 2px);
+  border-left-color: #363945;
 }
 
 body.read-dark .book-stack-right {
-  background:
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 4%, transparent 96%, rgba(0, 0, 0, 0.34)),
-    repeating-linear-gradient(to right, #1f2127 0px, #2b2d35 1px, #141519 2px);
-  border-right-color: #2f323b;
+  background-color: #1d1f26;
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.34) 0%, transparent 4.5%, transparent 94%, rgba(0, 0, 0, 0.42) 100%),
+    linear-gradient(to right, rgba(0, 0, 0, 0.34) 0%, rgba(255, 255, 255, 0.02) 45%, rgba(0, 0, 0, 0.28) 100%),
+    repeating-linear-gradient(to right, transparent 0px, transparent 6px, rgba(0, 0, 0, 0.16) 7.5px, transparent 9px),
+    repeating-linear-gradient(to right, #282a34 0px, #1f2128 1px, #131419 2px);
+  border-right-color: #363945;
 }
 
 body.read-dark .fh-front-sheen {

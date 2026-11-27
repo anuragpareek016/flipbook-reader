@@ -1116,6 +1116,31 @@ function updateCenterShift() {
   }
 }
 
+function getBookMaxStackThickness(totalPages, single) {
+  if (totalPages <= 2) return 0;
+  // Sublinear thickness curve so a thin booklet feels light while a thick textbook looks substantial
+  const rawBase = 3 + Math.sqrt(Math.max(0, totalPages - 2)) * 1.48;
+  const maxUnzoomed = clamp(Math.round(rawBase), 5, single ? 24 : 30);
+  const zoomScale = Math.min(2.0, 0.45 + 0.55 * (state.committedZoom || 1));
+  return Math.max(2, Math.round(maxUnzoomed * zoomScale));
+}
+
+function setStackElementGeometry(stackEl, side, thicknessPx) {
+  if (!stackEl) return;
+  const visible = thicknessPx > 0;
+  stackEl.style.opacity = visible ? '1' : '0';
+  stackEl.style.width = `${thicknessPx}px`;
+  if (side === 'left') {
+    stackEl.style.left = `${-thicknessPx}px`;
+    stackEl.style.right = 'auto';
+  } else {
+    stackEl.style.right = `${-thicknessPx}px`;
+    stackEl.style.left = 'auto';
+  }
+  const taperPx = visible ? Math.min(5, thicknessPx * 0.17).toFixed(1) : '0';
+  els.bookShell.style.setProperty(`--stack-taper-${side}`, `${taperPx}px`);
+}
+
 function updateBookDepthChrome() {
   if (!state.totalPages) return;
   const visible = getVisibleIndices();
@@ -1124,33 +1149,29 @@ function updateBookDepthChrome() {
 
   const leftIdx = visible[0];
   const rightIdx = visible[visible.length - 1];
+  const rightRemain = Math.max(0, state.totalPages - 1 - rightIdx);
+  const maxStack = getBookMaxStackThickness(state.totalPages, single);
+  const denom = Math.max(1, state.totalPages - 1);
 
-  const maxStack = 13;
-  const leftThick = leftIdx > 0
-    ? clamp(Math.round((leftIdx / Math.max(1, state.totalPages - 1)) * maxStack), single ? 3 : 2, maxStack)
+  const minLeaf = maxStack >= 16 ? 2 : 1;
+  const leftThick = leftIdx > 0 && maxStack > 0
+    ? clamp(Math.round((leftIdx / denom) * maxStack), minLeaf, maxStack)
     : 0;
-  const rightRemain = state.totalPages - 1 - rightIdx;
-  const rightThick = rightRemain > 0
-    ? clamp(Math.round((rightRemain / Math.max(1, state.totalPages - 1)) * maxStack), single ? 3 : 2, maxStack)
+  const rightThick = rightRemain > 0 && maxStack > 0
+    ? clamp(Math.round((rightRemain / denom) * maxStack), minLeaf, maxStack)
     : 0;
 
   els.bookShell.classList.toggle('has-left-stack', leftThick > 0);
 
   if (single) {
-    els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';
-    els.bookStackLeft.style.width = `${leftThick}px`;
-    els.bookStackLeft.style.left = `${-leftThick}px`;
-    els.bookStackLeft.style.right = 'auto';
-
-    els.bookStackRight.style.opacity = rightThick > 0 ? '1' : '0';
-    els.bookStackRight.style.width = `${rightThick}px`;
-    els.bookStackRight.style.right = `${-rightThick}px`;
-    els.bookStackRight.style.left = 'auto';
+    setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
+    setStackElementGeometry(els.bookStackRight, 'right', rightThick);
 
     state.allowSpine = false;
     els.bookSpineShadow.style.opacity = '0';
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
+    els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round((rightThick - leftThick) * 0.25)}px`);
     return;
   }
 
@@ -1159,45 +1180,31 @@ function updateBookDepthChrome() {
     state.allowSpine = false;
     if (visible[0] === 0) {
       // Front cover sits on right half of 2*pageW
-      els.bookStackLeft.style.opacity = '0';
-      els.bookStackLeft.style.width = '0px';
-
-      els.bookStackRight.style.opacity = rightThick > 0 ? '1' : '0';
-      els.bookStackRight.style.width = `${rightThick}px`;
-      els.bookStackRight.style.right = `${-rightThick}px`;
-      els.bookStackRight.style.left = 'auto';
-
+      setStackElementGeometry(els.bookStackLeft, 'left', 0);
+      setStackElementGeometry(els.bookStackRight, 'right', rightThick);
       els.bookSpineShadow.style.opacity = '0';
       els.bookDropShadow.style.left = `${sw}px`;
       els.bookDropShadow.style.right = `${-rightThick}px`;
+      els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(rightThick * 0.25)}px`);
     } else {
       // Back cover sits on left half of 2*pageW
-      els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';
-      els.bookStackLeft.style.width = `${leftThick}px`;
-      els.bookStackLeft.style.left = `${-leftThick}px`;
-
-      els.bookStackRight.style.opacity = '0';
-      els.bookStackRight.style.width = '0px';
-
+      setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
+      setStackElementGeometry(els.bookStackRight, 'right', 0);
       els.bookSpineShadow.style.opacity = '0';
       els.bookDropShadow.style.left = `${-leftThick}px`;
       els.bookDropShadow.style.right = `${sw}px`;
+      els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round(-leftThick * 0.25)}px`);
     }
   } else {
     state.allowSpine = true;
-    els.bookStackLeft.style.opacity = leftThick > 0 ? '1' : '0';
-    els.bookStackLeft.style.width = `${leftThick}px`;
-    els.bookStackLeft.style.left = `${-leftThick}px`;
-
-    els.bookStackRight.style.opacity = rightThick > 0 ? '1' : '0';
-    els.bookStackRight.style.width = `${rightThick}px`;
-    els.bookStackRight.style.right = `${-rightThick}px`;
-
+    setStackElementGeometry(els.bookStackLeft, 'left', leftThick);
+    setStackElementGeometry(els.bookStackRight, 'right', rightThick);
     if (!state.isFlipping) {
       els.bookSpineShadow.style.opacity = '1';
     }
     els.bookDropShadow.style.left = `${-leftThick}px`;
     els.bookDropShadow.style.right = `${-rightThick}px`;
+    els.bookShell.style.setProperty('--stack-shadow-bias', `${Math.round((rightThick - leftThick) * 0.25)}px`);
   }
 }
 
@@ -1269,7 +1276,8 @@ function paintSingleStackTopCard(pageIdx) {
   els.scsBadge.textContent = `Pg ${pageIdx + 1}`;
   els.singleCollectedStack.title = `Page ${pageIdx + 1} — Click to pull back (←)`;
 
-  const depth = pageIdx >= 30 ? '4' : pageIdx >= 10 ? '3' : pageIdx >= 3 ? '2' : '1';
+  const readRatio = pageIdx / Math.max(1, state.totalPages - 1);
+  const depth = pageIdx >= 20 || readRatio >= 0.7 ? '4' : pageIdx >= 7 || readRatio >= 0.35 ? '3' : pageIdx >= 2 || readRatio >= 0.1 ? '2' : '1';
   els.singleCollectedStack.dataset.depth = depth;
 
   if (singleStackMeta.renderedIdx === pageIdx && els.scsTopCard.firstChild) {
